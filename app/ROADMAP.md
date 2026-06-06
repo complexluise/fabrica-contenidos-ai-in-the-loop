@@ -69,11 +69,53 @@ No lo enseña, no lo ordena, ni te dice dónde estás.
 > persona decide) + espina del bucle + Inicio que orienta. El estado del proyecto se **deriva** del
 > disco ([D-032]), fuente única para server y front. **Pendiente:** smoke del loop completo con API real.
 
+[D-021]: ../docs/decisiones/0021-0030.md
+[D-022]: ../docs/decisiones/0021-0030.md
 [D-032]: ../docs/decisiones/0031-0040.md
 
 ---
 
-## Fase 2 — Paralelo entre jobs
+## Fase 2 — Entrada desde la app: importar → storyboard editable
+
+**Objetivo:** arrancar un proyecto **sin escribir YAML**. Pegás o subís texto (`.md`/`.txt`), la IA
+propone el borrador (título, brief, escenas), y la persona lo **edita** (agregar/eliminar/reordenar
+escenas) y confirma. Es el **Checkpoint humano #1/#2 de [D-021]** hecho interfaz: la IA descompone y
+propone; la persona decide y firma. Tracker: issue #5.
+
+### Acceptance Criteria
+- [x] AC1 — **Importar:** pegar texto o subir `.md`/`.txt`; la IA lo descompone en un **borrador** de
+  proyecto (título, brief, escenas con planos). `author.draft_project` (Claude) + `parse_draft` 🔬. *(Smoke real con Claude pendiente de `ANTHROPIC_API_KEY`.)*
+- [x] AC2 — Se **crea** `projects/<slug>/project.yaml` desde el borrador (`project.write_spec`, round-trip + idempotente 🔬); el `slug` se deriva (Haiku/`_slugify`) y se puede fijar en el import.
+- [x] AC3 — **Storyboard** (renombra *Guion*) **editable:** editar prompt/beat/duración/voz/caption por escena y plano; **agregar, eliminar y reordenar** escenas; editar título/brief.
+- [x] AC4 — **Guardar** persiste al `project.yaml` con **validación** (Pydantic → 422 en humano), no a mano. 🔬
+- [x] AC5 — **Guard de selecciones:** reordenar **no** corrompe `selections.yaml` (id estable); renombrar/eliminar **poda** las huérfanas (`prune_selections`). 🔬 ([D-022])
+- [x] AC6 — El estado del bucle ([D-032]) reconoce **"sin proyecto"** y `nextStep` guía a *Importar*.
+
+### Tasks (orden)
+- [x] T2.1 — Motor: `ingest.extract_text` (`.md`/`.txt`) + `author.draft_project(text)` → borrador (`ProjectDraft`). 🔬 ✅ *(parseo del LLM)*
+- [x] T2.2 — Motor: `project.write_spec(spec)` → `project.yaml` idempotente + `spec_from_dict` (parseo único). 🔬 ✅
+- [x] T2.3 — Backend: `POST /api/projects/import` (texto) como **job/SSE** → crea el proyecto, devuelve `slug`.
+- [x] T2.4 — Backend: `PUT /api/projects/{slug}` guarda el spec editado (422 si inválido, fusión por id) + guard de selecciones. 🔬
+- [x] T2.5 — UI: vista **Importar** (textarea + drag-drop `.md`/`.txt`, leído client-side) al frente del bucle.
+- [x] T2.6 — UI: **Storyboard** editable (ex-Guion): editar campos, agregar/eliminar/reordenar planos y escenas, Guardar.
+- [x] T2.7 — Estado [D-032]: "sin proyecto" → *Importar*; etapa "Guion" → "Storyboard"; espina del bucle renumerada (Inicio · 1 Ajustes · 2 **Importar** · 3 **Storyboard** · 4 Elegir · 5 Producir).
+
+> **✅ Fase 2 CERRADA** (2026-06-06, [D-033]). 151 tests del core en verde (+20: `test_author.py`
+> + endpoints import/PUT en `test_server.py`); build de la UI limpio. Entrada sin YAML: importar texto
+> → la IA propone borrador → editar/firmar el storyboard → guardar validado. El hash del caché
+> ([D-013]) queda intacto (`write_spec` solo serializa). **Pendiente:** smoke real del loop con
+> `ANTHROPIC_API_KEY` (texto real → borrador → edición → guardar).
+
+> **Decisión de alcance:** el backend recibe **texto** (la UI lee el archivo client-side; sin
+> `python-multipart`); `extract_text` queda para el motor/CLI.
+
+> **Diferido a fases siguientes** (acordado al cortar el alcance): `.docx`/`.pdf`; **personajes con
+> `design:` auto** (habilita el casting desde el import); regenerar una escena del borrador con la IA;
+> plantillas por estilo; subir imágenes de referencia; renombrar el slug de un proyecto ya creado.
+
+---
+
+## Fase 3 — Paralelo entre jobs
 
 **Objetivo:** varias generaciones a la vez sin reventar la API ni la máquina.
 
@@ -82,12 +124,12 @@ No lo enseña, no lo ordena, ni te dice dónde estás.
 - [ ] AC2 — El dashboard muestra **todos** los jobs activos con su progreso.
 
 ### Tasks
-- [ ] T2.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
-- [ ] T2.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
+- [ ] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
+- [ ] T3.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
 
 ---
 
-## Fase 3 — Después (diferido)
+## Fase 4 — Después (diferido)
 
 - [ ] Planos **concurrentes dentro de un render** (toca `run_project`: `gather` con cap).
 - [ ] Envoltorio **desktop** (Tauri) para un ícono clickeable, si se quiere.

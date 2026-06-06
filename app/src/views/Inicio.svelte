@@ -17,8 +17,10 @@
         detail: st.keys?.fal_key ? "fal.ai lista" : "falta FAL_KEY",
         actor: "tu",
       };
-    if (id === "guion")
-      return { done: st.scenes_total > 0, detail: `${st.scenes_total} escenas`, actor: "lee" };
+    if (id === "importar")
+      return { done: true, detail: "proyecto creado", actor: "ia" };
+    if (id === "storyboard")
+      return { done: st.scenes_total > 0, detail: `${st.scenes_total} escenas`, actor: "tu" };
     if (id === "elegir") {
       const c = st.casting || {}, k = st.keyframes || {};
       const castOk = c.needed === 0 || c.chosen >= c.needed;
@@ -37,10 +39,11 @@
   }
 
   const STATIONS = [
-    { id: "ajustes",  n: 1, label: "Ajustes",  desc: "Tus claves de API (fal.ai, Anthropic)." },
-    { id: "guion",    n: 2, label: "Guion",    desc: "Lo que vamos a contar, plano a plano." },
-    { id: "elegir",   n: 3, label: "Elegir",   desc: "La IA genera varias opciones; vos elegís." },
-    { id: "producir", n: 4, label: "Producir", desc: "Se arma el video y el paquete de edición." },
+    { id: "ajustes",    n: 1, label: "Ajustes",    desc: "Tus claves de API (fal.ai, Anthropic)." },
+    { id: "importar",   n: 2, label: "Importar",   desc: "Pegá un texto; la IA arma el borrador." },
+    { id: "storyboard", n: 3, label: "Storyboard", desc: "Editá y firmá el plan, plano a plano." },
+    { id: "elegir",     n: 4, label: "Elegir",     desc: "La IA genera opciones; vos elegís." },
+    { id: "producir",   n: 5, label: "Producir",   desc: "Se arma el video y el paquete." },
   ];
 
   const actorBadge = { tu: ["red", "vos decidís"], ia: ["blue", "la IA hace"], lee: ["", "leer"] };

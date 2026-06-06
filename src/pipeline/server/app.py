@@ -22,6 +22,21 @@ from .jobs import JobManager
 _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
          "elevenlabs_api_key": "ELEVENLABS_API_KEY"}
 
+# Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
+# requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
+_EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters", "shots"}
+
+
+def _unique_slug(base: str, projects_dir: Path) -> str:
+    """Slug de proyecto único y filesystem-safe (no pisa una carpeta existente)."""
+    from ..naming import _slugify
+
+    base = _slugify(base) or "proyecto"
+    slug, i = base, 2
+    while (projects_dir / slug).exists():
+        slug, i = f"{base}_{i}", i + 1
+    return slug
+
 
 def create_app(projects_dir: Path = Path("projects"),
                config_dir: Path = Path("config")) -> FastAPI:
@@ -72,6 +87,81 @@ def create_app(projects_dir: Path = Path("projects"),
                     except Exception:
                         out.append({"slug": d.name, "title": d.name, "style": "?", "scenes": 0})
         return out
+
+    # --- entrada desde la app: importar -> storyboard (D-033, Fase 2) -----
+    @app.post("/api/projects/import")
+    async def import_project(body: dict):
+        """Texto libre -> borrador de proyecto (la IA propone). Job/SSE: devuelve el
+        slug creado. La UI lee el .md/.txt client-side y manda el texto acá."""
+        import logging
+
+        from .. import author
+        from ..naming import semantic_slug
+        from ..project import Project, write_spec
+
+        text = (body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(422, "Pegá o subí un texto para importar.")
+        desired = (body.get("slug") or "").strip()
+        log = logging.getLogger("pipeline")
+
+        async def coro():
+            log.info("Descomponiendo el texto en un borrador (Claude)...")
+            draft = await asyncio.to_thread(author.draft_project, text)
+            slug = _unique_slug(desired or semantic_slug(draft.title), projects_dir)
+            project = Project(slug, root=projects_dir)
+            write_spec(draft.to_spec(slug), project.spec_path)
+            log.info("Proyecto '%s' creado: %d escenas.", slug, len(draft.scenes))
+            return {"slug": slug, "title": draft.title, "scenes": len(draft.scenes)}
+
+        return jobs.spawn("import", desired or "(nuevo)", coro()).to_dict()
+
+    @app.put("/api/projects/{slug}")
+    def update_project(slug: str, body: dict):
+        """Guarda el storyboard editado (D-033). Preserva los campos no editables
+        de cada escena; valida con Pydantic (422 si algo no cierra) y aplica el
+        guard de selecciones (D-022) si se renombraron/eliminaron escenas."""
+        from ..contracts import Scene
+        from ..project import Project, load_project_spec, write_spec
+        from ..studio import prune_selections
+
+        project = Project(slug, root=projects_dir)
+        if not project.spec_path.exists():
+            raise HTTPException(404, f"Proyecto '{slug}' no existe.")
+        spec = load_project_spec(project.spec_path)
+        existing = {s.id: s for s in spec.scenes}
+
+        raw_scenes = body.get("scenes")
+        if not raw_scenes:
+            raise HTTPException(422, "El storyboard necesita al menos una escena.")
+        try:
+            new_scenes = []
+            for i, raw in enumerate(raw_scenes):
+                sid = (raw.get("id") or "").strip() or f"s{i + 1}"
+                base = existing.get(sid)
+                data = base.model_dump(by_alias=True) if base else {}
+                data.update({k: raw[k] for k in _EDITABLE_SCENE if k in raw})
+                data["id"] = sid
+                scene = Scene(**data)
+                if scene.shots:  # el total de la escena = suma de sus planos
+                    scene.duration_s = sum(sh.duration_s for sh in scene.shots)
+                new_scenes.append(scene)
+        except Exception as exc:  # noqa: BLE001 — validación -> 422 legible
+            raise HTTPException(422, f"Storyboard inválido: {exc}")
+
+        ids = [s.id for s in new_scenes]
+        if len(set(ids)) != len(ids):
+            raise HTTPException(422, "Hay ids de escena repetidos.")
+
+        spec.scenes = new_scenes
+        if "title" in body:
+            spec.title = body["title"]
+        if "brief" in body:
+            spec.brief = body["brief"]
+        write_spec(spec, project.spec_path)
+        dropped = prune_selections(project, ids)
+        return {"saved": str(project.spec_path), "scenes": len(ids),
+                "dropped_selections": dropped}
 
     @app.get("/api/projects/{slug}")
     def project_detail(slug: str):
