@@ -107,6 +107,46 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"keyframes": read(project.candidates_path),
                 "cast": read(project.dir / "cast_candidates.yaml")}
 
+    @app.get("/api/projects/{slug}/status")
+    def project_status(slug: str):
+        """Estado derivado del proyecto para la pantalla de Inicio: qué hay hecho y
+        cuál es el siguiente paso. Lectura barata de archivos en disco (sin generar)."""
+        from ..studio import load_casting
+
+        project, spec, _cfg = load(slug)
+        s = get_settings()
+        keys = {attr: bool(getattr(s, attr)) for attr in _KEYS}
+
+        scene_ids = [sc.id for sc in spec.scenes]
+        designed = [name for name, ch in spec.characters.items() if ch.design]
+        casting = load_casting(project)
+        cast_chosen = [n for n in designed if n in casting]
+
+        selections = {}
+        if project.selections_path.exists():
+            selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+        chosen_scenes = [sid for sid in scene_ids if sid in selections]
+
+        run = project.latest_run()
+        final_url = None
+        if run is not None:
+            final = next(iter(run.dir.glob("final_*.mp4")), None)
+            final_url = file_url(final) if final else None
+        export_dir = project.dir / "export"
+
+        return {
+            "keys": keys,
+            "scenes_total": len(scene_ids),
+            "casting": {"needed": len(designed), "chosen": len(cast_chosen),
+                        "has_candidates": (project.dir / "cast_candidates.yaml").exists()},
+            "keyframes": {"total": len(scene_ids), "chosen": len(chosen_scenes),
+                          "has_candidates": project.candidates_path.exists()},
+            "render": {"done": run is not None,
+                       "run_id": run.run_id if run is not None else None,
+                       "final_url": final_url},
+            "export": {"done": export_dir.exists()},
+        }
+
     # --- jobs de generación ----------------------------------------------
     @app.post("/api/projects/{slug}/keyframes")
     async def gen_keyframes(slug: str, n: int = 4):
