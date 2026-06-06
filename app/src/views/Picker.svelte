@@ -59,6 +59,8 @@
   }
 
   const entries = (o) => Object.entries(o || {});
+  // Solo ofrecer casting si hay personajes con 'design:' (si no, el motor falla).
+  let needsCast = $derived((studio.status?.casting?.needed ?? 0) > 0);
   let hasCast = $derived(entries(cand.cast).length > 0);
   let hasKf = $derived(entries(cand.keyframes).length > 0);
   let nothing = $derived(!hasCast && !hasKf);
@@ -78,7 +80,8 @@
   <div class="gen-l">
     <div class="eyebrow" style="color:var(--blue-deep)">La IA propone</div>
     <p class="muted gen-help">
-      Generá un puñado de candidatos. <b>Casting</b> = la cara del personaje (se fija una vez).
+      Generá un puñado de candidatos.
+      {#if needsCast}<b>Casting</b> = la cara del personaje (se fija una vez). {/if}
       <b>Encuadres</b> = la imagen base de cada escena.
     </p>
   </div>
@@ -86,9 +89,11 @@
     <label class="n">opciones
       <input type="number" min="1" max="8" bind:value={n} />
     </label>
-    <button class="machine" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
-      {busy === "cast" ? "Generando…" : "Generar casting"}
-    </button>
+    {#if needsCast}
+      <button class="machine" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+        {busy === "cast" ? "Generando…" : "Generar casting"}
+      </button>
+    {/if}
     <button class="machine" onclick={() => generate("keyframes")} disabled={!!busy || !hasFal}>
       {busy === "keyframes" ? "Generando…" : "Generar encuadres"}
     </button>
