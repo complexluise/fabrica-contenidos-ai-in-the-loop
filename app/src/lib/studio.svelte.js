@@ -90,35 +90,41 @@ export function goTo(tab) {
   if (typeof window !== "undefined") window.scrollTo({ top: 0 });
 }
 
-// El "siguiente paso": una sola recomendacion clara segun el estado real.
+// --- el bucle, derivado del `stage` que decide el MOTOR (D-032) -------------
+// El front NO recalcula si un paso esta completo: lee `status.stage` (fuente
+// unica) y aca solo mapea ese stage a presentacion (copy + a que pestaña va).
+export const PIPELINE_ORDER = ["sin_claves", "casting", "encuadres", "render", "paquete", "completo"];
+
+// stage -> recomendacion de "siguiente paso" (la copia, no la logica)
+const NEXT = {
+  sin_claves: { tab: "ajustes", label: "Configurar FAL_KEY", why: "Sin la clave de fal.ai no se puede generar nada." },
+  casting: { tab: "elegir", label: "Elegir la cara del personaje", why: "Fijá el casting antes de los encuadres." },
+  encuadres: { tab: "elegir", label: "Elegir encuadres", why: "La IA propone candidatos; vos elegís el de cada escena." },
+  render: { tab: "producir", label: "Armar el video", why: "Ya elegiste todo: la máquina ejecuta." },
+  paquete: { tab: "producir", label: "Armar el paquete de edición", why: "Empaquetá para la editora." },
+};
+
 // Devuelve { tab, label, why } o null si el bucle esta completo.
 export function nextStep(st) {
   if (!hasProject())
     return { tab: "importar", label: "Importar un guion", why: "Empezá pegando o subiendo tu texto." };
   if (!st) return { tab: "ajustes", label: "Configurar claves", why: "Empezá por tus API keys." };
-  if (!st.keys?.fal_key)
-    return { tab: "ajustes", label: "Configurar las claves", why: "Sin la clave de fal.ai no se puede generar nada." };
-
+  const meta = NEXT[st.stage];
+  if (!meta) return null; // completo
   if (!st.storyboard?.signed)
     return { tab: "storyboard", label: "Firmar el plan", why: "Revisá las escenas y firmá el plan antes de generar." };
+  if (st.stage === "encuadres" && st.keyframes)
+    return { ...meta, label: `Elegir encuadres (${st.keyframes.chosen}/${st.keyframes.total})` };
+  return meta;
+}
 
-  const cast = st.casting || {};
-  if (cast.needed > 0 && cast.chosen < cast.needed)
-    return { tab: "elegir", label: "Elegir la cara del personaje", why: "Fijá el casting antes de los encuadres." };
-
-  const kf = st.keyframes || {};
-  if (kf.total > 0 && kf.chosen < kf.total)
-    return {
-      tab: "elegir",
-      label: `Elegir encuadres (${kf.chosen}/${kf.total})`,
-      why: "La IA propone candidatos; vos elegís el de cada escena.",
-    };
-
-  if (!st.render?.done)
-    return { tab: "producir", label: "Armar el video", why: "Ya elegiste todo: la máquina ejecuta." };
-
-  if (!st.export?.done)
-    return { tab: "producir", label: "Armar el paquete de edición", why: "Empaquetá para la editora." };
-
-  return null; // bucle completo
+// "El paso del sidebar `id` ya esta hecho?" -- segun donde quedo el stage en el orden.
+export function stepDone(id, st) {
+  if (!st) return false;
+  const at = PIPELINE_ORDER.indexOf(st.stage);
+  if (id === "ajustes") return at > PIPELINE_ORDER.indexOf("sin_claves");
+  if (id === "storyboard") return !!st.storyboard?.signed;
+  if (id === "elegir") return at > PIPELINE_ORDER.indexOf("encuadres");
+  if (id === "producir") return st.stage === "completo";
+  return false;
 }

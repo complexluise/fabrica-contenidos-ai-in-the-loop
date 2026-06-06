@@ -1,6 +1,6 @@
 <script>
   import { runJob, humanError } from "../lib/api.js";
-  import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
+  import { studio, goTo, refreshStatus, stepDone } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
   let running = $state(""); // "render" | "export" | ""
@@ -15,12 +15,8 @@
   let exportDone = $derived(!!st?.export?.done);
   let finalUrl = $derived(st?.render?.final_url || null);
 
-  // listo para renderizar = elegiste todos los encuadres (y el casting si hace falta)
-  let ready = $derived(
-    !!st && st.keyframes?.total > 0 &&
-      st.keyframes.chosen >= st.keyframes.total &&
-      (st.casting?.needed === 0 || st.casting.chosen >= st.casting.needed)
-  );
+  // listo para renderizar = el paso "Elegir" esta hecho (lo decide el motor)
+  let ready = $derived(stepDone("elegir", st));
 
   function run(kind) {
     log = []; err = ""; running = kind; kindStatus = { ...kindStatus, [kind]: "running" };

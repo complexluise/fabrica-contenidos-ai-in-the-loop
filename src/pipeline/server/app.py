@@ -270,6 +270,7 @@ def create_app(projects_dir: Path = Path("projects"),
             final = next(iter(run.dir.glob("final_*.mp4")), None)
             final_url = file_url(final) if final else None
         out["render"]["final_url"] = final_url
+        out["storyboard"] = {"signed": (project.dir / "storyboard.signed").exists()}
         return out
 
     # --- jobs de generación ----------------------------------------------

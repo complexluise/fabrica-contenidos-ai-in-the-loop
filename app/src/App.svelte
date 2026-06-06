@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, hasProject,
+  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
            createProject, deleteProject } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
   import Inicio from "./views/Inicio.svelte";
@@ -48,22 +48,13 @@
     catch (e) { pmErr = humanError(e); } finally { busy = false; }
   }
 
-  // Estado de cada paso del bucle para la espina lateral.
+  // Estado de cada paso del bucle para la espina lateral. La verdad la decide el
+  // motor (status.stage); aca solo proyectamos a done/todo/info.
   function stageState(id) {
-    const st = studio.status;
     if (id === "inicio") return "info";
     if (id === "importar") return hasProject() ? "done" : "todo";
-    if (id === "ajustes") return st?.keys?.fal_key ? "done" : "todo";
-    if (id === "storyboard") return st?.storyboard?.signed ? "done" : "todo";
-    if (!st) return "todo";
-    if (id === "elegir") {
-      const cast = st.casting || {}, kf = st.keyframes || {};
-      const castOk = cast.needed === 0 || cast.chosen >= cast.needed;
-      const kfOk = kf.total > 0 && kf.chosen >= kf.total;
-      return castOk && kfOk ? "done" : "todo";
-    }
-    if (id === "producir") return st.render?.done && st.export?.done ? "done" : "todo";
-    return "todo";
+    if (!studio.status) return "todo";
+    return stepDone(id, studio.status) ? "done" : "todo";
   }
 </script>
 

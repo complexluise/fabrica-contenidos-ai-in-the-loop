@@ -1,5 +1,5 @@
 <script>
-  import { studio, goTo, nextStep, refreshStatus } from "../lib/studio.svelte.js";
+  import { studio, goTo, nextStep, stepDone, refreshStatus } from "../lib/studio.svelte.js";
   import { onMount } from "svelte";
 
   let st = $derived(studio.status);
@@ -8,9 +8,11 @@
 
   onMount(refreshStatus);
 
-  // estado por estacion del bucle
+  // estado por estacion: `done` lo decide el motor (stepDone sobre status.stage);
+  // el `detail` (X/Y) es presentacion, lee los contadores del status.
   function station(id) {
     if (!st) return { done: false, detail: "—", actor: "tu" };
+    const done = stepDone(id, st);
     if (id === "importar")
       return { done: true, detail: "proyecto creado", actor: "ia" };
     if (id === "storyboard")
@@ -21,15 +23,12 @@
       };
     if (id === "elegir") {
       const c = st.casting || {}, k = st.keyframes || {};
-      const castOk = c.needed === 0 || c.chosen >= c.needed;
-      const kfOk = k.total > 0 && k.chosen >= k.total;
       const parts = [];
       if (c.needed > 0) parts.push(`casting ${c.chosen}/${c.needed}`);
       parts.push(`encuadres ${k.chosen}/${k.total}`);
-      return { done: castOk && kfOk, detail: parts.join(" · "), actor: "tu" };
+      return { done, detail: parts.join(" · "), actor: "tu" };
     }
     if (id === "producir") {
-      const done = st.render?.done && st.export?.done;
       const detail = !st.render?.done ? "sin render" : !st.export?.done ? "falta paquete" : "video + paquete";
       return { done, detail, actor: "ia" };
     }
