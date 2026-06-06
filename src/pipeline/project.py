@@ -64,11 +64,16 @@ class ProjectSpec:
     brief: str | None = None  # brief del proyecto (para el guion de export, D-029)
 
 
-def load_project_spec(path: Path) -> ProjectSpec:
-    """Lee y valida un project.yaml -> ProjectSpec (escenas + banco de personajes)."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
+    """Construye (y valida) un ProjectSpec desde un dict.
+
+    Fuente única de parseo del spec: la usan tanto `load_project_spec` (desde el
+    `project.yaml` en disco) como el endpoint `PUT /api/projects/{slug}` (desde el
+    storyboard editado en la UI, D-033). La validación de Pydantic (Scene/Shot)
+    es la que rebota un spec inválido.
+    """
     if "scenes" not in data:
-        raise ValueError(f"{path} debe tener 'scenes'.")
+        raise ValueError("El spec debe tener 'scenes'.")
     scenes = [Scene(**s) for s in data["scenes"]]
     characters = {
         name: Character(
@@ -86,7 +91,7 @@ def load_project_spec(path: Path) -> ProjectSpec:
         for name, cspec in (data.get("characters") or {}).items()
     }
     return ProjectSpec(
-        slug=data.get("project", path.parent.name),
+        slug=data.get("project", slug),
         style=data.get("style", "lego"),
         format=str(data.get("format", "9:16")),
         scenes=scenes,
@@ -96,6 +101,115 @@ def load_project_spec(path: Path) -> ProjectSpec:
         title=data.get("title"),
         brief=data.get("brief"),
     )
+
+
+def load_project_spec(path: Path) -> ProjectSpec:
+    """Lee y valida un project.yaml -> ProjectSpec (escenas + banco de personajes)."""
+    path = Path(path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        return spec_from_dict(data, path.parent.name)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+
+
+def _num(x: float) -> float | int:
+    """Entero si el float es redondo (5.0 -> 5), para un YAML legible. Lógica pura."""
+    return int(x) if float(x).is_integer() else x
+
+
+def _shot_to_dict(sh: Shot) -> dict:
+    d: dict = {}
+    if sh.framing:
+        d["framing"] = sh.framing
+    d["duration_s"] = _num(sh.duration_s)
+    if sh.seed:
+        d["seed"] = sh.seed
+    if sh.voiceover:
+        d["voiceover"] = sh.voiceover
+    if sh.caption:
+        d["caption"] = sh.caption
+    return d
+
+
+def _scene_to_dict(s: Scene) -> dict:
+    d: dict = {"id": s.id, "prompt": s.prompt, "duration_s": _num(s.duration_s)}
+    if s.beat:
+        d["beat"] = s.beat
+    if s.characters:
+        d["characters"] = list(s.characters)
+    if s.dialogue:
+        d["dialogue"] = s.dialogue
+    if s.class_:
+        d["class"] = s.class_
+    if s.requirements.required_capabilities():  # solo si pide algo (no default)
+        req = s.requirements
+        d["requirements"] = {
+            k: True for k, v in {
+                "needs_audio": req.needs_audio, "needs_lipsync": req.needs_lipsync,
+                "needs_4k": req.needs_4k, "needs_camera_control": req.needs_camera_control,
+                "needs_hdr": req.needs_hdr,
+            }.items() if v
+        }
+    if s.caption:
+        d["caption"] = s.caption
+    if s.voiceover:
+        d["voiceover"] = s.voiceover
+    if s.voice_id:
+        d["voice_id"] = s.voice_id
+    if s.seed:
+        d["seed"] = s.seed
+    if s.shots:  # vacío = 1 plano implícito; no se persiste (compat)
+        d["shots"] = [_shot_to_dict(sh) for sh in s.shots]
+    return d
+
+
+def _char_to_dict(ch: Character) -> dict:
+    d: dict = {}
+    if ch.refs:
+        d["refs"] = [str(r) for r in ch.refs]
+    if ch.design:
+        design: dict = {"prompt": ch.design.prompt}
+        if ch.design.refs:
+            design["refs"] = [str(r) for r in ch.design.refs]
+        d["design"] = design
+    return d
+
+
+def spec_to_dict(spec: ProjectSpec) -> dict:
+    """ProjectSpec -> dict canónico para `project.yaml`. Inverso de `spec_from_dict`.
+
+    Omite campos vacíos/por-defecto para un YAML legible (humano-first, D-026) y
+    estable (mismo spec -> mismos bytes => idempotente)."""
+    data: dict = {"project": spec.slug}
+    if spec.title:
+        data["title"] = spec.title
+    if spec.brief:
+        data["brief"] = spec.brief
+    data["style"] = spec.style
+    data["format"] = spec.format
+    if spec.music:
+        data["music"] = str(spec.music)
+    if spec.voice_id:
+        data["voice_id"] = spec.voice_id
+    if spec.characters:
+        data["characters"] = {name: _char_to_dict(ch) for name, ch in spec.characters.items()}
+    data["scenes"] = [_scene_to_dict(s) for s in spec.scenes]
+    return data
+
+
+def write_spec(spec: ProjectSpec, path: Path) -> Path:
+    """Escribe `spec` como `project.yaml` en `path` (crea la carpeta). Idempotente.
+
+    Round-trip: `load_project_spec(write_spec(spec, p)) == spec`. Es el escritor
+    que faltaba para crear/editar proyectos desde la app sin tocar YAML a mano (D-033)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(spec_to_dict(spec), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path
 
 
 def effective_shots(scene: Scene) -> list[Shot]:

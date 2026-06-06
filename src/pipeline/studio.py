@@ -240,6 +240,24 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
     return project.selections_path
 
 
+def prune_selections(project: Project, scene_ids: list[str]) -> list[str]:
+    """Guard de [D-022]: al editar el storyboard (renombrar/eliminar/reordenar
+    escenas) la selección de keyframes se llavea por id de escena. Descarta las
+    entradas cuyo id ya no existe para no dejar `selections.yaml` corrupto.
+    Devuelve los ids descartados. Reordenar no rompe (el id se conserva)."""
+    if not project.selections_path.exists():
+        return []
+    selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    valid = set(scene_ids)
+    dropped = [sid for sid in selections if sid not in valid]
+    if dropped:
+        kept = {sid: v for sid, v in selections.items() if sid in valid}
+        project.selections_path.write_text(
+            yaml.safe_dump(kept, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return dropped
+
+
 async def render(project: Project, spec: ProjectSpec, cfg: Config,
                  keyframe_overrides: dict[str, Path] | None = None):
     """Genera el video con los keyframes elegidos por escena.

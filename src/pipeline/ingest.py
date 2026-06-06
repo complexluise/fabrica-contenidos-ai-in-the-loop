@@ -27,6 +27,23 @@ Guion:
 """
 
 
+_TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".text"}
+
+
+def extract_text(path: Path) -> str:
+    """Lee texto plano de un `.md`/`.txt` (entrada de la app, D-033).
+
+    Sólo formatos de texto por ahora; `.docx`/`.pdf` quedan diferidos a una fase
+    siguiente (ver `app/ROADMAP.md`). La descomposición la hace `author.draft_project`.
+    """
+    path = Path(path)
+    if path.suffix.lower() not in _TEXT_SUFFIXES:
+        raise ValueError(
+            f"Formato no soportado: '{path.suffix}'. Usa .md o .txt (pegá el texto si es otro)."
+        )
+    return path.read_text(encoding="utf-8")
+
+
 def load_brief(path: Path) -> list[Scene]:
     """Carga escenas desde un brief YAML. Si trae 'script', delega a Claude."""
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
