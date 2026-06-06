@@ -51,19 +51,25 @@ auditoría de UX: hoy la app asume que ya conocés `casting → keyframes → el
 No lo enseña, no lo ordena, ni te dice dónde estás.
 
 ### Acceptance Criteria
-- [ ] AC1 — **Pantalla de Inicio** con un **checklist de estado** del proyecto (keys · casting · keyframes elegidos · render · export) y el **siguiente paso** sugerido.
-- [ ] AC2 — El sidebar **numera y ordena** el flujo (Inicio · 1 Ajustes · 2 Guion · 3 Picker · 4 Render/Export).
-- [ ] AC3 — **Sin API key**, los botones de "Generar" quedan **deshabilitados** con un cartel claro ("Configurá las keys en Ajustes"); los errores se muestran **en humano**, no como traceback.
-- [ ] AC4 — **CTA de siguiente paso**: tras elegir → "Siguiente: Render"; tras render → "Siguiente: Export".
-- [ ] AC5 — **Sub-etiquetas en lenguaje claro** (una línea de ayuda por pantalla; traducir la jerga: keyframes = imagen base, casting = cara del personaje, rough cut = corte de referencia).
+- [x] AC1 — **Pantalla de Inicio** con un **checklist de estado** del proyecto (keys · casting · keyframes elegidos · render · export) y el **siguiente paso** sugerido.
+- [x] AC2 — El sidebar **numera y ordena** el flujo (Inicio · 1 Ajustes · 2 Guion · 3 **Elegir** · 4 **Producir**). *(El "Picker" pasó a llamarse Elegir y "Render/Export" a Producir — lenguaje más claro.)*
+- [x] AC3 — **Sin API key**, los botones de "Generar" quedan **deshabilitados** con un cartel claro ("Configurá las keys en Ajustes"); los errores se muestran **en humano** (`humanError`), no como traceback.
+- [x] AC4 — **CTA de siguiente paso**: tras elegir → "Siguiente: Producir"; tras render → "Siguiente: Export".
+- [x] AC5 — **Sub-etiquetas en lenguaje claro** (una línea de ayuda por pantalla; traducir la jerga: keyframes = imagen base, casting = cara del personaje, rough cut = corte de referencia).
 
 ### Tasks (orden)
-- [ ] T1.5.1 — Backend: `GET /api/projects/{slug}/status` (casting hecho X/Y, candidatos, escenas elegidas X/Y, run, export). 🔬 *(lógica de estado)*
-- [ ] T1.5.2 — Vista **Inicio**: checklist con ✓/⬜ + botón "siguiente paso" que salta a la pestaña correcta.
-- [ ] T1.5.3 — Sidebar numerado + reordenado; `setTab` compartido para navegar desde Inicio/CTA.
-- [ ] T1.5.4 — Picker: deshabilitar "Generar" sin `fal_key`; banner de error en humano; CTA tras guardar.
-- [ ] T1.5.5 — Render/Export: CTA "Siguiente: Export" tras render; error en humano.
-- [ ] T1.5.6 — Sub-etiquetas/ayuda por pantalla (glosario corto inline).
+- [x] T1.5.1 — Backend: `GET /api/projects/{slug}/status` (casting hecho X/Y, candidatos, escenas elegidas X/Y, run, export). 🔬 *(creció a [D-032]: estado **derivado** del disco, fuente única; `state.compute_stage`/`derive_state`)*
+- [x] T1.5.2 — Vista **Inicio**: checklist con ✓/⬜ + botón "siguiente paso" que salta a la pestaña correcta.
+- [x] T1.5.3 — Sidebar numerado + reordenado (la espina del bucle); store compartido (`studio.svelte.js`) para navegar desde Inicio/CTA.
+- [x] T1.5.4 — Elegir: deshabilitar "Generar" sin `fal_key`; banner de error en humano; CTA tras guardar.
+- [x] T1.5.5 — Producir: CTA "Siguiente: Export" tras render; error en humano.
+- [x] T1.5.6 — Sub-etiquetas/ayuda por pantalla (glosario corto inline).
+
+> **✅ Fase 1.5 CERRADA** (2026-06-06, PR #2). UI a dos tintas (azul = la IA propone, rojo = la
+> persona decide) + espina del bucle + Inicio que orienta. El estado del proyecto se **deriva** del
+> disco ([D-032]), fuente única para server y front. **Pendiente:** smoke del loop completo con API real.
+
+[D-032]: ../docs/decisiones/0031-0040.md
 
 ---
 
