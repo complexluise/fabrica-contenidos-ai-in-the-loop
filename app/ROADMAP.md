@@ -69,11 +69,48 @@ No lo enseña, no lo ordena, ni te dice dónde estás.
 > persona decide) + espina del bucle + Inicio que orienta. El estado del proyecto se **deriva** del
 > disco ([D-032]), fuente única para server y front. **Pendiente:** smoke del loop completo con API real.
 
+[D-021]: ../docs/decisiones/0021-0030.md
+[D-022]: ../docs/decisiones/0021-0030.md
 [D-032]: ../docs/decisiones/0031-0040.md
 
 ---
 
-## Fase 2 — Paralelo entre jobs
+## Fase 2 — Entrada desde la app: importar → storyboard editable
+
+**Objetivo:** arrancar un proyecto **sin escribir YAML**. Pegás o subís texto (`.md`/`.txt`), la IA
+propone el borrador (título, brief, escenas), y la persona lo **edita** (agregar/eliminar/reordenar
+escenas) y confirma. Es el **Checkpoint humano #1/#2 de [D-021]** hecho interfaz: la IA descompone y
+propone; la persona decide y firma. Tracker: issue #5.
+
+### Acceptance Criteria
+- [ ] AC1 — **Importar:** pegar texto o subir `.md`/`.txt`; la IA lo descompone en un **borrador** de
+  proyecto (título, brief, escenas con planos). Reúsa `ingest.decompose_script` + el L2 classifier.
+- [ ] AC2 — Se **crea** `projects/<slug>/project.yaml` desde el borrador (nuevo escritor del spec); el
+  `slug` se deriva y se puede editar.
+- [ ] AC3 — **Storyboard** (renombra *Guion*) **editable:** editar prompt/beat/duración/voz/caption por
+  escena y plano; **agregar, eliminar y reordenar** escenas; editar título/brief.
+- [ ] AC4 — **Guardar** persiste al `project.yaml` con **validación** (Pydantic; error en humano si algo
+  no cierra), no a mano.
+- [ ] AC5 — **Guard de selecciones:** reordenar/renombrar escenas **no corrompe** `selections.yaml`
+  ([D-022]); se re-mapea por id o se avisa.
+- [ ] AC6 — El estado del bucle ([D-032]) reconoce **"sin proyecto"** y guía a *Importar*.
+
+### Tasks (orden)
+- [ ] T2.1 — Motor: `ingest.extract_text` (`.md`/`.txt`) + `author.draft_project(text)` → borrador (Pydantic). 🔬 *(parseo del LLM)*
+- [ ] T2.2 — Motor: `project.write_spec(spec)` → `project.yaml` idempotente + validado. 🔬
+- [ ] T2.3 — Backend: `POST /api/projects/import` (texto o archivo) como **job/SSE** → crea el proyecto, devuelve `slug`.
+- [ ] T2.4 — Backend: `PUT /api/projects/{slug}` guarda el spec editado (422 si inválido) + guard de selecciones.
+- [ ] T2.5 — UI: vista **Importar** (textarea + drag-drop `.md`/`.txt`) al frente del bucle.
+- [ ] T2.6 — UI: **Storyboard** editable (ex-Guion): editar campos, agregar/eliminar/reordenar, Guardar.
+- [ ] T2.7 — Estado [D-032]: stage `SIN_PROYECTO` → *Importar*; renombrar la etapa "Guion" a "Storyboard".
+
+> **Diferido a fases siguientes** (acordado al cortar el alcance): `.docx`/`.pdf`; **personajes con
+> `design:` auto** (habilita el casting desde el import); regenerar una escena del borrador con la IA;
+> plantillas por estilo; subir imágenes de referencia; estado `BORRADOR` como guard.
+
+---
+
+## Fase 3 — Paralelo entre jobs
 
 **Objetivo:** varias generaciones a la vez sin reventar la API ni la máquina.
 
@@ -82,12 +119,12 @@ No lo enseña, no lo ordena, ni te dice dónde estás.
 - [ ] AC2 — El dashboard muestra **todos** los jobs activos con su progreso.
 
 ### Tasks
-- [ ] T2.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
-- [ ] T2.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
+- [ ] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
+- [ ] T3.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
 
 ---
 
-## Fase 3 — Después (diferido)
+## Fase 4 — Después (diferido)
 
 - [ ] Planos **concurrentes dentro de un render** (toca `run_project`: `gather` con cap).
 - [ ] Envoltorio **desktop** (Tauri) para un ícono clickeable, si se quiere.
