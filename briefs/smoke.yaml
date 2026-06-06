@@ -1,0 +1,7 @@
+# Brief minimo para smoke run barato: 1 escena de volumen (ruta Kling, sin audio).
+scenes:
+  - id: s1
+    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacias"
+    duration_s: 5
+    characters: []
+    class: volume

@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI in the Loop — Video Gen Pipeline</title>
+  <style>
+    :root {
+      --bg: #f7f5f0;
+      --paper: #ffffff;
+      --ink: #1a1a1a;
+      --ink-soft: #4a4a4a;
+      --ink-mute: #8a8a8a;
+      --line: #e3dfd4;
+      --line-strong: #c8c2b3;
+
+      --human: #2d7a3e;
+      --human-bg: #e6f1e9;
+      --ia: #2a5fa8;
+      --ia-bg: #e4ebf6;
+      --keyframe: #b8851c;
+      --keyframe-bg: #f8eed4;
+      --keyframe-strong: #8a5e0f;
+
+      --radius: 8px;
+      --max: 720px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 70px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Sticky top nav */
+    .scale-nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+      padding: 0.6rem 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.5rem;
+      justify-content: center;
+      font-size: 0.8rem;
+    }
+
+    .scale-nav a {
+      color: var(--ink-soft);
+      text-decoration: none;
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .scale-nav a:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .scale-nav .nav-num {
+      font-weight: 700;
+      color: var(--ink);
+      margin-right: 0.2rem;
+    }
+
+    /* Layout */
+    main {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+
+    .scale {
+      padding: 2.5rem 0 1.5rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .scale:first-of-type {
+      border-top: none;
+      padding-top: 0.5rem;
+    }
+
+    .scale-label {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ink-mute);
+      margin-bottom: 0.5rem;
+    }
+
+    h1, h2, h3 {
+      letter-spacing: -0.015em;
+      margin: 0 0 0.6rem;
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      line-height: 1.05;
+    }
+
+    h2 {
+      font-size: 1.65rem;
+      font-weight: 700;
+      margin-bottom: 0.8rem;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 1.75rem 0 0.4rem;
+    }
+
+    p { margin: 0 0 1rem; }
+
+    .lead {
+      font-size: 1.15rem;
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+
+    a { color: var(--ia); }
+
+    /* Diagram container */
+    .diagram {
+      margin: 1.75rem 0;
+      padding: 1.25rem 0.75rem;
+      overflow-x: auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .diagram svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .diagram-caption {
+      font-size: 0.78rem;
+      color: var(--ink-mute);
+      text-align: center;
+      margin: 0.6rem 0 0;
+    }
+
+    /* Legend (compartido) */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      font-size: 0.78rem;
+      color: var(--ink-soft);
+      margin: 0 0 1rem;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .legend-dot.h { background: var(--human); }
+    .legend-dot.i { background: var(--ia); }
+    .legend-dot.k { background: var(--keyframe); }
+
+    /* Contrast / comparison */
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin: 1.5rem 0;
+    }
+
+    .compare > div {
+      padding: 1rem 1.1rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .compare .after {
+      background: var(--keyframe-bg);
+      border-color: var(--keyframe);
+    }
+
+    .compare h4 {
+      margin: 0 0 0.4rem;
+      font-size: 0.85rem;
+    }
+
+    .compare ul {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.85rem;
+    }
+
+    .compare li { margin-bottom: 0.2rem; }
+
+    /* Cards */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.75rem;
+      margin: 1.25rem 0;
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.9rem 1rem;
+    }
+
+    .card h4 {
+      margin: 0 0 0.4rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .card p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+    }
+
+    /* Mantra / closing */
+    .mantra {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.25;
+      padding: 1.5rem 1rem;
+      margin: 1.75rem 0;
+      text-align: center;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .closing {
+      font-size: 1.4rem;
+      font-weight: 700;
+      text-align: center;
+      padding: 2rem 1rem;
+      margin: 2rem 0 0;
+      color: var(--keyframe-strong);
+      border: 2px dashed var(--keyframe);
+      border-radius: var(--radius);
+      background: var(--keyframe-bg);
+    }
+
+    /* Highlight box (la tesis) */
+    .thesis {
+      background: var(--keyframe-bg);
+      border-left: 4px solid var(--keyframe);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    .thesis p { margin: 0; }
+    .thesis strong { color: var(--keyframe-strong); }
+
+    /* Principio rector (colaboración humano + IA) */
+    .principle {
+      background: linear-gradient(135deg, var(--human-bg) 0%, var(--ia-bg) 100%);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--human);
+      padding: 1.1rem 1.4rem 1.2rem;
+      margin: 1.5rem 0;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    .principle-label {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ink-mute);
+      margin-bottom: 0.4rem;
+    }
+
+    .principle h3 {
+      margin: 0 0 0.7rem;
+      font-size: 1.05rem;
+    }
+
+    .principle-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.9rem;
+      margin-top: 0.4rem;
+    }
+
+    .principle-col h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .principle-col p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+    }
+
+    .principle-together {
+      margin: 0.85rem 0 0;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--line);
+      font-size: 0.88rem;
+      color: var(--ink-soft);
+    }
+
+    .principle-together strong { color: var(--ink); }
+
+    /* Caja "BASE" para casting/look-dev */
+    .base-tag {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      background: var(--keyframe-strong);
+      color: #fff;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+    }
+
+    /* Nodos clicables dentro de los SVGs (Patrón A) */
+    .diagram svg a {
+      cursor: pointer;
+      display: block;
+    }
+
+    .diagram svg a:hover rect,
+    .diagram svg a:focus rect {
+      stroke-width: 3.5;
+      filter: drop-shadow(0 0 4px rgba(184, 133, 28, 0.35));
+    }
+
+    .diagram svg a:focus { outline: none; }
+
+    .diagram svg a:focus-visible rect {
+      stroke: var(--keyframe-strong);
+    }
+
+    /* Highlight al llegar al target (Patrón A) */
+    @keyframes flash-highlight {
+      0%   { background-color: var(--keyframe-bg); box-shadow: 0 0 0 6px rgba(184, 133, 28, 0.18); }
+      100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+    }
+
+    .target-flash {
+      animation: flash-highlight 1.1s ease-out;
+      border-radius: var(--radius);
+      padding: 0.4rem 0.6rem;
+      margin-left: -0.6rem;
+      margin-right: -0.6rem;
+    }
+
+    /* Breadcrumb en sub-secciones destino */
+    .breadcrumb {
+      font-size: 0.78rem;
+      color: var(--ink-mute);
+      margin: 0 0 0.8rem;
+    }
+
+    .breadcrumb a {
+      color: var(--ia);
+      text-decoration: none;
+    }
+
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    /* Mini-mapa flotante (Patrón B) */
+    .minimap {
+      position: fixed;
+      right: 1rem;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 140px;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.6rem 0.6rem;
+      font-size: 0.72rem;
+      z-index: 9;
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+    }
+
+    .minimap-label {
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-mute);
+      margin-bottom: 0.35rem;
+      padding: 0 0.25rem;
+    }
+
+    .minimap a {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--ink-soft);
+      text-decoration: none;
+      padding: 0.3rem 0.4rem;
+      border-radius: 4px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .minimap a:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .minimap a.active {
+      background: var(--keyframe-bg);
+      color: var(--keyframe-strong);
+      font-weight: 600;
+    }
+
+    .minimap .num {
+      font-weight: 700;
+      color: var(--ink);
+      width: 12px;
+      flex-shrink: 0;
+    }
+
+    .minimap a.active .num { color: var(--keyframe-strong); }
+
+    .minimap .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--line-strong);
+      flex-shrink: 0;
+    }
+
+    .minimap a.active .dot {
+      background: var(--keyframe);
+      box-shadow: 0 0 0 3px rgba(184, 133, 28, 0.22);
+    }
+
+    @media (max-width: 900px) {
+      .minimap { display: none; }
+    }
+
+    /* Color tags (inline) */
+    .tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      margin: 0 0.15rem;
+      white-space: nowrap;
+    }
+
+    .tag-human { background: var(--human-bg); color: var(--human); }
+    .tag-ia { background: var(--ia-bg); color: var(--ia); }
+    .tag-keyframe { background: var(--keyframe-bg); color: var(--keyframe-strong); }
+
+    /* Navigation arrows (entre escalas) */
+    .nav-arrow {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-top: 2rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--line);
+      font-size: 0.85rem;
+    }
+
+    .nav-arrow a {
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 999px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+    }
+
+    .nav-arrow a:hover {
+      background: var(--bg);
+    }
+
+    .nav-arrow .up { color: var(--human); }
+    .nav-arrow .down { color: var(--ia); }
+
+    /* Cost / numbers */
+    .cost-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.88rem;
+    }
+
+    .cost-table th, .cost-table td {
+      text-align: left;
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .cost-table th {
+      font-weight: 700;
+      color: var(--ink-mute);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .cost-table .cost {
+      text-align: right;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 600;
+    }
+
+    .cost-table .zero { color: var(--human); }
+    .cost-table .hit  { color: var(--human); }
+
+    /* Subcommands / code */
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85em;
+      background: #efece5;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+
+    pre {
+      background: #1f1d1a;
+      color: #e8e6e0;
+      padding: 0.9rem 1rem;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    /* Details (glosario, sub-info) */
+    details {
+      margin: 0.4rem 0;
+      padding: 0.6rem 0.9rem;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.88rem;
+      list-style: none;
+    }
+
+    summary::-webkit-details-marker { display: none; }
+
+    summary::before {
+      content: "▸";
+      display: inline-block;
+      margin-right: 0.5rem;
+      color: var(--ink-mute);
+      transition: transform 0.15s;
+    }
+
+    details[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    details > p, details > ul {
+      margin: 0.6rem 0 0;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+    }
+
+    details > ul { padding-left: 1.2rem; }
+
+    /* FAQ */
+    .faq dt {
+      font-weight: 600;
+      margin-top: 1rem;
+      font-size: 0.95rem;
+    }
+
+    .faq dd {
+      margin: 0.25rem 0 0 0;
+      color: var(--ink-soft);
+      font-size: 0.9rem;
+    }
+
+    /* Code-style command line */
+    .cmd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85em;
+      background: #1f1d1a;
+      color: #e8e6e0;
+      padding: 0.5rem 0.75rem;
+      border-radius: var(--radius);
+      display: block;
+      margin: 0.4rem 0;
+    }
+
+    .cmd .prompt { color: #8a8a8a; user-select: none; }
+
+    /* Footer / fuente */
+    .sources {
+      list-style: none;
+      padding: 0;
+      margin: 1rem 0;
+    }
+
+    .sources li {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.88rem;
+    }
+
+    .sources li:last-child { border-bottom: none; }
+
+    .sources code { font-size: 0.78rem; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      h1 { font-size: 2.1rem; }
+      h2 { font-size: 1.4rem; }
+      .compare { grid-template-columns: 1fr; }
+      .scale-nav { font-size: 0.72rem; }
+      .scale-nav a { padding: 0.25rem 0.5rem; }
+      main { padding: 1.5rem 1rem 3rem; }
+      .mantra { font-size: 1.25rem; }
+      .principle-grid { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      .scale-nav { display: none; }
+      .diagram { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="scale-nav" aria-label="Escalas de lectura">
+    <a href="#escala-1"><span class="nav-num">1</span>TL;DR</a>
+    <a href="#escala-2"><span class="nav-num">2</span>Vista general</a>
+    <a href="#escala-3"><span class="nav-num">3</span>Piedra angular</a>
+    <a href="#escala-4"><span class="nav-num">4</span>Mecánica</a>
+    <a href="#escala-5"><span class="nav-num">5</span>Profundidad</a>
+  </nav>
+
+  <aside class="minimap" aria-label="Mapa de escalas" id="minimap">
+    <span class="minimap-label">Estás en</span>
+    <a href="#escala-1"><span class="num">1</span><span class="dot"></span>TL;DR</a>
+    <a href="#escala-2"><span class="num">2</span><span class="dot"></span>Vista general</a>
+    <a href="#escala-3"><span class="num">3</span><span class="dot"></span>Piedra angular</a>
+    <a href="#escala-4"><span class="num">4</span><span class="dot"></span>Mecánica</a>
+    <a href="#escala-5"><span class="num">5</span><span class="dot"></span>Profundidad</a>
+  </aside>
+
+  <main>
+
+    <!-- ====================================================== -->
+    <!-- ESCALA 1 · TL;DR (5 segundos)                          -->
+    <!-- ====================================================== -->
+    <section id="escala-1" class="scale">
+      <span class="scale-label">Escala 1 · 5 segundos</span>
+      <h1>AI in the Loop</h1>
+      <p class="lead">El humano dirige. La IA genera y asiste.</p>
+
+      <!-- Principio rector -->
+      <div class="principle" role="note" aria-label="Principio rector de la colaboración humano-IA">
+        <span class="principle-label">Principio rector</span>
+        <h3>Cada uno hace lo que es mejor.</h3>
+        <div class="principle-grid">
+          <div class="principle-col">
+            <h4><span class="tag tag-human">Humano</span></h4>
+            <p>Intención, marca, criterio, gusto. Decide qué sí y qué no.</p>
+          </div>
+          <div class="principle-col">
+            <h4><span class="tag tag-ia">IA</span></h4>
+            <p>Variantes, escala, velocidad. Genera opciones que el humano no podría producir solo.</p>
+          </div>
+        </div>
+        <p class="principle-together"><strong>Juntos:</strong> best-of-N → gate rankea → humano elige. El resultado es mejor que la suma.</p>
+      </div>
+
+      <p>Ese principio se aplica <strong>tres veces seguidas</strong> en este pipeline, y la primera es la que sostiene todo lo demás:</p>
+
+      <div class="legend" aria-label="Leyenda de colores">
+        <span class="legend-item"><span class="legend-dot h"></span>Humano decide</span>
+        <span class="legend-item"><span class="legend-dot i"></span>IA genera</span>
+        <span class="legend-item"><span class="legend-dot k"></span>Keyframe (pieza central)</span>
+      </div>
+
+      <!-- Diagrama 1 (mini): 3 cajas — Casting → Keyframe → Video -->
+      <div class="diagram">
+        <svg viewBox="0 0 660 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cadena crítica: casting, keyframe, video">
+          <defs>
+            <marker id="ar1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+            </marker>
+            <marker id="ar1b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a5e0f"/>
+            </marker>
+          </defs>
+
+          <!-- Box 1: Casting + look-dev (BASE) -->
+          <a href="#casting-look-dev" xlink:href="#casting-look-dev" role="link" tabindex="0">
+            <title>Click para ver el detalle de Casting + look-dev en Escala 3</title>
+            <g transform="translate(20, 25)">
+              <rect width="180" height="80" rx="8" fill="#fbf3e0" stroke="#8a5e0f" stroke-width="3"/>
+              <text x="90" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">3. Casting</text>
+              <text x="90" y="44" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">+ look-dev</text>
+              <text x="90" y="64" text-anchor="middle" font-size="10" fill="#8a5e0f" font-weight="600">humano define</text>
+              <text x="90" y="76" text-anchor="middle" font-size="10" fill="#2a5fa8" font-weight="600">IA N variantes</text>
+            </g>
+          </a>
+
+          <!-- Flecha "produce el banco" (gruesa, ámbar) -->
+          <line x1="205" y1="55" x2="245" y2="55" stroke="#8a5e0f" stroke-width="3" marker-end="url(#ar1b)"/>
+          <text x="225" y="48" text-anchor="middle" font-size="9" fill="#8a5e0f" font-weight="700">banco</text>
+
+          <!-- Box 2: Keyframe -->
+          <a href="#anatomia-keyframe" xlink:href="#anatomia-keyframe" role="link" tabindex="0">
+            <title>Click para ver la anatomía del keyframe en Escala 3</title>
+            <g transform="translate(250, 25)">
+              <rect width="180" height="80" rx="8" fill="#f8eed4" stroke="#b8851c" stroke-width="2.5"/>
+              <text x="90" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">4. Keyframe</text>
+              <text x="90" y="46" text-anchor="middle" font-size="11" fill="#4a4a4a">consume el banco</text>
+              <text x="90" y="64" text-anchor="middle" font-size="10" fill="#8a5e0f" font-weight="600">humano elige · IA N</text>
+              <text x="90" y="76" text-anchor="middle" font-size="9" fill="#4a4a4a" font-style="italic">consistente por propagación</text>
+            </g>
+          </a>
+
+          <!-- Flecha -->
+          <line x1="435" y1="55" x2="475" y2="55" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar1)"/>
+
+          <!-- Box 3: Video -->
+          <a href="#asimetria-keyframe-video" xlink:href="#asimetria-keyframe-video" role="link" tabindex="0">
+            <title>Click para ver la asimetría keyframe vs video en Escala 3</title>
+            <g transform="translate(480, 25)">
+              <rect width="160" height="80" rx="8" fill="#f8eed4" stroke="#b8851c" stroke-width="2"/>
+              <text x="80" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">5. Video</text>
+              <text x="80" y="48" text-anchor="middle" font-size="11" fill="#4a4a4a">clip por escena</text>
+              <text x="80" y="68" text-anchor="middle" font-size="10" fill="#2a5fa8" font-weight="600">IA elige · humano vetea</text>
+            </g>
+          </a>
+        </svg>
+        <p class="diagram-caption">La cadena visual crítica. Lo que la sostiene es el casting + look-dev bien hecho.</p>
+      </div>
+
+      <div class="mantra" style="margin: 1.5rem 0 0; padding: 1.25rem 1rem; font-size: 1.2rem; border-top: 0; border-bottom: 0; text-align: left;">
+        Si el <strong style="color: var(--keyframe-strong);">casting</strong> está bien, el <strong>keyframe</strong> se hace solo.<br>
+        Y si el <strong>keyframe</strong> es consistente, el <strong>video</strong> también.
+      </div>
+
+      <div class="nav-arrow">
+        <a href="#escala-2" class="down">↓ ver el flujo completo (8 checkpoints)</a>
+      </div>
+    </section>
+
+
+    <!-- ====================================================== -->
+    <!-- ESCALA 2 · VISTA GENERAL (30 segundos)                 -->
+    <!-- ====================================================== -->
+    <section id="escala-2" class="scale">
+      <span class="scale-label">Escala 2 · 30 segundos</span>
+      <h2>El flujo en 8 checkpoints</h2>
+      <p>El video pasa por 8 etapas. El humano <span class="tag tag-human">decide</span> en casi todas; la IA <span class="tag tag-ia">genera</span> candidatos. Los <strong>3 núcleo</strong> de decisión son guion/shotlist, keyframe y video; el casting + look-dev es la <strong>base</strong> que sostiene la consistencia.</p>
+
+      <div class="legend">
+        <span class="legend-item"><span class="legend-dot h"></span>Humano decide</span>
+        <span class="legend-item"><span class="legend-dot i"></span>IA genera</span>
+        <span class="legend-item"><span class="legend-dot k"></span>Keyframe (pieza central)</span>
+      </div>
+
+      <!-- Diagrama 1 (full): 8 cajas -->
+      <div class="diagram">
+        <svg viewBox="0 0 990 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flujo completo en 8 checkpoints">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+            </marker>
+            <marker id="ar2b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a5e0f"/>
+            </marker>
+          </defs>
+
+          <!-- 1. Guion -->
+          <a href="#mecanica-subseccion" xlink:href="#mecanica-subseccion" role="link" tabindex="0">
+            <title>Click para ver cómo se ejecuta (Escala 4)</title>
+            <g transform="translate(15, 50)">
+              <rect width="100" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+              <text x="50" y="28" text-anchor="middle" font-size="13" font-weight="700">1. Guion</text>
+              <text x="50" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA redacta</text>
+              <text x="50" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">humano</text>
+            </g>
+          </a>
+
+          <line x1="118" y1="90" x2="138" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 2. Shot list -->
+          <a href="#mecanica-subseccion" xlink:href="#mecanica-subseccion" role="link" tabindex="0">
+            <title>Click para ver cómo se ejecuta (Escala 4)</title>
+            <g transform="translate(140, 50)">
+              <rect width="100" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+              <text x="50" y="28" text-anchor="middle" font-size="13" font-weight="700">2. Shot list</text>
+              <text x="50" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA descompone</text>
+              <text x="50" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">humano</text>
+            </g>
+          </a>
+
+          <line x1="243" y1="90" x2="263" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 3. Casting (BASE) — más prominente -->
+          <a href="#casting-look-dev" xlink:href="#casting-look-dev" role="link" tabindex="0">
+            <title>Click para ver el detalle de Casting + look-dev en Escala 3</title>
+            <g transform="translate(265, 38)">
+              <rect width="120" height="104" rx="8" fill="#fbf3e0" stroke="#8a5e0f" stroke-width="3"/>
+              <rect x="2" y="2" width="116" height="14" rx="6" fill="#8a5e0f"/>
+              <text x="60" y="12" text-anchor="middle" font-size="9" font-weight="800" fill="#fff" letter-spacing="0.06em">BASE</text>
+              <text x="60" y="38" text-anchor="middle" font-size="13" font-weight="800">3. Casting</text>
+              <text x="60" y="54" text-anchor="middle" font-size="12" font-weight="600">+ look-dev</text>
+              <text x="60" y="72" text-anchor="middle" font-size="10" fill="#4a4a4a">IA N vars.</text>
+              <text x="60" y="88" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="700">humano afina</text>
+              <text x="60" y="100" text-anchor="middle" font-size="8" fill="#8a5e0f" font-style="italic">produce el banco</text>
+            </g>
+          </a>
+
+          <!-- Flecha "consistencia" (más gruesa, ámbar) -->
+          <line x1="388" y1="90" x2="408" y2="90" stroke="#8a5e0f" stroke-width="3" marker-end="url(#ar2b)"/>
+          <text x="398" y="82" text-anchor="middle" font-size="9" fill="#8a5e0f" font-weight="700">consistencia</text>
+
+          <!-- 4. KEYFRAME (énfasis) -->
+          <a href="#anatomia-keyframe" xlink:href="#anatomia-keyframe" role="link" tabindex="0">
+            <title>Click para ver la anatomía del keyframe en Escala 3</title>
+            <g transform="translate(410, 38)">
+              <rect width="120" height="104" rx="8" fill="#f8eed4" stroke="#b8851c" stroke-width="3"/>
+              <text x="60" y="28" text-anchor="middle" font-size="14" font-weight="800">4. Keyframe</text>
+              <text x="60" y="44" text-anchor="middle" font-size="9" font-weight="700" fill="#8a5e0f" font-style="italic">pieza central</text>
+              <text x="60" y="62" text-anchor="middle" font-size="10" fill="#4a4a4a">consume el banco</text>
+              <text x="60" y="80" text-anchor="middle" font-size="10" fill="#4a4a4a">IA: N candidatos</text>
+              <text x="60" y="96" text-anchor="middle" font-size="10" font-weight="700" fill="#8a5e0f">humano elige</text>
+            </g>
+          </a>
+
+          <line x1="533" y1="90" x2="553" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 5. Video -->
+          <a href="#asimetria-keyframe-video" xlink:href="#asimetria-keyframe-video" role="link" tabindex="0">
+            <title>Click para ver la asimetría keyframe vs video en Escala 3</title>
+            <g transform="translate(555, 50)">
+              <rect width="100" height="80" rx="8" fill="#e4ebf6" stroke="#2a5fa8" stroke-width="2"/>
+              <text x="50" y="28" text-anchor="middle" font-size="13" font-weight="700">5. Video</text>
+              <text x="50" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA ensemble</text>
+              <text x="50" y="68" text-anchor="middle" font-size="9" fill="#2a5fa8" font-weight="600">vetea</text>
+            </g>
+          </a>
+
+          <line x1="658" y1="90" x2="678" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 6. Corte -->
+          <a href="#mecanica-subseccion" xlink:href="#mecanica-subseccion" role="link" tabindex="0">
+            <title>Click para ver cómo se ejecuta (Escala 4)</title>
+            <g transform="translate(680, 50)">
+              <rect width="100" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+              <text x="50" y="28" text-anchor="middle" font-size="13" font-weight="700">6. Corte</text>
+              <text x="50" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA sugiere</text>
+              <text x="50" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">decide</text>
+            </g>
+          </a>
+
+          <line x1="783" y1="90" x2="803" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 7. Sonido -->
+          <a href="#mecanica-subseccion" xlink:href="#mecanica-subseccion" role="link" tabindex="0">
+            <title>Click para ver cómo se ejecuta (Escala 4)</title>
+            <g transform="translate(805, 50)">
+              <rect width="80" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+              <text x="40" y="28" text-anchor="middle" font-size="13" font-weight="700">7. Sonido</text>
+              <text x="40" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA voz/música</text>
+              <text x="40" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">opcional</text>
+            </g>
+          </a>
+
+          <line x1="888" y1="90" x2="908" y2="90" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar2)"/>
+
+          <!-- 8. Publicación -->
+          <a href="#mecanica-subseccion" xlink:href="#mecanica-subseccion" role="link" tabindex="0">
+            <title>Click para ver cómo se ejecuta (Escala 4)</title>
+            <g transform="translate(910, 50)">
+              <rect width="80" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+              <text x="40" y="28" text-anchor="middle" font-size="13" font-weight="700">8. Publicar</text>
+              <text x="40" y="50" text-anchor="middle" font-size="10" fill="#4a4a4a">IA caption</text>
+              <text x="40" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">go</text>
+            </g>
+          </a>
+
+          <!-- Anotación abajo: los 3 núcleo enmarcados -->
+          <g transform="translate(15, 160)">
+            <rect x="0" y="0" width="525" height="24" rx="4" fill="none" stroke="#b8851c" stroke-width="1" stroke-dasharray="3,2"/>
+            <text x="262" y="16" text-anchor="middle" font-size="11" fill="#8a5e0f" font-weight="600">↑ los 3 núcleo: guion/shotlist · keyframe · video</text>
+          </g>
+        </svg>
+        <p class="diagram-caption">Mismo flujo que la Escala 1, ahora con los 8 checkpoints. El casting + look-dev (BASE) alimenta el keyframe con consistencia.</p>
+      </div>
+
+      <h3>Quién decide qué</h3>
+      <div class="cards">
+        <div class="card">
+          <h4>1. Guion</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA redacta</span><br>La idea, el mensaje, la estructura.</p>
+        </div>
+        <div class="card">
+          <h4>2. Shot list</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA descompone</span><br>Divide el guion en escenas y propone duración/cámara.</p>
+        </div>
+        <div class="card">
+          <h4>3. Casting + look-dev <span class="base-tag">base</span></h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA N variantes</span><br>Define personajes y estilo. <strong>Produce el banco</strong> (refs + LoRA) que alimenta los keyframes — son consistentes por propagación.</p>
+        </div>
+        <div class="card">
+          <h4>4. Keyframe</h4>
+          <p><span class="tag tag-keyframe">Humano</span> <span class="tag tag-ia">IA N candidatos</span><br>Elige la imagen de estilo por escena.</p>
+        </div>
+        <div class="card">
+          <h4>5. Video</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA ensemble</span><br>Vetea o rerollea el clip que la IA eligió.</p>
+        </div>
+        <div class="card">
+          <h4>6. Corte</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA sugiere</span><br>Orden, ritmo, transiciones.</p>
+        </div>
+        <div class="card">
+          <h4>7. Sonido</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA voz/música</span><br>Opcional: voz en off, música, captions.</p>
+        </div>
+        <div class="card">
+          <h4>8. Publicación</h4>
+          <p><span class="tag tag-human">Humano</span> <span class="tag tag-ia">IA caption</span><br>Go/no-go, copy por plataforma, thumbnail.</p>
+        </div>
+      </div>
+
+      <div class="nav-arrow">
+        <a href="#escala-1" class="up">↑ TL;DR</a>
+        <a href="#escala-3" class="down">↓ por qué el keyframe es especial</a>
+      </div>
+    </section>
+
+
+    <!-- ====================================================== -->
+    <!-- ESCALA 3 · PIEDRA ANGULAR (1-2 minutos)                -->
+    <!-- ====================================================== -->
+    <section id="escala-3" class="scale">
+      <span class="scale-label">Escala 3 · 1–2 minutos</span>
+      <h2>El casting + look-dev sostiene el keyframe</h2>
+      <p>La verdadera palanca de automatización no es el keyframe: es el <strong>casting + look-dev bien hecho</strong>. Si esa base está, el keyframe sale consistente por propagación y el video se hace solo.</p>
+
+      <h3 id="casting-look-dev">Primero: el casting + look-dev</h3>
+      <p class="breadcrumb"><a href="#escala-1">↑ volver a Escala 1 (diagrama mini)</a> · <a href="#escala-2">Escala 2 (vista general)</a></p>
+      <p><strong>Por qué existe.</strong> El humano no puede generar 8 keyframes consistentes si no fija primero el personaje y el estilo. Sin banco, cada keyframe es una apuesta distinta. El casting + look-dev cierra esa puerta: define identidad y look <em>una vez</em>, antes de generar nada.</p>
+      <p><strong>Qué produce.</strong> Un <strong>banco</strong>: por personaje, una o más imágenes de referencia; por estilo, un LoRA. El humano decide qué personajes son y qué look tienen. La IA genera <strong>N variantes</strong> por cada uno; el humano afina, descarta y aprueba. El banco queda fijo para todo el proyecto.</p>
+      <p><strong>Cómo se conecta con el keyframe.</strong> El keyframe consume el banco. Si el casting está bien, cada keyframe hereda automáticamente la identidad del personaje y el estilo. Eso es la "propagación": la consistencia no se negocia en cada keyframe, se hereda del banco.</p>
+
+      <!-- Mini-diagrama: casting/look-dev produce el banco -->
+      <div class="diagram">
+        <svg viewBox="0 0 730 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Casting produce el banco">
+          <defs>
+            <marker id="arc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+            </marker>
+          </defs>
+
+          <!-- 1. Humano define -->
+          <g transform="translate(15, 25)">
+            <rect width="140" height="70" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+            <text x="70" y="26" text-anchor="middle" font-size="12" font-weight="700">Humano</text>
+            <text x="70" y="42" text-anchor="middle" font-size="12" font-weight="700">define</text>
+            <text x="70" y="60" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">personaje + estilo</text>
+          </g>
+
+          <line x1="158" y1="60" x2="180" y2="60" stroke="#8a8a8a" stroke-width="2" marker-end="url(#arc)"/>
+
+          <!-- 2. IA N variantes -->
+          <g transform="translate(182, 25)">
+            <rect width="140" height="70" rx="8" fill="#e4ebf6" stroke="#2a5fa8" stroke-width="2"/>
+            <text x="70" y="26" text-anchor="middle" font-size="12" font-weight="700">IA:</text>
+            <text x="70" y="42" text-anchor="middle" font-size="12" font-weight="700">N variantes</text>
+            <text x="70" y="60" text-anchor="middle" font-size="9" fill="#2a5fa8" font-weight="600">explora el espacio</text>
+          </g>
+
+          <line x1="325" y1="60" x2="347" y2="60" stroke="#8a8a8a" stroke-width="2" marker-end="url(#arc)"/>
+
+          <!-- 3. Humano afina -->
+          <g transform="translate(349, 25)">
+            <rect width="140" height="70" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+            <text x="70" y="26" text-anchor="middle" font-size="12" font-weight="700">Humano</text>
+            <text x="70" y="42" text-anchor="middle" font-size="12" font-weight="700">afina y aprueba</text>
+            <text x="70" y="60" text-anchor="middle" font-size="9" fill="#2d7a3e" font-weight="600">queda el canónico</text>
+          </g>
+
+          <line x1="492" y1="60" x2="514" y2="60" stroke="#8a5e0f" stroke-width="2.5" marker-end="url(#arc)"/>
+
+          <!-- 4. Banco -->
+          <g transform="translate(516, 18)">
+            <rect width="200" height="84" rx="8" fill="#fbf3e0" stroke="#8a5e0f" stroke-width="2.5"/>
+            <text x="100" y="26" text-anchor="middle" font-size="13" font-weight="800">BANCO</text>
+            <text x="100" y="46" text-anchor="middle" font-size="11" fill="#4a4a4a">personajes (refs)</text>
+            <text x="100" y="60" text-anchor="middle" font-size="11" fill="#4a4a4a">+ LoRA de estilo</text>
+            <text x="100" y="78" text-anchor="middle" font-size="9" fill="#8a5e0f" font-style="italic">fuente de consistencia</text>
+          </g>
+        </svg>
+        <p class="diagram-caption">El casting + look-dev en acción: humano define, IA explora, humano afina. Lo que queda es el banco.</p>
+      </div>
+
+      <h3 id="anatomia-keyframe">Después: el keyframe consume el banco</h3>
+      <p class="breadcrumb"><a href="#escala-1">↑ volver a Escala 1 (diagrama mini)</a> · <a href="#escala-2">Escala 2 (vista general)</a></p>
+      <p>Una vez que el banco está, el keyframe ya no es una apuesta. La IA genera <strong>N keyframes candidatos</strong> condicionados al banco (mismo personaje, mismo estilo). Un gate los <strong>ordena</strong> (no pasa/falla, ranking). El humano abre una <strong>hoja de contactos HTML</strong> y elige uno. La selección se guarda y la consume la siguiente etapa (video).</p>
+
+      <!-- Diagrama 2: anatomía del keyframe (ahora con refs del banco) -->
+      <div class="diagram">
+        <svg viewBox="0 0 820 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Anatomía del checkpoint keyframe">
+          <defs>
+            <marker id="ar3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+            </marker>
+            <marker id="ar3b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a5e0f"/>
+            </marker>
+          </defs>
+
+          <!-- Banco (entrada superior) -->
+          <a href="#casting-look-dev" xlink:href="#casting-look-dev" role="link" tabindex="0">
+            <title>Click para ver de dónde viene el banco (Casting + look-dev)</title>
+            <g transform="translate(15, 10)">
+              <rect width="130" height="36" rx="8" fill="#fbf3e0" stroke="#8a5e0f" stroke-width="2"/>
+              <text x="65" y="16" text-anchor="middle" font-size="11" font-weight="800">BANCO</text>
+              <text x="65" y="29" text-anchor="middle" font-size="9" fill="#4a4a4a">refs + LoRA</text>
+            </g>
+          </a>
+
+          <!-- Flecha banco → IA -->
+          <line x1="80" y1="46" x2="80" y2="68" stroke="#8a5e0f" stroke-width="2.5" marker-end="url(#ar3b)"/>
+
+          <!-- 1. IA genera N -->
+          <g transform="translate(15, 70)">
+            <rect width="130" height="80" rx="8" fill="#e4ebf6" stroke="#2a5fa8" stroke-width="2"/>
+            <text x="65" y="28" text-anchor="middle" font-size="13" font-weight="700">IA: N</text>
+            <text x="65" y="44" text-anchor="middle" font-size="13" font-weight="700">keyframes</text>
+            <text x="65" y="64" text-anchor="middle" font-size="9" fill="#4a4a4a">prompt + banco</text>
+            <text x="65" y="74" text-anchor="middle" font-size="9" fill="#4a4a4a">+ style + seed</text>
+          </g>
+
+          <line x1="148" y1="110" x2="170" y2="110" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar3)"/>
+
+          <!-- 2. Gate rankea -->
+          <g transform="translate(172, 70)">
+            <rect width="130" height="80" rx="8" fill="#e4ebf6" stroke="#2a5fa8" stroke-width="2"/>
+            <text x="65" y="28" text-anchor="middle" font-size="13" font-weight="700">Gate:</text>
+            <text x="65" y="44" text-anchor="middle" font-size="13" font-weight="700">rank</text>
+            <text x="65" y="64" text-anchor="middle" font-size="9" fill="#4a4a4a">puntúa c/u</text>
+            <text x="65" y="74" text-anchor="middle" font-size="9" fill="#2a5fa8" font-style="italic">mejor primero</text>
+          </g>
+
+          <line x1="305" y1="110" x2="327" y2="110" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar3)"/>
+
+          <!-- 3. Hoja HTML -->
+          <g transform="translate(329, 70)">
+            <rect width="130" height="80" rx="8" fill="#f8eed4" stroke="#b8851c" stroke-width="2"/>
+            <text x="65" y="28" text-anchor="middle" font-size="13" font-weight="700">Hoja</text>
+            <text x="65" y="44" text-anchor="middle" font-size="13" font-weight="700">HTML</text>
+            <text x="65" y="64" text-anchor="middle" font-size="9" fill="#4a4a4a">se abre auto</text>
+            <text x="65" y="74" text-anchor="middle" font-size="9" fill="#8a5e0f">grid de N imgs</text>
+          </g>
+
+          <line x1="462" y1="110" x2="484" y2="110" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar3)"/>
+
+          <!-- 4. Humano elige -->
+          <g transform="translate(486, 70)">
+            <rect width="130" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+            <text x="65" y="28" text-anchor="middle" font-size="13" font-weight="700">Humano</text>
+            <text x="65" y="44" text-anchor="middle" font-size="13" font-weight="700">elige 1</text>
+            <text x="65" y="64" text-anchor="middle" font-size="9" fill="#4a4a4a">click sobre la img</text>
+            <text x="65" y="74" text-anchor="middle" font-size="9" fill="#2d7a3e" font-style="italic">decisión</text>
+          </g>
+
+          <line x1="619" y1="110" x2="641" y2="110" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar3)"/>
+
+          <!-- 5. selections.yaml -->
+          <g transform="translate(643, 70)">
+            <rect width="162" height="80" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+            <text x="81" y="28" text-anchor="middle" font-size="13" font-weight="700">selections</text>
+            <text x="81" y="44" text-anchor="middle" font-size="13" font-weight="700">.yaml</text>
+            <text x="81" y="64" text-anchor="middle" font-size="9" fill="#4a4a4a">persiste</text>
+            <text x="81" y="74" text-anchor="middle" font-size="9" fill="#2d7a3e" font-style="italic">próxima etapa</text>
+          </g>
+
+          <!-- Anotación flecha hacia abajo -->
+          <g transform="translate(295, 180)">
+            <line x1="0" y1="0" x2="0" y2="14" stroke="#8a8a8a" stroke-width="2"/>
+            <line x1="-5" y1="8" x2="0" y2="16" stroke="#8a8a8a" stroke-width="2"/>
+            <line x1="5" y1="8" x2="0" y2="16" stroke="#8a8a8a" stroke-width="2"/>
+            <text x="10" y="10" font-size="10" fill="#8a8a8a" font-style="italic">el keyframe elegido alimenta el video</text>
+          </g>
+        </svg>
+        <p class="diagram-caption">Zoom del checkpoint #4. Notá que el banco entra como input — la consistencia ya está garantizada antes de generar.</p>
+      </div>
+
+      <h3>Por qué el casting + look-dev es la palanca de automatización</h3>
+      <div class="thesis">
+        <p><strong>1. La consistencia se decide una vez.</strong> El humano fija personaje y estilo. El keyframe y el video los heredan sin renegociar.</p>
+      </div>
+      <div class="thesis">
+        <p><strong>2. El estilo vive en la imagen.</strong> Los modelos de video no aceptan LoRA custom. El look (LEGO, anime, sci-fi…) se logra en el keyframe (Flux + LoRA) y entra como <code>init_image</code> al video.</p>
+      </div>
+      <div class="thesis">
+        <p><strong>3. Es barato iterar el banco.</strong> Cambiar una referencia de personaje = invalidar el keyframe de todas las escenas donde aparece. Cambiar el LoRA = invalidar el keyframe de todas. Es un cambio grande pero único y barato.</p>
+      </div>
+      <div class="thesis">
+        <p><strong>4. Es la verdadera palanca.</strong> Banco bien hecho → keyframes consistentes sin esfuerzo → video coherente sin esfuerzo.</p>
+      </div>
+
+      <h3 id="asimetria-keyframe-video">Asimetría: keyframe ≠ video</h3>
+      <p class="breadcrumb"><a href="#escala-1">↑ volver a Escala 1 (diagrama mini)</a> · <a href="#escala-2">Escala 2 (vista general)</a></p>
+      <p>El humano revisa imágenes rápido; revisar N videos de 5s es caro (atención + tiempo). Por eso:</p>
+      <ul>
+        <li><strong>Keyframe</strong> (imagen): humano mira N y <strong>elige</strong> la mejor. Best-of-N completo.</li>
+        <li><strong>Video</strong> (5s): IA corre Ensemble, arma un ranking. El humano <strong>vetea/rerollea</strong> si algo no convence.</li>
+      </ul>
+
+      <h3>El gate cambió de juez a asistente</h3>
+      <p>Antes: pass/fail. Bloqueaba o dejaba pasar. Ahora: <strong>ranking</strong>. Ordena los N candidatos, marca artefactos, sugiere el mejor primero. El humano decide con mejor información, no contra la decisión de la máquina.</p>
+
+      <div class="mantra">
+        Si el <strong style="color: var(--keyframe-strong);">casting + look-dev</strong> está bien,<br>
+        el <strong>keyframe</strong> se hace solo<br>
+        y el <strong>video</strong> se hace solo también.
+      </div>
+
+      <div class="nav-arrow">
+        <a href="#escala-2" class="up">↑ vista general</a>
+        <a href="#escala-4" class="down">↓ cómo se ejecuta (subcomandos + costo)</a>
+      </div>
+    </section>
+
+
+    <!-- ====================================================== -->
+    <!-- ESCALA 4 · MECÁNICA (3 minutos)                        -->
+    <!-- ====================================================== -->
+    <section id="escala-4" class="scale">
+      <span class="scale-label">Escala 4 · 3 minutos</span>
+      <h2 id="mecanica-subseccion">Cómo se ejecuta y cuánto cuesta</h2>
+      <p class="breadcrumb"><a href="#escala-2">↑ volver a Escala 2 (vista general)</a></p>
+      <p>El pipeline corre por subcomandos. Cada uno resuelve una etapa, la decisión se guarda, y la siguiente la consume. Nada se hace de un tirón.</p>
+
+      <h3>El ciclo, en 3 comandos</h3>
+      <pre><code>pipeline keyframes    <span style="color:#8a8a8a"># IA genera N por escena → abre hoja de contactos HTML</span>
+pipeline pick         <span style="color:#8a8a8a"># humano confirma/sobrescribe selección → guarda selections.yaml</span>
+pipeline render       <span style="color:#8a8a8a"># toma las selecciones y produce el video final</span></code></pre>
+
+      <p>Y el modo <code>pipeline run</code> end-to-end <strong>sigue existiendo</strong> para cuando ya todo está calibrado y solo querés producir.</p>
+
+      <h3 id="cache-diagrama">El truco del caché (y por qué cuesta tan poco iterar)</h3>
+      <p class="breadcrumb"><a href="#mecanica-subseccion">↑ volver a la sección anterior</a> · <a href="#escala-2">Escala 2 (vista general)</a></p>
+      <p>Cada paso se llavea por <strong>hash de sus inputs</strong>. Si los inputs no cambiaron, no se regenera (costo $0). Si cambiaron, solo ese paso se regenera.</p>
+
+      <!-- Diagrama 3: caché/costo -->
+      <div class="diagram">
+        <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cadena de hashes del caché">
+          <defs>
+            <marker id="ar4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"/>
+            </marker>
+            <marker id="ar4b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a5e0f"/>
+            </marker>
+          </defs>
+
+          <!-- Banco (entrada superior) -->
+          <a href="#casting-look-dev" xlink:href="#casting-look-dev" role="link" tabindex="0">
+            <title>Click para ver de dónde viene el banco (Casting + look-dev)</title>
+            <g transform="translate(20, 12)">
+              <rect width="170" height="38" rx="8" fill="#fbf3e0" stroke="#8a5e0f" stroke-width="2"/>
+              <text x="85" y="17" text-anchor="middle" font-size="11" font-weight="800">BANCO (refs + LoRA)</text>
+              <text x="85" y="30" text-anchor="middle" font-size="9" fill="#4a4a4a">entra al hash del keyframe</text>
+            </g>
+          </a>
+
+          <!-- Flecha banco → keyframe hash -->
+          <line x1="105" y1="50" x2="180" y2="86" stroke="#8a5e0f" stroke-width="2" marker-end="url(#ar4b)"/>
+
+          <!-- 1 -->
+          <g transform="translate(20, 90)">
+            <rect width="200" height="78" rx="8" fill="#e4ebf6" stroke="#2a5fa8" stroke-width="2"/>
+            <text x="100" y="22" text-anchor="middle" font-size="11" font-weight="700">prompt + style</text>
+            <text x="100" y="36" text-anchor="middle" font-size="11" font-weight="700">+ refs + seed</text>
+            <text x="100" y="56" text-anchor="middle" font-size="10" fill="#4a4a4a">hash →</text>
+            <text x="100" y="70" text-anchor="middle" font-size="9" fill="#2a5fa8" font-style="italic">cambiar p/ref = miss</text>
+          </g>
+
+          <!-- arrow with hash label -->
+          <line x1="223" y1="129" x2="267" y2="129" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar4)"/>
+          <text x="245" y="121" text-anchor="middle" font-size="9" fill="#8a8a8a">hash</text>
+
+          <!-- 2 -->
+          <g transform="translate(270, 90)">
+            <rect width="200" height="78" rx="8" fill="#f8eed4" stroke="#b8851c" stroke-width="2"/>
+            <text x="100" y="22" text-anchor="middle" font-size="12" font-weight="700">keyframe_key</text>
+            <text x="100" y="40" text-anchor="middle" font-size="10" fill="#4a4a4a">hash →</text>
+            <text x="100" y="68" text-anchor="middle" font-size="9" fill="#8a5e0f" font-style="italic">cambiar banco = miss total</text>
+          </g>
+
+          <line x1="473" y1="129" x2="517" y2="129" stroke="#8a8a8a" stroke-width="2" marker-end="url(#ar4)"/>
+          <text x="495" y="121" text-anchor="middle" font-size="9" fill="#8a8a8a">hash</text>
+
+          <!-- 3 -->
+          <g transform="translate(520, 90)">
+            <rect width="220" height="78" rx="8" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="2"/>
+            <text x="110" y="22" text-anchor="middle" font-size="12" font-weight="700">video_key</text>
+            <text x="110" y="40" text-anchor="middle" font-size="10" fill="#4a4a4a">→ clip final</text>
+            <text x="110" y="68" text-anchor="middle" font-size="9" fill="#2d7a3e" font-style="italic">cambiar seed = video miss</text>
+          </g>
+
+          <!-- Pie: qué pasa si NO cambiás nada -->
+          <g transform="translate(20, 180)">
+            <rect width="720" height="32" rx="6" fill="#e6f1e9" stroke="#2d7a3e" stroke-width="1.5" stroke-dasharray="4,3"/>
+            <text x="20" y="20" font-size="11" fill="#1a1a1a">Si NO cambiás nada → todos los pasos son cache hit. <strong style="color:#2d7a3e">Costo total: $0.000</strong>.</text>
+          </g>
+        </svg>
+        <p class="diagram-caption">Cadena de hashes. El banco entra al hash del keyframe. Cambiar prompt o refs invalida el keyframe; cambiar el banco entero, todo.</p>
+      </div>
+
+      <div class="thesis">
+        <p><strong>El banco entra al hash del keyframe.</strong> Cambiar una referencia de personaje = keyframe miss en todas las escenas donde aparece. Cambiar el LoRA de estilo = keyframe miss en todas. Es un cambio grande pero <em>una sola vez</em>: una vez que el banco está afinado, todo lo demás itera barato.</p>
+      </div>
+
+      <h3>Costos concretos (cifras de referencia, jun 2026)</h3>
+      <table class="cost-table">
+        <thead>
+          <tr>
+            <th>Acción</th>
+            <th>Qué hace</th>
+            <th class="cost">Costo aprox.</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Re-correr sin cambios</td>
+            <td>Todo cache hit</td>
+            <td class="cost zero">$0.000</td>
+          </tr>
+          <tr>
+            <td>Reroll 1 escena (subir seed)</td>
+            <td>Regenera solo ese clip</td>
+            <td class="cost">~$0.15</td>
+          </tr>
+          <tr>
+            <td>Cambiar prompt de 1 escena</td>
+            <td>Regenera keyframe + clip de esa escena</td>
+            <td class="cost">~$0.15</td>
+          </tr>
+          <tr>
+            <td>Escena volume (cascade Kling)</td>
+            <td>1 intento, modelo barato</td>
+            <td class="cost">~$0.15</td>
+          </tr>
+          <tr>
+            <td>Escena standard (router)</td>
+            <td>Modelo medio (Seedance)</td>
+            <td class="cost">~$0.30</td>
+          </tr>
+          <tr>
+            <td>Escena hero (ensemble N modelos)</td>
+            <td>Paga N, se queda con 1</td>
+            <td class="cost">~$0.45</td>
+          </tr>
+          <tr>
+            <td>Video 30s (mixto realista)</td>
+            <td>8 escenas ~60% standard, 20% volume, 20% hero</td>
+            <td class="cost">~$2.5</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size: 0.8rem; color: var(--ink-mute);">Ahorro medido: ~58% vs. usar solo el modelo premium. Y re-correr para ajustar cuesta prácticamente $0.</p>
+
+      <h3>Mini-ejemplo: un spot de 30 segundos</h3>
+      <ol>
+        <li>Escribís un <strong>guion</strong> corto y un <strong>shot list</strong> de 8 escenas.</li>
+        <li>Elegís el <strong>estilo</strong> (LEGO, anime, lo que sea) y subís una foto del personaje.</li>
+        <li>Corres <code>pipeline keyframes</code>: para cada escena, la IA genera 4 keyframes candidatos. Te abre una <strong>hoja de contactos</strong>. Elegís 1 por escena.</li>
+        <li>Corres <code>pipeline render</code>: la IA produce los 8 clips usando tus keyframes. El gate los rankea. Si alguno no te gusta, lo rerolleas con un <code>seed</code> distinto.</li>
+        <li>El video sale con música y formato vertical (9:16) listo para subir.</li>
+      </ol>
+
+      <div class="nav-arrow">
+        <a href="#escala-3" class="up">↑ piedra angular</a>
+        <a href="#escala-5" class="down">↓ para los que quieren leer todo</a>
+      </div>
+    </section>
+
+
+    <!-- ====================================================== -->
+    <!-- ESCALA 5 · PROFUNDIDAD (lectura libre)                  -->
+    <!-- ====================================================== -->
+    <section id="escala-5" class="scale">
+      <span class="scale-label">Escala 5 · profundidad</span>
+      <h2>Para los que quieren leer todo</h2>
+      <p>Lo de arriba es la versión a 5 escalas. El resto vive en el repo: decisiones, especificación, código. Si algo te generó ruido, este es el lugar para resolverlo.</p>
+
+      <h3>Documentos fuente</h3>
+      <ul class="sources">
+        <li>
+          <a href="../SPEC.md">SPEC.md</a> — arquitectura por capas, contratos, números.
+        </li>
+        <li>
+          <a href="../ROADMAP.md">ROADMAP.md</a> — sprints, tareas, definición de "hecho".
+        </li>
+        <li>
+          <a href="../decisions/0021-0030.md">D-021 — AI in the Loop</a> — el principio rector de todo esto.
+        </li>
+        <li>
+          <a href="../decisions/0021-0030.md">D-022 — Interacción humano-IA</a> — por qué subcomandos + hoja HTML.
+        </li>
+        <li>
+          <a href="../decisions/0011-0020.md">D-013 / D-014 / D-015</a> — modelo de proyecto, granularidad de escena, caché.
+        </li>
+        <li>
+          <a href="https://github.com/">Repo</a> — código + tests + smokes reales.
+        </li>
+      </ul>
+
+      <h3>Glosario rápido</h3>
+      <details>
+        <summary>Casting</summary>
+        <p>Elegir y fijar los personajes que aparecen en el video. El humano define la identidad (foto de referencia, nombre, rasgos). La IA genera N variantes; el humano afina y aprueba. Se hace <strong>antes</strong> del keyframe.</p>
+      </details>
+      <details>
+        <summary>Look-dev</summary>
+        <p>Fijar el estilo visual global: paleta, iluminación, LoRA de estilo (LEGO, anime, sci-fi…). Es la "estética" del proyecto. Se hace junto con el casting, antes del keyframe.</p>
+      </details>
+      <details>
+        <summary>Banco</summary>
+        <p>El conjunto <code>{personaje: [refs], estilo: LoRA}</code> que se mantiene estable durante todo el proyecto. Es la <strong>fuente de consistencia</strong>: el keyframe y el video lo consumen. Cambiar el banco = regenerar todo lo que viene después.</p>
+      </details>
+      <details>
+        <summary>Keyframe</summary>
+        <p>Imagen estática que define el estilo y la composición de una escena. Entra como <code>init_image</code> al modelo de video (image-to-video). Consume el banco (refs + LoRA) para garantizar consistencia con las demás escenas.</p>
+      </details>
+      <details>
+        <summary>LoRA</summary>
+        <p>Adaptador liviano que entrena un modelo sobre un estilo o personaje específico (~20–50 imgs para estilo, ~80–120 para un sujeto). Solo se puede aplicar a modelos que acepten pesos custom, por eso va en la imagen y no en el video.</p>
+      </details>
+      <details>
+        <summary>Cache hit / miss</summary>
+        <p>Cada paso se identifica por un <strong>hash</strong> de sus inputs. Si el hash ya existe, <strong>hit</strong>: se reutiliza, costo $0. Si no, <strong>miss</strong>: se regenera y se guarda bajo el nuevo hash.</p>
+      </details>
+      <details>
+        <summary>Seed (reroll)</summary>
+        <p>Número que controla la variación aleatoria de un modelo. Subirlo (o cambiarlo) hace que el modelo genere una variante distinta de la misma escena. Acá es la perilla para "dame otra versión" sin pagar más allá de ese clip.</p>
+      </details>
+      <details>
+        <summary>Reroll</summary>
+        <p>Regenerar una escena específica (subiendo su seed). Como el caché es por hash, rerollar 1 escena = regenerar solo esa. El resto del video se mantiene.</p>
+      </details>
+      <details>
+        <summary>Ensemble</summary>
+        <p>Estrategia de generación: N modelos en paralelo, se queda con el mejor. Cuesta N veces pero garantiza calidad. Reservado a escenas hero.</p>
+      </details>
+      <details>
+        <summary>Cascade</summary>
+        <p>Estrategia: prueba el modelo más barato; si el gate falla, escala al siguiente tier. Costo variable, bueno para volumen/B-roll.</p>
+      </details>
+      <details>
+        <summary>Gate (Quality Gate)</summary>
+        <p>Filtro de calidad. Hoy es multimodal (mira un frame del clip) y devuelve un ranking + veredicto. Antes era juez pass/fail; ahora es asistente.</p>
+      </details>
+      <details>
+        <summary>Hoja de contactos (contact sheet)</summary>
+        <p>HTML que muestra los N candidatos en grilla. La abre el subcomando <code>pipeline keyframes</code>; el humano hace click sobre el elegido y la selección persiste.</p>
+      </details>
+      <details>
+        <summary>Best-of-N</summary>
+        <p>Patrón: la IA genera N variantes; el humano o un gate elige la mejor. Núcleo del enfoque "AI in the Loop".</p>
+      </details>
+
+      <h3>Preguntas frecuentes</h3>
+      <dl class="faq">
+        <dt>¿Por qué el humano decide tantas cosas y la IA tan pocas?</dt>
+        <dd>Porque la IA es poderosa pero <strong>opaca</strong> en decisiones creativas (no sabe qué estilo le gusta a tu marca). El humano es lento pero <strong>dueño de la intención</strong>. Cada checkpoint humano es donde se fija esa intención.</dd>
+
+        <dt>¿Por qué hay un paso de casting + look-dev separado? ¿No alcanza con el keyframe?</dt>
+        <dd>Sin casting, cada keyframe es una apuesta distinta: el personaje puede cambiar de cara entre escenas, el estilo puede variar. El banco fija identidad y look <strong>una vez</strong>, y los keyframes salen consistentes por propagación. Invertir 10 minutos en casting te ahorra horas de keyframes inconsistentes y clips que hay que rerollear.</dd>
+
+        <dt>¿Y si quiero correr todo de un tirón sin pausar?</dt>
+        <dd>Existe: <code>pipeline run</code>. Úsalo cuando ya tenés el estilo y la dirección calibrados, y querés producir en serie.</dd>
+
+        <dt>¿Y si re-correr varias veces se vuelve caro?</dt>
+        <dd>No, por el caché. Si no cambiás nada, todos los pasos son cache hit, costo $0. Si cambiás 1 prompt, solo se regenera esa escena. El sistema está diseñado para iterar barato.</dd>
+
+        <dt>¿Por qué la IA hace el video y no el humano?</dt>
+        <dd>Porque revisar 8 videos de 5s es caro en atención. La IA corre Ensemble y arma un ranking; el humano vetea si algo no convence. Es un trade-off consciente: calidad donde cuesta revisar poco (keyframes), velocidad donde cuesta revisar mucho (videos).</dd>
+
+        <dt>¿Esto no es "solo un video bonito"? ¿Qué lo diferencia?</dt>
+        <dd>Que está diseñado para que el humano tenga el control creativo <strong>en cada paso que importa</strong>, mientras la IA absorbe el trabajo mecánico. Y que re-correr es prácticamente gratis, lo que cambia cómo se piensa la producción.</dd>
+      </dl>
+
+      <div class="closing">
+        Si tus keyframes son buenos, el video se hace solo.
+      </div>
+
+      <div class="nav-arrow">
+        <a href="#escala-4" class="up">↑ mecánica</a>
+        <a href="#escala-1" class="down">↓ volver al inicio</a>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    (function() {
+      // 1. Scroll-spy del minimapa (Patrón B)
+      const sections = document.querySelectorAll('section[id^="escala"]');
+      const navLinks = document.querySelectorAll('.minimap a');
+
+      if (sections.length && navLinks.length) {
+        const setActive = (id) => {
+          navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+          });
+        };
+
+        const observer = new IntersectionObserver(entries => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) setActive(entry.target.id);
+          });
+        }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+
+        sections.forEach(s => observer.observe(s));
+      }
+
+      // 2. Click handler en nodos de diagramas: expandir <details> + flash en el target
+      document.querySelectorAll('.diagram a[href^="#"]').forEach(link => {
+        link.addEventListener('click', () => {
+          const targetId = link.getAttribute('href').slice(1);
+          // Espera a que el smooth scroll llegue cerca del target
+          setTimeout(() => {
+            const target = document.getElementById(targetId);
+            if (!target) return;
+            // Expande todos los <details> en la sección
+            target.closest('section')?.querySelectorAll('details').forEach(d => d.open = true);
+            // Flash highlight
+            target.classList.add('target-flash');
+            setTimeout(() => target.classList.remove('target-flash'), 1100);
+          }, 500);
+        });
+      });
+    })();
+  </script>
+
+</body>
+</html>

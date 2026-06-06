@@ -1,0 +1,16 @@
+# Style slot parametrizable. Cambiar este archivo (o --style) altera el look
+# sin tocar la orquestacion. El LoRA vive en la capa de imagen (keyframe), no
+# en el modelo de video (API-only no acepta pesos custom en video).
+style: lego
+keyframe:
+  backend: fal
+  model: "fal-ai/flux-lora"
+  lora: "<url-o-id-del-lora-lego>"  # TODO: entrenar/colocar LoRA LEGO (20-50 imgs)
+  strength: 0.9
+  # Modelo de edicion con referencia: si la escena trae personajes con refs, el
+  # keyframe se genera condicionado a esas imagenes (consistencia de identidad).
+  ref_model: "fal-ai/nano-banana/edit"
+prompt_template: >
+  {scene_prompt}, LEGO brick style, plastic minifigure characters, studio lighting,
+  shallow depth of field, highly detailed, toy photography
+negative_prompt: "realistic skin, photorealism, blur, deformed bricks"

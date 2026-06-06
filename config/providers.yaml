@@ -1,0 +1,18 @@
+# Backends de generacion de video. Costo/seg y capabilities por modelo.
+# Revalidar precios contra el pricing vigente antes de cerrar presupuesto.
+providers:
+  kling:
+    backend: fal
+    model: "fal-ai/kling-video/v2.1/standard/image-to-video"
+    cost_per_second: 0.03
+    capabilities: [i2v, lipsync, "4k"]
+  seedance:
+    backend: fal
+    model: "fal-ai/bytedance/seedance/v1/lite/image-to-video"
+    cost_per_second: 0.06
+    capabilities: [i2v, multishot]
+  veo:
+    backend: google
+    model: "veo-3.1"
+    cost_per_second: 0.50
+    capabilities: [audio, lipsync, i2v]

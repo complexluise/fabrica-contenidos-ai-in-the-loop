@@ -1,0 +1,21 @@
+# Brief de ejemplo (LEGO). Escenas explicitas para un smoke run deterministico.
+# Alternativa: poner 'script: |' con prosa y dejar que Claude las descomponga.
+scenes:
+  - id: s1
+    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacias"
+    duration_s: 4
+    characters: []
+    class: volume
+
+  - id: s2
+    prompt: "Dos minifiguras LEGO conversan en una cafeteria, plano medio"
+    duration_s: 5
+    characters: [alex, robin]
+    dialogue: "Hoy lanzamos el producto."
+    requirements:
+      needs_audio: true
+
+  - id: s3
+    prompt: "Minifigura LEGO camina por el parque, seguimiento lateral"
+    duration_s: 4
+    characters: [alex]

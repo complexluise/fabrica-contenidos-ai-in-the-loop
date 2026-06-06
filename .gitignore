@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets / config local
+.env
+.env.*
+!.env.example
+*.local.yaml
+config/secrets.yaml
+
+# Artefactos del pipeline
+out/
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+keyframes/
+cache/
+
+# Imagenes de referencia locales (no subir al repo)
+data/
+
+# Proyectos: trackear solo project.yaml; cache y runs son artefactos locales
+projects/*/cache/
+projects/*/runs/
+projects/*/_scratch/
+projects/*/candidates.yaml
+projects/*/selections.yaml
+projects/*/keyframes_review.html
+projects/*/cast_candidates.yaml
+projects/*/casting.yaml
+projects/*/cast_review.html
+# Variantes Windows de las hojas de contacto (generadas)
+projects/*/*_win.html
+# Alias legibles humano-facing (D-026): copias del cache por hash
+projects/*/keyframes/
+projects/*/faces/
+# Bundle de export para edicion (D-029): salida generada desde el ultimo run
+projects/*/export/
+
+# Node (conversor md->docx D-030; UI Svelte D-031)
+node_modules/
+*.docx
+app/dist/
+
+# Estado / DB
+*.sqlite
+*.sqlite3
+*.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

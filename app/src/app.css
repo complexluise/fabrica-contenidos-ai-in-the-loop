@@ -1,0 +1,48 @@
+:root {
+  --bg: #0f1115;
+  --panel: #1a1d24;
+  --panel2: #21252e;
+  --border: #2c313c;
+  --text: #e7e9ee;
+  --muted: #8b93a3;
+  --accent: #7b2d8b;
+  --accent2: #9cf;
+  --ok: #1a7a4a;
+  --warn: #d97706;
+  --bad: #dc2626;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+button:hover { border-color: var(--accent2); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+select, input {
+  font: inherit;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+h1, h2, h3 { font-weight: 700; }
+a { color: var(--accent2); }
+code, .mono { font-family: ui-monospace, "Cascadia Code", monospace; }

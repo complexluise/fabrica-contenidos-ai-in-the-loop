@@ -1,0 +1,31 @@
+# Tabla de orquestacion: clasificacion de escena -> estrategia + providers.
+# Cambiar aqui altera el ruteo sin tocar codigo.
+hybrid:
+  hero:
+    strategy: ensemble
+    providers: [veo, seedance, kling]
+  standard:
+    strategy: router
+    providers: [seedance, kling]
+  volume:
+    strategy: cascade
+    providers: [kling, seedance, veo]
+
+# Gate suave por defecto: puntua y registra (Claude vision) pero NO bloquea ni
+# regenera mientras iteras. Poner true para endurecer (dispara reintento/escalado).
+enforce: false
+
+# Umbrales del Quality Gate por tipo de escena (hero mas estricto).
+thresholds:
+  hero:
+    aesthetic: 0.80
+    char_consistency: 0.85
+    clip_adherence: 0.75
+  standard:
+    aesthetic: 0.65
+    char_consistency: 0.70
+    clip_adherence: 0.65
+  volume:
+    aesthetic: 0.50
+    char_consistency: 0.55
+    clip_adherence: 0.55
