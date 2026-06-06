@@ -64,3 +64,11 @@ app/dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# Excepcion: lego_demo es el ejemplo de referencia (showcase curado).
+# Versionamos la entrada, la decision humana y un resultado, para que el flujo
+# completo se vea sin generar nada. El resto de artefactos siguen ignorados.
+# (Estas negaciones van al final para ganarle a las reglas globales *.png/*.mp4.)
+!projects/lego_demo/selections.yaml
+!projects/lego_demo/keyframe_s1.png
+!projects/lego_demo/final_9x16.mp4

@@ -149,20 +149,38 @@ def render_guion(spec: ProjectSpec, planos: list[dict]) -> str:
     return "\n".join(L)
 
 
-def _maybe_docx(md_path: Path) -> None:
-    """Best-effort (D-030): si hay node + el conversor, genera el .docx junto al .md.
+def _docx_command(md_path: Path) -> list[str] | None:
+    """Resuelve cómo convertir md->docx (D-030). Devuelve el comando o None.
 
-    Python no depende de Node: si falta node o el conversor no está instalado
-    (`pnpm install`), se omite el .docx sin romper el export.
+    Prefiere el comando global `md-to-docs` (`pnpm add -g md-to-docs`); si no está,
+    cae al conversor local `src/md_to_docs/convert.js` (requiere `node` + `pnpm install`).
     """
+    docx_path = md_path.with_suffix(".docx")
+    # 1) Comando global instalado vía pnpm. En Windows, which resuelve el .CMD/.PS1.
+    md_to_docs = shutil.which("md-to-docs")
+    if md_to_docs:
+        return [md_to_docs, str(md_path), str(docx_path)]
+    # 2) Conversor local (node + pnpm install en src/md_to_docs).
     node = shutil.which("node")
     convert = Path(__file__).resolve().parent.parent / "md_to_docs" / "convert.js"
-    if not node or not convert.exists():
-        logger.info("guion.docx omitido (sin node o conversor): instala src/md_to_docs (pnpm install).")
+    if node and convert.exists():
+        return [node, str(convert), str(md_path), str(docx_path)]
+    return None
+
+
+def _maybe_docx(md_path: Path) -> None:
+    """Best-effort (D-030): genera el .docx junto al .md si hay un conversor.
+
+    Python no depende de Node: si no hay ni el comando global `md-to-docs` ni el
+    conversor local, se omite el .docx sin romper el export.
+    """
+    cmd = _docx_command(md_path)
+    if cmd is None:
+        logger.info("guion.docx omitido (sin conversor): instala con `pnpm add -g md-to-docs` "
+                    "o `pnpm install` en src/md_to_docs.")
         return
     try:
-        subprocess.run([node, str(convert), str(md_path), str(md_path.with_suffix(".docx"))],
-                       check=True, capture_output=True, timeout=120)
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
         logger.info("guion.docx generado.")
     except Exception as exc:  # noqa: BLE001 — best-effort: el .md ya quedó
         logger.warning("No se pudo generar guion.docx (best-effort): %s", exc)
