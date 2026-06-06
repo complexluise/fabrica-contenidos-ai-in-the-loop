@@ -1,12 +1,23 @@
 # Video Gen Pipeline
 
+[![Licencia: GPL-3.0](https://img.shields.io/badge/Licencia-GPL--3.0-blue.svg)](./LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/gestionado%20con-uv-purple.svg)](https://docs.astral.sh/uv/)
+
 Industrialización de video con IA: orquestación multi-modelo **API-only** (Kling / Seedance / Veo
 vía fal.ai), estilo parametrizable (LEGO por defecto), Quality Gate con Claude visión, caché que
 abarata la iteración, y **checkpoints humanos "AI-in-the-Loop"** (eliges la cara del personaje y el
 keyframe entre varias opciones).
 
-Docs: [`SPEC.md`](./SPEC.md) (arquitectura y contratos) · [`ROADMAP.md`](./ROADMAP.md) (plan por
-sprints) · [`decisions/`](./decisions/) (decisiones ADR, numeradas y con estado).
+> ### 🤝 Filosofía: tecnologías mixtas
+> La IA **propone**; la persona **decide**. La IA es solo *una* herramienta — junto a la oralidad,
+> el trabajo en equipo y el oficio. Si vas a usar o contribuir a este proyecto, empieza por
+> [**FILOSOFIA.md**](./FILOSOFIA.md): es el alma del repo.
+
+Docs: [`FILOSOFIA.md`](./FILOSOFIA.md) (el porqué y los valores) · [`SPEC.md`](./SPEC.md)
+(arquitectura y contratos) · [`ROADMAP.md`](./ROADMAP.md) (plan por sprints) ·
+[`decisions/`](./decisions/) (decisiones ADR, numeradas y con estado) ·
+[`docs/flujo-de-trabajo.md`](./docs/flujo-de-trabajo.md) (cómo trabaja el equipo + la IA).
 
 ## Estado actual (Sprints 1–4.6 cerrados)
 
@@ -127,3 +138,19 @@ L1 Ingest → L2 Classifier → L3 Keyframe → L4 Providers → L5 Orchestrator
 → L6 Quality Gate (Claude visión) → L7 Assembly → L8 Delivery        (L9 Telemetría transversal)
         ▲ checkpoints humanos: cast / pick-cast (personaje) · keyframes / pick (encuadre)
 ```
+
+## Contribuir
+
+Los aportes son bienvenidos — y se aprende preguntando. Empieza por:
+
+1. [`FILOSOFIA.md`](./FILOSOFIA.md) — el espíritu del proyecto (un buen aporte mantiene a la persona en el centro).
+2. [`CONTRIBUTING.md`](./CONTRIBUTING.md) — setup con `uv`, cómo correr los tests, flujo de PR y el checklist.
+3. [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) — normas de convivencia (respeto y cuidado).
+
+¿Idea o bug? Abre un [issue](../../issues/new/choose). ¿Una duda? Abre una discusión. **Nunca**
+subas claves ni un `.env` (revisa tu diff antes del PR).
+
+## Licencia
+
+[GPL-3.0-only](./LICENSE). Puedes usar, estudiar, modificar y compartir este software;
+si lo distribuyes (modificado o no), debe seguir siendo libre bajo la misma licencia.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Pregunta o duda
+    url: https://github.com/complexluise/fabrica-contenidos-ai-in-the-loop/discussions
+    about: ¿No es un bug ni una propuesta concreta? Abrí una discusión. Acá se aprende preguntando.
+  - name: Lee la filosofía primero
+    url: https://github.com/complexluise/fabrica-contenidos-ai-in-the-loop/blob/main/FILOSOFIA.md
+    about: Tecnologias mixtas - la IA propone, la persona decide. Empezá por aquí.

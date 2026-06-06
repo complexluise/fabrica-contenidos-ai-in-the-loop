@@ -2,6 +2,8 @@
 name = "video-gen-pipeline"
 version = "0.1.0"
 description = "Industrializacion de video con IA: orquestacion multi-modelo API-only"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",
