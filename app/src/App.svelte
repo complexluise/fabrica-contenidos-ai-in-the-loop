@@ -1,8 +1,9 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, loadProjects, setSlug, goTo, nextStep } from "./lib/studio.svelte.js";
+  import { studio, STAGES, loadProjects, setSlug, goTo, nextStep, hasProject } from "./lib/studio.svelte.js";
   import Inicio from "./views/Inicio.svelte";
-  import Guion from "./views/Guion.svelte";
+  import Importar from "./views/Importar.svelte";
+  import Storyboard from "./views/Storyboard.svelte";
   import Picker from "./views/Picker.svelte";
   import Produccion from "./views/Produccion.svelte";
   import Ajustes from "./views/Ajustes.svelte";
@@ -15,7 +16,9 @@
   // Estado de cada paso del bucle para la espina lateral.
   function stageState(id) {
     const st = studio.status;
-    if (id === "inicio" || id === "guion") return "info";
+    if (id === "inicio") return "info";
+    if (id === "importar") return hasProject() ? "done" : "todo";
+    if (id === "storyboard") return hasProject() ? "info" : "todo";
     if (!st) return "todo";
     if (id === "ajustes") return st.keys?.fal_key ? "done" : "todo";
     if (id === "elegir") {
@@ -100,21 +103,24 @@
   <main>
     {#if studio.error}
       <p class="error">{studio.error}</p>
+    {:else if studio.tab === "importar"}
+      <Importar />
+    {:else if studio.tab === "ajustes"}
+      <Ajustes />
     {:else if !studio.slug}
       <div class="empty card">
-        <h2>No hay proyectos</h2>
-        <p class="muted">Creá uno en <code>projects/&lt;slug&gt;/project.yaml</code> y recargá.</p>
+        <h2>No hay proyectos todavía</h2>
+        <p class="muted">Empezá importando un guion: pegá o subí tu texto y la IA arma el borrador.</p>
+        <button class="primary" onclick={() => goTo("importar")}>Importar un guion →</button>
       </div>
     {:else if studio.tab === "inicio"}
       <Inicio />
-    {:else if studio.tab === "guion"}
-      <Guion slug={studio.slug} />
+    {:else if studio.tab === "storyboard"}
+      <Storyboard slug={studio.slug} />
     {:else if studio.tab === "elegir"}
       <Picker slug={studio.slug} />
     {:else if studio.tab === "producir"}
       <Produccion slug={studio.slug} />
-    {:else if studio.tab === "ajustes"}
-      <Ajustes />
     {/if}
   </main>
 </div>

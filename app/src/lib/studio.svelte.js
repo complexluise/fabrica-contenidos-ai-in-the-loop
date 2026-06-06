@@ -15,11 +15,12 @@ export const studio = $state({
 //   "ia"  -> la maquina propone/ejecuta  (azul)
 //   "lee" -> lectura/contexto            (neutro)
 export const STAGES = [
-  { id: "inicio",   n: 0, label: "Inicio",   sub: "Donde estas parado",          actor: "lee" },
-  { id: "ajustes",  n: 1, label: "Ajustes",  sub: "Tus claves de API",           actor: "tu"  },
-  { id: "guion",    n: 2, label: "Guion",    sub: "Lo que vamos a hacer",        actor: "lee" },
-  { id: "elegir",   n: 3, label: "Elegir",   sub: "La IA propone, vos decidis",  actor: "tu"  },
-  { id: "producir", n: 4, label: "Producir", sub: "Armar el video y el paquete", actor: "ia"  },
+  { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",          actor: "lee" },
+  { id: "ajustes",    n: 1, label: "Ajustes",    sub: "Tus claves de API",           actor: "tu"  },
+  { id: "importar",   n: 2, label: "Importar",   sub: "Texto -> borrador (la IA)",   actor: "ia"  },
+  { id: "storyboard", n: 3, label: "Storyboard", sub: "Edita y firma el plan",       actor: "tu"  },
+  { id: "elegir",     n: 4, label: "Elegir",     sub: "La IA propone, vos decidis",  actor: "tu"  },
+  { id: "producir",   n: 5, label: "Producir",   sub: "Armar el video y el paquete", actor: "ia"  },
 ];
 
 // Glosario: traducir la jerga a lenguaje humano (se muestra inline).
@@ -28,12 +29,21 @@ export const GLOSARIO = {
   casting: "la cara del personaje, fijada una vez",
   "rough cut": "corte de referencia, no el definitivo",
   plano: "una toma; el video se arma juntando planos",
+  storyboard: "el plan: escenas y planos, antes de generar",
 };
+
+export const hasProject = () => !!studio.slug && studio.projects.length > 0;
 
 export async function loadProjects() {
   try {
     studio.projects = await get("/api/projects");
-    if (!studio.slug && studio.projects.length) {
+    if (!studio.projects.length) {
+      studio.slug = "";
+      studio.status = null;
+      studio.tab = "importar"; // sin proyecto: arranca por Importar (D-033)
+      return;
+    }
+    if (!studio.slug || !studio.projects.some((p) => p.slug === studio.slug)) {
       studio.slug = studio.projects[0].slug;
     }
     await refreshStatus();
@@ -65,6 +75,8 @@ export function goTo(tab) {
 // El "siguiente paso": una sola recomendacion clara segun el estado real.
 // Devuelve { tab, label, why } o null si el bucle esta completo.
 export function nextStep(st) {
+  if (!hasProject())
+    return { tab: "importar", label: "Importar un guion", why: "Empezá pegando o subiendo tu texto." };
   if (!st) return { tab: "ajustes", label: "Configurar claves", why: "Empezá por tus API keys." };
   if (!st.keys?.fal_key)
     return { tab: "ajustes", label: "Configurar FAL_KEY", why: "Sin la clave de fal.ai no se puede generar nada." };

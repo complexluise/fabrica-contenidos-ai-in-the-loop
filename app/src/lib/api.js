@@ -38,12 +38,12 @@ export function humanError(e) {
   return last.length > 200 ? last.slice(0, 200) + "…" : last;
 }
 
-// Dispara un job (POST) y transmite su progreso por SSE.
-// onLine(line), onDone(status) — devuelve una función para cancelar.
-export async function runJob(postPath, { onLine, onDone, onError } = {}) {
+// Dispara un job (POST [body]) y transmite su progreso por SSE.
+// onLine(line), onDone(status, jobId) — devuelve una función para cancelar.
+export async function runJob(postPath, { body, onLine, onDone, onError } = {}) {
   let es;
   try {
-    const job = await post(postPath);
+    const job = await post(postPath, body);
     es = new EventSource(`/api/jobs/${job.id}/stream`);
     es.onmessage = (e) => {
       if (e.data.startsWith("__status__:")) {
