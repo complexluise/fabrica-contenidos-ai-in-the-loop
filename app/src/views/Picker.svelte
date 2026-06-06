@@ -1,102 +1,246 @@
 <script>
-  import { get, post, runJob } from "../lib/api.js";
+  import { get, post, runJob, humanError } from "../lib/api.js";
+  import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
   let cand = $state({ keyframes: {}, cast: {} });
-  let kfPicks = $state({}); // escena -> índice
-  let castPicks = $state({}); // personaje -> índice
-  let busy = $state("");
-  let msg = $state("");
+  let kfPicks = $state({}); // escena -> indice
+  let castPicks = $state({}); // personaje -> indice
+  let busy = $state(""); // "keyframes" | "cast" | ""
+  let progress = $state(""); // ultima linea del job en vivo
+  let err = $state("");
+  let saved = $state(false);
   let n = $state(4);
 
+  let hasFal = $derived(!!studio.status?.keys?.fal_key);
+
   async function load() {
-    cand = await get(`/api/projects/${slug}/candidates`);
+    try {
+      cand = await get(`/api/projects/${slug}/candidates`);
+    } catch (e) {
+      err = humanError(e);
+    }
   }
   $effect(() => {
-    if (slug) { kfPicks = {}; castPicks = {}; msg = ""; load(); }
+    if (slug) {
+      kfPicks = {}; castPicks = {}; progress = ""; err = ""; saved = false;
+      load();
+    }
   });
 
   function generate(kind) {
-    busy = kind;
-    msg = `Generando ${kind}…`;
+    busy = kind; err = ""; saved = false;
+    progress = "Pidiéndole opciones a la IA…";
     runJob(`/api/projects/${slug}/${kind}?n=${n}`, {
-      onLine: (l) => (msg = l),
+      onLine: (l) => (progress = l),
       onDone: async (status) => {
         busy = "";
-        msg = status === "done" ? "Listo. Elegí abajo." : `Terminó: ${status}`;
+        progress = status === "done" ? "Listo. Elegí abajo." : "";
+        if (status !== "done") err = `La generación terminó como: ${status}.`;
         await load();
+        await refreshStatus();
       },
-      onError: () => { busy = ""; msg = "Error al generar."; },
+      onError: (e) => { busy = ""; progress = ""; err = humanError(e); },
     });
   }
 
   async function savePicks() {
-    if (Object.keys(kfPicks).length)
-      await post(`/api/projects/${slug}/pick`, { picks: kfPicks });
-    if (Object.keys(castPicks).length)
-      await post(`/api/projects/${slug}/pick-cast`, { picks: castPicks });
-    msg = "Selección guardada.";
+    err = "";
+    try {
+      if (Object.keys(kfPicks).length)
+        await post(`/api/projects/${slug}/pick`, { picks: kfPicks });
+      if (Object.keys(castPicks).length)
+        await post(`/api/projects/${slug}/pick-cast`, { picks: castPicks });
+      saved = true;
+      await refreshStatus();
+    } catch (e) {
+      err = humanError(e);
+    }
   }
 
   const entries = (o) => Object.entries(o || {});
+  // Solo ofrecer casting si hay personajes con 'design:' (si no, el motor falla).
+  let needsCast = $derived((studio.status?.casting?.needed ?? 0) > 0);
+  let hasCast = $derived(entries(cand.cast).length > 0);
+  let hasKf = $derived(entries(cand.keyframes).length > 0);
+  let nothing = $derived(!hasCast && !hasKf);
+  let anyPick = $derived(Object.keys(kfPicks).length + Object.keys(castPicks).length > 0);
 </script>
 
-<div class="bar">
-  <label>N <input type="number" min="1" max="8" bind:value={n} style="width:60px" /></label>
-  <button onclick={() => generate("keyframes")} disabled={!!busy}>Generar keyframes</button>
-  <button onclick={() => generate("cast")} disabled={!!busy}>Generar casting</button>
-  <div class="spacer"></div>
-  <button class="primary" onclick={savePicks} disabled={!!busy}>Guardar selección</button>
-</div>
-{#if msg}<p class="msg mono">{msg}</p>{/if}
+<header class="head">
+  <div class="eyebrow">Paso 3 · vos decidís</div>
+  <h1>Elegir</h1>
+  <p class="lede">
+    La IA <b class="b">propone</b> varias opciones para cada escena. Tu trabajo es
+    el más importante: <b class="r">elegir</b> la que va. Hacé clic en la que más te guste.
+  </p>
+</header>
 
-{#if entries(cand.cast).length}
-  <h2>Casting</h2>
-  {#each entries(cand.cast) as [name, urls]}
-    <div class="group">
-      <h3>{name} {#if castPicks[name] != null}<span class="chosen">elegido: {castPicks[name]}</span>{/if}</h3>
-      <div class="grid">
-        {#each urls as url, i}
-          <button class="cand" class:sel={castPicks[name] === i} onclick={() => (castPicks = { ...castPicks, [name]: i })}>
-            <img src={url} alt="{name} {i}" />
-            <span class="idx">{i}</span>
-          </button>
-        {/each}
+<div class="generate card">
+  <div class="gen-l">
+    <div class="eyebrow" style="color:var(--blue-deep)">La IA propone</div>
+    <p class="muted gen-help">
+      Generá un puñado de candidatos.
+      {#if needsCast}<b>Casting</b> = la cara del personaje (se fija una vez). {/if}
+      <b>Encuadres</b> = la imagen base de cada escena.
+    </p>
+  </div>
+  <div class="gen-controls">
+    <label class="n">opciones
+      <input type="number" min="1" max="8" bind:value={n} />
+    </label>
+    {#if needsCast}
+      <button class="machine" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+        {busy === "cast" ? "Generando…" : "Generar casting"}
+      </button>
+    {/if}
+    <button class="machine" onclick={() => generate("keyframes")} disabled={!!busy || !hasFal}>
+      {busy === "keyframes" ? "Generando…" : "Generar encuadres"}
+    </button>
+  </div>
+</div>
+
+{#if !hasFal}
+  <p class="note">🔒 Para generar necesitás tu clave de fal.ai. <button class="small ghost" onclick={() => goTo("ajustes")}>Configurarla</button></p>
+{/if}
+{#if busy}
+  <div class="progress mono"><span class="spin"></span>{progress}</div>
+{/if}
+{#if err}<p class="error">{err}</p>{/if}
+
+{#if hasCast}
+  <section>
+    <h2 class="sec">Casting <span class="muted small-h">la cara del personaje</span></h2>
+    {#each entries(cand.cast) as [name, urls]}
+      <div class="group">
+        <div class="group-h">
+          <b>{name}</b>
+          {#if castPicks[name] != null}<span class="badge red">elegido · {castPicks[name]}</span>{/if}
+        </div>
+        <div class="lighttable">
+          {#each urls as url, i}
+            <button class="cell" class:sel={castPicks[name] === i}
+                    onclick={() => { castPicks = { ...castPicks, [name]: i }; saved = false; }}>
+              <img src={url} alt="{name} {i}" loading="lazy" />
+              <span class="idx">{i}</span>
+              {#if castPicks[name] === i}<span class="stamp">elegido</span>{/if}
+            </button>
+          {/each}
+        </div>
       </div>
-    </div>
-  {/each}
+    {/each}
+  </section>
 {/if}
 
-{#if entries(cand.keyframes).length}
-  <h2>Keyframes</h2>
-  {#each entries(cand.keyframes) as [scene, urls]}
-    <div class="group">
-      <h3>{scene} {#if kfPicks[scene] != null}<span class="chosen">elegido: {kfPicks[scene]}</span>{/if}</h3>
-      <div class="grid">
-        {#each urls as url, i}
-          <button class="cand" class:sel={kfPicks[scene] === i} onclick={() => (kfPicks = { ...kfPicks, [scene]: i })}>
-            <img src={url} alt="{scene} {i}" />
-            <span class="idx">{i}</span>
-          </button>
-        {/each}
+{#if hasKf}
+  <section>
+    <h2 class="sec">Encuadres <span class="muted small-h">la imagen base de cada escena</span></h2>
+    {#each entries(cand.keyframes) as [scene, urls]}
+      <div class="group">
+        <div class="group-h">
+          <b class="scene-id">{scene}</b>
+          {#if kfPicks[scene] != null}<span class="badge red">elegido · {kfPicks[scene]}</span>{/if}
+        </div>
+        <div class="lighttable">
+          {#each urls as url, i}
+            <button class="cell" class:sel={kfPicks[scene] === i}
+                    onclick={() => { kfPicks = { ...kfPicks, [scene]: i }; saved = false; }}>
+              <img src={url} alt="{scene} {i}" loading="lazy" />
+              <span class="idx">{i}</span>
+              {#if kfPicks[scene] === i}<span class="stamp">elegido</span>{/if}
+            </button>
+          {/each}
+        </div>
       </div>
-    </div>
-  {/each}
-{:else if !entries(cand.cast).length}
-  <p class="muted">No hay candidatos todavía. Generá keyframes o casting arriba.</p>
+    {/each}
+  </section>
+{/if}
+
+{#if nothing && !busy}
+  <div class="empty card">
+    <p>Todavía no hay opciones para elegir.</p>
+    <p class="muted">Usá <b>Generar</b> arriba para que la IA proponga candidatos.</p>
+  </div>
+{/if}
+
+{#if (hasCast || hasKf)}
+  <div class="savebar">
+    {#if saved}
+      <div class="saved">
+        <b>✓ Selección guardada.</b>
+        <button class="primary" onclick={() => goTo("producir")}>Siguiente: Producir →</button>
+      </div>
+    {:else}
+      <button class="primary" onclick={savePicks} disabled={!anyPick}>
+        Confirmar mi elección
+      </button>
+      {#if !anyPick}<span class="muted">Hacé clic en al menos una opción.</span>{/if}
+    {/if}
+  </div>
 {/if}
 
 <style>
-  .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .spacer { flex: 1; }
-  .msg { color: var(--muted); font-size: 13px; }
-  .group { margin: 16px 0; }
-  .group h3 { color: var(--accent2); margin: 0 0 8px; }
-  .chosen { color: var(--ok); font-size: 13px; font-weight: 400; margin-left: 8px; }
-  .grid { display: flex; flex-wrap: wrap; gap: 10px; }
-  .cand { position: relative; padding: 4px; border-radius: 8px; background: var(--panel); }
-  .cand img { display: block; max-width: 200px; max-height: 200px; border-radius: 4px; }
-  .cand.sel { outline: 3px solid var(--ok); border-color: var(--ok); }
-  .idx { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); color: #fff; border-radius: 4px; padding: 0 6px; font-size: 12px; }
-  .muted { color: var(--muted); }
+  .head { margin-bottom: 18px; }
+  .head h1 { margin: 5px 0 8px; }
+  .lede { max-width: 56ch; color: var(--ink-2); font-size: 16px; }
+  .lede .b { color: var(--blue-deep); }
+  .lede .r { color: var(--red-deep); }
+
+  .generate { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; padding: 16px 20px; margin-bottom: 14px; }
+  .gen-l { flex: 1; min-width: 220px; }
+  .gen-help { font-size: 13px; margin: 4px 0 0; max-width: 52ch; }
+  .gen-controls { display: flex; align-items: center; gap: 9px; }
+  .n { display: flex; flex-direction: column; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); gap: 3px; }
+  .n input { width: 64px; font-family: var(--font-mono); }
+
+  .note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
+  .progress { display: flex; align-items: center; gap: 10px; background: var(--blue-wash); border: 1px solid #b9c2ee; color: var(--blue-deep); border-radius: var(--r); padding: 10px 14px; font-size: 13px; }
+  .spin { width: 13px; height: 13px; border: 2px solid var(--blue-deep); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .sec { margin: 28px 0 6px; }
+  .small-h { font-family: var(--font-sans); font-size: 13px; font-weight: 400; }
+  .group { margin: 14px 0 22px; }
+  .group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 16px; }
+  .scene-id { font-family: var(--font-mono); color: var(--blue-deep); }
+
+  /* mesa de luz: panel hundido oscuro para que las imagenes resalten */
+  .lighttable {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    background: #2a251e;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r);
+    padding: 14px;
+    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.35);
+  }
+  .cell {
+    position: relative; padding: 0; background: #1a1611; border: 2px solid transparent;
+    border-radius: var(--r-sm); overflow: hidden; line-height: 0; box-shadow: none;
+    transition: transform 0.1s ease, border-color 0.12s ease;
+  }
+  .cell:hover { transform: translateY(-3px) scale(1.01); border-color: rgba(255, 255, 255, 0.4); box-shadow: 0 8px 20px -6px rgba(0,0,0,0.6); }
+  .cell img { display: block; max-width: 210px; max-height: 230px; }
+  .cell.sel { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-wash), 0 8px 22px -6px rgba(0,0,0,0.6); }
+  .idx {
+    position: absolute; top: 7px; left: 7px; background: rgba(0,0,0,0.62); color: #fff;
+    border-radius: var(--r-sm); padding: 0 7px; font-family: var(--font-mono); font-size: 12px;
+  }
+  .stamp {
+    position: absolute; top: 9px; right: -28px; transform: rotate(14deg);
+    background: var(--red); color: #fff8f2; font-weight: 700; font-size: 11px;
+    letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 30px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+
+  .empty { padding: 30px; text-align: center; margin-top: 16px; }
+  .empty p { margin: 4px 0; }
+
+  .savebar {
+    position: sticky; bottom: 0; margin-top: 26px; padding: 16px 0 8px;
+    background: linear-gradient(0deg, var(--paper) 60%, transparent);
+    display: flex; align-items: center; gap: 14px;
+  }
+  .saved { display: flex; align-items: center; gap: 16px; }
+  .saved b { color: var(--ok); }
+  .muted { color: var(--ink-soft); }
 </style>

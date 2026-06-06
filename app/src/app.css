@@ -1,48 +1,213 @@
+/* ============================================================================
+   Taller — sistema de diseño
+   "Mesa de luz + hoja de rodaje", risografia a dos tintas.
+   AZUL = la IA propone.   ROJO = la persona decide.   Papel = el sustrato.
+   ========================================================================== */
+
 :root {
-  --bg: #0f1115;
-  --panel: #1a1d24;
-  --panel2: #21252e;
-  --border: #2c313c;
-  --text: #e7e9ee;
-  --muted: #8b93a3;
-  --accent: #7b2d8b;
-  --accent2: #9cf;
-  --ok: #1a7a4a;
-  --warn: #d97706;
-  --bad: #dc2626;
+  /* --- sustrato (papel calido) --- */
+  --paper:    #f3ede1;
+  --paper-2:  #ece4d4;   /* panel / hundido */
+  --paper-3:  #e3d9c5;   /* borde de panel */
+  --card:     #faf6ec;   /* tarjetas elevadas */
+
+  /* --- tinta --- */
+  --ink:      #211c16;   /* negro calido */
+  --ink-2:    #4a4339;   /* texto secundario */
+  --ink-soft: #8a8073;   /* apagado */
+  --line:     #d8cdb8;   /* hairline */
+  --line-2:   #c8bca3;
+
+  /* --- las dos tintas --- */
+  --red:      #d6402a;   /* bermellon: la persona decide / accion primaria */
+  --red-deep: #b32f1c;
+  --red-wash: #f7e2db;   /* fondo lavado rojo */
+  --blue:     #2647c9;   /* tinta azul: la IA propone */
+  --blue-deep:#1b3399;
+  --blue-wash:#e0e3f6;
+
+  /* --- estados --- */
+  --ok:       #2f7445;
+  --ok-wash:  #dfeede;
+  --warn:     #b9690e;
+  --warn-wash:#f6e7cf;
+  --bad:      #c0392b;
+
+  /* --- tipografia --- */
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+
+  /* --- forma --- */
+  --r-sm: 6px;
+  --r:    11px;
+  --r-lg: 18px;
+  --shadow: 0 1px 2px rgba(33, 28, 22, 0.06), 0 8px 24px -12px rgba(33, 28, 22, 0.22);
+  --shadow-lg: 0 2px 4px rgba(33, 28, 22, 0.08), 0 24px 48px -20px rgba(33, 28, 22, 0.3);
+
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
 
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  background: var(--paper);
+  color: var(--ink);
+  /* grano risografico: ruido SVG fijo, sutil, sin capturar clics */
+  position: relative;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
+/* --- tipografia base --- */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-optical-sizing: auto;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+h1 { font-size: clamp(28px, 4vw, 40px); }
+h2 { font-size: 24px; }
+h3 { font-size: 18px; }
+
+a { color: var(--blue-deep); text-underline-offset: 3px; }
+
+.mono, code { font-family: var(--font-mono); font-size: 0.9em; }
+code {
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  padding: 0.5px 6px;
+  border-radius: var(--r-sm);
+}
+
+/* etiqueta tipo hoja-de-rodaje (uppercase tracked) */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* --- botones --- */
 button {
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--panel2);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 8px 14px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1.5px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 9px 16px;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease,
+    border-color 0.15s ease;
 }
-button:hover { border-color: var(--accent2); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button:disabled { opacity: 0.5; cursor: default; }
+button:hover { border-color: var(--ink-2); box-shadow: var(--shadow); }
+button:active { transform: translateY(1px); }
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  border-color: var(--line);
+}
 
-select, input {
+/* accion primaria = el gesto humano = rojo */
+button.primary {
+  background: var(--red);
+  border-color: var(--red-deep);
+  color: #fff8f2;
+  box-shadow: 0 2px 0 var(--red-deep);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--red-deep);
+  box-shadow: 0 3px 0 var(--red-deep), var(--shadow);
+}
+button.primary:disabled { box-shadow: none; }
+
+/* accion de la maquina = azul */
+button.machine {
+  background: var(--blue);
+  border-color: var(--blue-deep);
+  color: #f3f5ff;
+  box-shadow: 0 2px 0 var(--blue-deep);
+}
+button.machine:hover:not(:disabled) { background: var(--blue-deep); }
+button.machine:disabled { box-shadow: none; }
+
+button.ghost { background: transparent; border-color: var(--line-2); }
+button.small { padding: 5px 11px; font-size: 13px; border-radius: var(--r-sm); }
+
+/* --- inputs --- */
+select, input[type="text"], input[type="number"], input[type="password"] {
   font: inherit;
-  background: var(--panel2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  background: var(--card);
+  color: var(--ink);
+  border: 1.5px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 9px 12px;
+}
+select:focus, input:focus { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
+
+/* --- piezas reutilizables --- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.card {
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
 }
 
-h1, h2, h3 { font-weight: 700; }
-a { color: var(--accent2); }
-code, .mono { font-family: ui-monospace, "Cascadia Code", monospace; }
+/* badges de estado */
+.badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.badge.ok   { background: var(--ok-wash);   color: var(--ok); }
+.badge.no   { background: var(--paper-2);   color: var(--ink-soft); border: 1px solid var(--line); }
+.badge.warn { background: var(--warn-wash); color: var(--warn); }
+.badge.blue { background: var(--blue-wash); color: var(--blue-deep); }
+.badge.red  { background: var(--red-wash);  color: var(--red-deep); }
+
+.muted { color: var(--ink-soft); }
+.error {
+  color: var(--bad);
+  background: var(--red-wash);
+  border: 1px solid #e6b3a8;
+  border-radius: var(--r);
+  padding: 10px 14px;
+}
+
+/* scrollbar discreta */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; border: 3px solid var(--paper); }
