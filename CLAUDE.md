@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 API-only multi-model **AI video generation pipeline**. Orchestrates Kling / Seedance / Veo (video) and Flux / nano-banana (keyframes) through **fal.ai**, with a Claude-vision Quality Gate, content-addressed caching, and **"AI-in-the-Loop" human checkpoints** (a human picks the character face and the keyframe among N candidates). Default style is LEGO; style is parametrizable.
 
-Authoritative docs (read these before large changes): `SPEC.md` (architecture + contracts), `ROADMAP.md` (sprints + acceptance criteria), `decisions/` (numbered ADRs, max 10 per file — the *why* behind every choice).
+Authoritative docs (read these before large changes): `SPEC.md` (architecture + contracts), `ROADMAP.md` (sprints + acceptance criteria), `docs/decisiones/` (numbered ADRs, max 10 per file — the *why* behind every choice).
 
 ## Commands
 
@@ -71,6 +71,6 @@ L1 Ingest → L2 Classifier → L3 Keyframe → L4 Providers → L5 Orchestrator
 
 - **TDD test-first** (red-green-refactor), but **only the critical core** — contracts, routing/strategies, gate fusion, telemetry, project/cache, studio. External APIs, ffmpeg, and prompts are validated by real smoke runs, **not** unit tests. Do not add broad test coverage beyond the core.
 - **Prefer paid APIs over heavy local libraries** (no local whisper/torch/insightface in the default path) — this is why character consistency uses nano-banana + Claude vision, and CLIP/aesthetic stay dormant.
-- **Sprint workflow:** work the whole sprint, then commit. Update `ROADMAP.md` (check AC) and `decisions/` before/as part of the work, not after.
+- **Sprint workflow:** work the whole sprint, then commit. Update `ROADMAP.md` (check AC) and `docs/decisiones/` before/as part of the work, not after.
 - Windows/PowerShell host: avoid non-ASCII in console output (`->` not `→`; an earlier `→` print crashed on cp1252). ffmpeg must be on PATH.
 - Git has no global identity configured here — commit with `git -c user.name="Luis" -c user.email="luis@sostaina.com"`.

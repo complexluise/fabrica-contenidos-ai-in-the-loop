@@ -24,6 +24,6 @@ assignees: ''
 ## ¿Es una decisión de arquitectura?
 
 <!-- Si cambia un contrato, una estrategia o el flujo, probablemente necesite un ADR
-     en decisions/. No hace falta escribirlo ahora; solo marcá si lo creés. -->
+     en docs/decisiones/. No hace falta escribirlo ahora; solo marcá si lo creés. -->
 
 - [ ] Creo que esto amerita un ADR.

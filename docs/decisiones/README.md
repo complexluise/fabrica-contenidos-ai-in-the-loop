@@ -6,7 +6,7 @@ es continua entre archivos.
 
 - Formato de cada decisión: Contexto · Decisión · Consecuencias · Cambios (si se revisó).
 - Estados: **Vigente** · **Revisada** (sigue válida pero se ajustó) · **Reemplazada por D-XXX** · **Diferida**.
-- La arquitectura y los contratos viven en [`../SPEC.md`](../SPEC.md); aquí solo el *por qué*.
+- La arquitectura y los contratos viven en [`SPEC.md`](../../SPEC.md); aquí solo el *por qué*.
 
 ## Índice
 

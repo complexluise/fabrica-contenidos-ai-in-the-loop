@@ -288,7 +288,7 @@ SPEC de referencia).
 - [x] AC4 — El smoke **detecta el drift**: un subcomando renombrado/eliminado hace fallar el test (verificado: `keyframez --help` → exit 2).
 
 ### Tasks
-- [x] T5.5.1 — Reforzar [D-023] en `decisions/0021-0030.md`: contrato CLI > internals, smoke de contrato, exigencias al CLI (auto-descriptivo, estado legible, exit codes, idempotencia, dry-run).
+- [x] T5.5.1 — Reforzar [D-023] en `docs/decisiones/0021-0030.md`: contrato CLI > internals, smoke de contrato, exigencias al CLI (auto-descriptivo, estado legible, exit codes, idempotencia, dry-run).
 - [x] T5.5.2 — `SPEC.md`: capa de skills + CLI como **contrato dual-audiencia** (§1) y `skills/` en la estructura (§8).
 - [x] T5.5.3 — `skills/author-project/SKILL.md`, `skills/bank-casting/SKILL.md`, `skills/keyframe-best-of-n/SKILL.md` (verificadas contra `cli.py`/`studio.py`/`project.py`).
 - [x] T5.5.4 — `skills/README.md`: la convención (apuntar al CLI, cómo authorar una skill, el smoke obligatorio).

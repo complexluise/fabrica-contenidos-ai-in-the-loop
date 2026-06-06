@@ -21,7 +21,7 @@ Closes #
 
 - [ ] `uv run pytest` pasa en verde.
 - [ ] Si cambié el CLI (subcomando, flag o salida), actualicé `skills/*/SKILL.md`.
-- [ ] Si tomé una decisión de diseño, la registré en `decisions/` (ADR).
+- [ ] Si tomé una decisión de diseño, la registré en `docs/decisiones/` (ADR).
 - [ ] No hay secretos, `.env` ni claves en el diff.
 - [ ] La consola no imprime caracteres no-ASCII (host Windows/PowerShell).
 - [ ] El cambio respeta la **regla de oro**: la IA propone, la persona decide.

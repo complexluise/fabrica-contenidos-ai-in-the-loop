@@ -1,7 +1,7 @@
 # ROADMAP — Studio local (app)
 
 > Track **separado** del pipeline (ver [`../ROADMAP.md`](../ROADMAP.md) para el motor). Decisión:
-> [`D-031`](../decisions/0031-0040.md). Filosofía: **local, sin auth, estado en disco** — la UI es
+> [`D-031`](../docs/decisiones/0031-0040.md). Filosofía: **local, sin auth, estado en disco** — la UI es
 > el loop donde la persona decide ([D-021]). Backend **FastAPI** en `src/pipeline/server/`, UI
 > **Svelte** en `app/`. La API es cáscara fina sobre `studio`/`runner`/`export` (no se reescribe el motor).
 

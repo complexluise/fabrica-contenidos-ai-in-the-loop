@@ -217,7 +217,7 @@ El *routing* (qué estrategia y modelo por clase de escena) y los umbrales del g
 
 10 capas desacopladas por contratos (`L0 Contracts … L9 Telemetría`) más el modo interactivo de
 checkpoints. El detalle, los contratos y los diagramas están en [`SPEC.md`](./SPEC.md); el *por
-qué* de cada elección, en [`decisions/`](./decisions/) (ADR numerados).
+qué* de cada elección, en [`docs/decisiones/`](./docs/decisiones/) (ADR numerados).
 
 ```
 L1 Ingest -> L2 Classifier -> L3 Keyframe -> L4 Providers -> L5 Orchestrator (router/cascade/ensemble)

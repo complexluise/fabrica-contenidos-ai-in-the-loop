@@ -66,7 +66,7 @@ La filosofía no es un cartel; está en las decisiones de ingeniería:
 | La IA asiste, no juzga sola | Gate como *ranker*, suave por defecto (`enforce: false`) | [D-016], [D-018] |
 | Pertinencia sobre peso | Preferir APIs antes que librerías pesadas locales | [D-017] |
 | Iterar sin miedo | Caché content-addressed: re-correr lo ya hecho cuesta $0 | [D-013], [D-015] |
-| Trazabilidad humana | Cada decisión técnica queda escrita y numerada (ADRs) | [`decisions/`](./decisions/) |
+| Trazabilidad humana | Cada decisión técnica queda escrita y numerada (ADRs) | [`docs/decisiones/`](./docs/decisiones/) |
 | Entregar a una persona | El `export` arma un paquete que un humano entiende sin contexto | [D-029], [D-030] |
 
 ## 6. Lo que **no** somos
@@ -89,12 +89,12 @@ Gracias por sumar tu oficio al de la máquina. 🤝
 
 ---
 
-[D-016]: ./decisions/0011-0020.md
-[D-017]: ./decisions/0011-0020.md
-[D-018]: ./decisions/0011-0020.md
-[D-013]: ./decisions/0011-0020.md
-[D-015]: ./decisions/0011-0020.md
-[D-021]: ./decisions/0021-0030.md
-[D-022]: ./decisions/0021-0030.md
-[D-029]: ./decisions/0021-0030.md
-[D-030]: ./decisions/0021-0030.md
+[D-016]: ./docs/decisiones/0011-0020.md
+[D-017]: ./docs/decisiones/0011-0020.md
+[D-018]: ./docs/decisiones/0011-0020.md
+[D-013]: ./docs/decisiones/0011-0020.md
+[D-015]: ./docs/decisiones/0011-0020.md
+[D-021]: ./docs/decisiones/0021-0030.md
+[D-022]: ./docs/decisiones/0021-0030.md
+[D-029]: ./docs/decisiones/0021-0030.md
+[D-030]: ./docs/decisiones/0021-0030.md

@@ -14,7 +14,7 @@ Lee, en este orden, lo que sea relevante a tu cambio:
 1. [`FILOSOFIA.md`](./FILOSOFIA.md) — el *por qué*.
 2. [`SPEC.md`](./SPEC.md) — arquitectura y contratos (las 10 capas).
 3. [`ROADMAP.md`](./ROADMAP.md) — sprints y criterios de aceptación.
-4. [`decisions/`](./decisions/) — los ADR: el *por qué* de cada elección técnica.
+4. [`docs/decisiones/`](./docs/decisiones/) — los ADR: el *por qué* de cada elección técnica.
 
 ## Preparar el entorno
 
@@ -63,7 +63,7 @@ No hay linter ni formateador configurado: **los tests son el único gate**.
 
 ## Decisiones de arquitectura (ADR)
 
-Si tu cambio es una **decisión** (no un bugfix obvio), documentala en [`decisions/`](./decisions/):
+Si tu cambio es una **decisión** (no un bugfix obvio), documentala en [`docs/decisiones/`](./docs/decisiones/):
 numeración continua, máximo 10 por archivo, con **Contexto · Decisión · Consecuencias**.
 Hacelo *como parte* del PR, no después.
 
@@ -84,13 +84,13 @@ Hacelo *como parte* del PR, no después.
 
 - [ ] `uv run pytest` pasa en verde.
 - [ ] Si cambié el CLI, actualicé `skills/*/SKILL.md`.
-- [ ] Si tomé una decisión de diseño, la registré en `decisions/`.
+- [ ] Si tomé una decisión de diseño, la registré en `docs/decisiones/`.
 - [ ] No hay secretos, `.env` ni claves en el diff.
 - [ ] La consola no imprime caracteres no-ASCII.
 - [ ] El cambio respeta la regla de oro: **la persona sigue decidiendo**.
 
 ¿Dudas? Abrí un issue con la etiqueta `pregunta`. Acá se aprende preguntando.
 
-[D-012]: ./decisions/0011-0020.md
-[D-017]: ./decisions/0011-0020.md
-[D-023]: ./decisions/0021-0030.md
+[D-012]: ./docs/decisiones/0011-0020.md
+[D-017]: ./docs/decisiones/0011-0020.md
+[D-023]: ./docs/decisiones/0021-0030.md

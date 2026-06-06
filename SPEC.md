@@ -7,7 +7,7 @@
 > **Enfoque:** solo API (sin self-hosting en MVP), priorizando ahorro y mezcla de modelos.
 >
 > **Estado:** v0.2 — este documento describe **arquitectura y contratos**. El *por qué* de cada
-> elección (con estado y "qué cambió") vive en el registro de decisiones: **[`decisions/`](decisions/)**.
+> elección (con estado y "qué cambió") vive en el registro de decisiones: **[`docs/decisiones/`](docs/decisiones/)**.
 > Revalidar precios de cada API antes de cerrar presupuesto.
 
 ---
@@ -179,24 +179,24 @@ Router, Cascade y Ensemble son **3 implementaciones de `Strategy`** sobre la mis
 ## 3. Decisiones de tecnología
 
 El *por qué* de cada elección vive en el **registro de decisiones** (ADR), numerado y con estado:
-**[`decisions/`](decisions/)**. Resumen de la cadena por capa (ver el ADR para alternativas y
+**[`docs/decisiones/`](docs/decisiones/)**. Resumen de la cadena por capa (ver el ADR para alternativas y
 trade-offs):
 
 | Capa / tema | Elección | ADR |
 |---|---|---|
-| Orquestación | Python + asyncio | [D-001](decisions/0001-0010.md) |
-| Acceso a modelos | Agregador fal.ai (+ directos a volumen) | [D-002](decisions/0001-0010.md) |
-| L3 Estilo/keyframe | LoRA en la imagen (Flux), no en el video | [D-003](decisions/0001-0010.md) |
-| L4 Video por tier | Kling / Seedance / Veo | [D-004](decisions/0001-0010.md), [D-020](decisions/0011-0020.md) |
-| L2 Clasificador | Reglas + Claude (híbrido) | [D-005](decisions/0001-0010.md) |
-| L5 Estrategias | Router / Cascade / Ensemble (híbrido por YAML) | [D-006](decisions/0001-0010.md) |
-| L6 Quality Gate | VLM-judge → señales enchufables + fusión | [D-007](decisions/0001-0010.md), [D-016](decisions/0011-0020.md) |
-| L7/L8 Post | ffmpeg | [D-008](decisions/0001-0010.md) |
-| L9 Estado/cola | SQLite+asyncio → Temporal+Postgres | [D-009](decisions/0001-0010.md) |
-| Modelo de proyecto | Spec + caché content-addressed + runs | [D-013](decisions/0011-0020.md)…[D-015](decisions/0011-0020.md) |
-| Filosofía de deps | APIs antes que libs pesadas | [D-017](decisions/0011-0020.md) |
-| Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](decisions/0011-0020.md) |
-| Tooling | uv · pydantic-settings · TDD selectivo | [D-010](decisions/0001-0010.md), [D-011](decisions/0011-0020.md), [D-012](decisions/0011-0020.md) |
+| Orquestación | Python + asyncio | [D-001](docs/decisiones/0001-0010.md) |
+| Acceso a modelos | Agregador fal.ai (+ directos a volumen) | [D-002](docs/decisiones/0001-0010.md) |
+| L3 Estilo/keyframe | LoRA en la imagen (Flux), no en el video | [D-003](docs/decisiones/0001-0010.md) |
+| L4 Video por tier | Kling / Seedance / Veo | [D-004](docs/decisiones/0001-0010.md), [D-020](docs/decisiones/0011-0020.md) |
+| L2 Clasificador | Reglas + Claude (híbrido) | [D-005](docs/decisiones/0001-0010.md) |
+| L5 Estrategias | Router / Cascade / Ensemble (híbrido por YAML) | [D-006](docs/decisiones/0001-0010.md) |
+| L6 Quality Gate | VLM-judge → señales enchufables + fusión | [D-007](docs/decisiones/0001-0010.md), [D-016](docs/decisiones/0011-0020.md) |
+| L7/L8 Post | ffmpeg | [D-008](docs/decisiones/0001-0010.md) |
+| L9 Estado/cola | SQLite+asyncio → Temporal+Postgres | [D-009](docs/decisiones/0001-0010.md) |
+| Modelo de proyecto | Spec + caché content-addressed + runs | [D-013](docs/decisiones/0011-0020.md)…[D-015](docs/decisiones/0011-0020.md) |
+| Filosofía de deps | APIs antes que libs pesadas | [D-017](docs/decisiones/0011-0020.md) |
+| Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](docs/decisiones/0011-0020.md) |
+| Tooling | uv · pydantic-settings · TDD selectivo | [D-010](docs/decisiones/0001-0010.md), [D-011](docs/decisiones/0011-0020.md), [D-012](docs/decisiones/0011-0020.md) |
 
 ---
 
