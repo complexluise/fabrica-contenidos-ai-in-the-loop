@@ -41,7 +41,7 @@ class StrategyRule(BaseModel):
 
 
 class RoutingConfig(BaseModel):
-    hybrid: dict[str, StrategyRule]
+    rules: dict[str, StrategyRule]  # perfil ya resuelto (D-038); era 'hybrid'
     thresholds: dict[str, dict[str, float]]
     enforce: bool = False  # gate suave por defecto (puntúa pero no bloquea)
 
@@ -76,18 +76,30 @@ def load_audio(path: Path) -> dict[str, ProviderConfig]:
     return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
 
 
-def load_routing(path: Path) -> RoutingConfig:
-    return RoutingConfig(**_load_yaml(path))
+def load_routing(path: Path, profile: str = "prod") -> RoutingConfig:
+    """Carga el routing resolviendo el perfil solicitado (D-038).
+
+    Formato nuevo: `profiles.<profile>` en el YAML.
+    Compat: si no hay `profiles:`, se asume bloque `hybrid:` como perfil prod.
+    """
+    raw = _load_yaml(path)
+    if "profiles" in raw:
+        profiles = raw.pop("profiles")
+        rules = profiles.get(profile) or profiles["prod"]
+    else:
+        rules = raw.pop("hybrid", {})
+    raw["rules"] = rules
+    return RoutingConfig(**raw)
 
 
 def load_style(path: Path) -> StyleConfig:
     return StyleConfig(**_load_yaml(path))
 
 
-def load_config(config_dir: Path, style: str) -> Config:
-    """Carga la config completa para un estilo dado."""
+def load_config(config_dir: Path, style: str, profile: str = "prod") -> Config:
+    """Carga la config completa para un estilo y perfil dados (D-038)."""
     providers = load_providers(config_dir / "providers.yaml")
     audio = load_audio(config_dir / "providers.yaml")
-    routing = load_routing(config_dir / "routing.yaml")
+    routing = load_routing(config_dir / "routing.yaml", profile=profile)
     style_cfg = load_style(config_dir / "styles" / f"{style}.yaml")
     return Config(providers=providers, routing=routing, style=style_cfg, audio=audio)

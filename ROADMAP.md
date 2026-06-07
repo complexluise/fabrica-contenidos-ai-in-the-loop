@@ -489,6 +489,31 @@ plano), en `project.yaml`. El cue de MMAudio por plano = `shot.sfx` + `ambience`
 
 ---
 
+## Sprint 6.11 — Perfiles de calidad + escenas en paralelo (D-038, D-039)
+
+**Objetivo:** que `pipeline run --profile proto` sea el comando de iteración barato (un candidato,
+proveedor más económico, rápido) y `--profile prod` sea la producción final; y que con
+`--concurrency N` varias escenas corran en vuelo simultáneo recortando el tiempo total de render.
+
+### Acceptance Criteria
+- [ ] AC1 — `routing.yaml` tiene perfiles `prod` y `proto`; `--profile proto` aplica la tabla barata sin tocar otros archivos.
+- [ ] AC2 — `--profile prod` reproduce exactamente el comportamiento actual (ensemble/router/cascade). 🔬
+- [ ] AC3 — `pipeline run <slug> --profile proto --concurrency 3` genera las escenas en vuelo simultáneo con el mismo orden de clips que en serie.
+- [ ] AC4 — Una escena que falla con `concurrency > 1` no aborta el resto del run. 🔬
+- [ ] AC5 — El endpoint `POST /api/projects/{slug}/render` acepta `profile` y `concurrency` en el body.
+
+### Tasks (orden test-first)
+- [x] T6.11.1 — ADRs D-038 y D-039 en `docs/decisiones/`.
+- [ ] T6.11.2 — `routing.yaml`: sección `profiles:` con `prod` y `proto`. 🔬 *core*
+- [ ] T6.11.3 — `config.py`: `RoutingConfig.hybrid` → `rules`; `load_routing(path, profile)`. 🔬 *core*
+- [ ] T6.11.4 — `dispatch.py` + tests. *core*
+- [ ] T6.11.5 — `runner.py`: `run_project(concurrency=1)` + `asyncio.gather` con semáforo. 🔬 *core*
+- [ ] T6.11.6 — `cli.py`: `--profile prod` y `--concurrency 1` en `run`; `--concurrency` en `render`.
+- [ ] T6.11.7 — `app.py`: endpoint render acepta `profile`/`concurrency`.
+- [ ] T6.11.8 — Smoke: `pipeline run lego_mix --profile proto --concurrency 2`.
+
+---
+
 ## Sprint 6.10 — Frame por plano + cortes cortos (D-037)
 
 **Objetivo:** que **cada plano** autogenere su propio frame desde su `framing` (no reusar una opción

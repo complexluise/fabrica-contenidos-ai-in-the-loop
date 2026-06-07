@@ -1,15 +1,31 @@
 # Tabla de orquestacion: clasificacion de escena -> estrategia + providers.
-# Cambiar aqui altera el ruteo sin tocar codigo.
-hybrid:
-  hero:
-    strategy: ensemble
-    providers: [veo, seedance, kling]
-  standard:
-    strategy: router
-    providers: [seedance, kling]
-  volume:
-    strategy: cascade
-    providers: [kling, seedance, veo]
+# Cambiar aqui altera el ruteo sin tocar codigo (D-038).
+#
+# Perfiles disponibles (--profile en el CLI):
+#   prod  — calidad maxima: ensemble para hero, router/cascade para el resto.
+#   proto — iteracion barata: router + proveedor unico para todo. Un candidato,
+#           minimo costo, sin gate enforcement. Ideal para validar el storyboard.
+profiles:
+  prod:
+    hero:
+      strategy: ensemble
+      providers: [veo, seedance, kling]
+    standard:
+      strategy: router
+      providers: [seedance, kling]
+    volume:
+      strategy: cascade
+      providers: [kling, seedance, veo]
+  proto:
+    hero:
+      strategy: router
+      providers: [kling]
+    standard:
+      strategy: router
+      providers: [kling]
+    volume:
+      strategy: router
+      providers: [kling]
 
 # Gate suave por defecto: puntua y registra (Claude vision) pero NO bloquea ni
 # regenera mientras iteras. Poner true para endurecer (dispara reintento/escalado).

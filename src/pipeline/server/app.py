@@ -52,7 +52,7 @@ def create_app(projects_dir: Path = Path("projects"),
     jobs = JobManager()
 
     # --- helpers ----------------------------------------------------------
-    def load(slug: str):
+    def load(slug: str, profile: str = "prod"):
         from ..config import load_config
         from ..project import Project, load_project_spec
         from ..studio import apply_casting, load_casting
@@ -61,7 +61,7 @@ def create_app(projects_dir: Path = Path("projects"),
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
-        cfg = load_config(config_dir, spec.style)
+        cfg = load_config(config_dir, spec.style, profile=profile)
         apply_casting(spec.characters, load_casting(project))
         return project, spec, cfg
 
@@ -298,13 +298,16 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("cast", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/render")
-    async def render(slug: str):
+    async def render(slug: str, body: dict = {}):
         from .. import studio
 
-        project, spec, cfg = load(slug)
+        profile = (body.get("profile") or "prod")
+        concurrency = int(body.get("concurrency") or 1)
+        project, spec, cfg = load(slug, profile=profile)
 
         async def coro():
-            run, final, totals = await studio.render(project, spec, cfg)
+            run, final, totals = await studio.render(project, spec, cfg,
+                                                     concurrency=concurrency)
             return {"run_id": run.run_id, "final": str(final), **totals}
 
         return jobs.spawn("render", slug, coro()).to_dict()

@@ -15,8 +15,8 @@ def test_load_config_real_files_typed():
     assert cfg.providers["kling"].cost_per_second == 0.03
     assert "i2v" in cfg.providers["kling"].capabilities
     # routing con umbrales por clase
-    assert set(cfg.routing.hybrid) == {"hero", "standard", "volume"}
-    assert cfg.routing.hybrid["hero"].strategy == "ensemble"
+    assert set(cfg.routing.rules) == {"hero", "standard", "volume"}
+    assert cfg.routing.rules["hero"].strategy == "ensemble"
     assert cfg.routing.thresholds["hero"]["aesthetic"] == 0.80
     # estilo
     assert cfg.style.style == "lego"
@@ -52,3 +52,23 @@ def test_audio_block_absent_is_empty(tmp_path):
 def test_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         load_routing(Path("config") / "no_existe.yaml")
+
+
+# --- D-038: perfiles de calidad -----------------------------------------------
+
+def test_profile_prod_mantiene_ensemble():
+    routing = load_routing(CONFIG_DIR / "routing.yaml", profile="prod")
+    assert routing.rules["hero"].strategy == "ensemble"
+    assert set(routing.rules) == {"hero", "standard", "volume"}
+
+
+def test_profile_proto_todo_router_kling():
+    routing = load_routing(CONFIG_DIR / "routing.yaml", profile="proto")
+    for clase in ("hero", "standard", "volume"):
+        assert routing.rules[clase].strategy == "router"
+        assert routing.rules[clase].providers == ["kling"]
+
+
+def test_profile_desconocido_cae_a_prod():
+    routing = load_routing(CONFIG_DIR / "routing.yaml", profile="no_existe")
+    assert routing.rules["hero"].strategy == "ensemble"

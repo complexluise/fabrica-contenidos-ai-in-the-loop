@@ -20,7 +20,7 @@ _STRATEGIES = {
 
 def select_rule(scene_class: str, routing: RoutingConfig) -> StrategyRule:
     """Regla (estrategia + providers) para la clase de escena. Default: standard."""
-    return routing.hybrid.get(scene_class) or routing.hybrid["standard"]
+    return routing.rules.get(scene_class) or routing.rules["standard"]
 
 
 def build_strategy(name: str):

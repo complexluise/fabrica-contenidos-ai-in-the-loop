@@ -10,6 +10,7 @@ Aquí viven las llamadas reales a API (no unit-test; se valida con smoke run).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import yaml
@@ -219,11 +220,13 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
 
 
 async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
-                      keyframe_overrides: dict | None = None):
+                      keyframe_overrides: dict | None = None,
+                      concurrency: int = 1):
     """Ejecuta el proyecto. Devuelve (run, final_path, totals).
 
     `keyframe_overrides`: {scene_id: Path} con keyframes ya elegidos por el humano
     (modo interactivo D-022); si se da, no se genera/cachea el keyframe de esa escena.
+    `concurrency`: escenas en vuelo simultaneo (D-039). Default 1 = serial.
     """
     keyframe_overrides = keyframe_overrides or {}
     providers_by_name = {n: build_provider(p) for n, p in cfg.providers.items()}
@@ -231,8 +234,8 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
 
     run = project.new_run()
     run_log = add_run_logfile(run.dir / "run.log")  # detalle completo por corrida (L9)
-    logger.info("run %s | %d escenas | estilo %s | formato %s",
-                run.run_id, len(spec.scenes), spec.style, spec.format)
+    logger.info("run %s | %d escenas | estilo %s | formato %s | concurrencia %d",
+                run.run_id, len(spec.scenes), spec.style, spec.format, concurrency)
     keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch")
     telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
 
@@ -254,42 +257,65 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
         if fal_key_env:
             mm = MMAudioV2(fal_key_env, audio_cfg)
 
+    # --- loop de escenas con semaforo de concurrencia (D-039) ----------------
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _process_scene(scene):
+        """Todos los planos de una escena, en serie. Devuelve (clips, records, manifests, audio)."""
+        async with sem:
+            scene.class_ = scene.class_ or classify(scene)
+            refs = character_refs(scene, spec.characters)
+            scene.character_refs = refs
+            ref_sig = sorted(str(r) for r in refs)
+            rule = select_rule(scene.class_, cfg.routing)
+            subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]
+            strategy = build_strategy(rule.strategy)
+            provider_sig = {p.name: getattr(p, "model", p.name) for p in subset}
+
+            shots = effective_shots(scene)  # D-028: planos reales o 1 implícito (compat)
+            if len(shots) > 1:
+                logger.info("[%s] %s | %d planos", scene.id, scene.class_, len(shots))
+
+            s_clips, s_records, s_manifests, s_audio = [], [], [], False
+            for idx, shot in enumerate(shots):
+                shot_id = scene.id if idx == 0 else f"{scene.id}.{idx + 1}"
+                try:  # robustez: un plano que falla no aborta el run
+                    clip_path, record, mentry, audio = await _render_shot(
+                        project=project, spec=spec, cfg=cfg, run=run, keyframer=keyframer,
+                        gate=gate, tts=tts, mm=mm, scene=scene, shot=shot, shot_id=shot_id,
+                        idx=idx, refs=refs, ref_sig=ref_sig, rule=rule, subset=subset,
+                        strategy=strategy, provider_sig=provider_sig,
+                        keyframe_overrides=keyframe_overrides)
+                    s_clips.append(clip_path)
+                    s_records.append(record)
+                    s_manifests.append(mentry)
+                    s_audio = s_audio or audio
+                except Exception as exc:  # noqa: BLE001 — robustez: registra y sigue
+                    telemetry.record_failure(shot_id, str(exc))
+                    logger.error("[%s] FALLO: %s", shot_id, exc)
+                    logger.debug("[%s] traceback", shot_id, exc_info=True)
+            return s_clips, s_records, s_manifests, s_audio
+
+    # asyncio.gather preserva el orden de las corutinas -> clips en orden de escenas.
+    scene_results = await asyncio.gather(
+        *[_process_scene(s) for s in spec.scenes],
+        return_exceptions=True,
+    )
+
     manifest_scenes: list[dict] = []
     clips = []
-    audio_applied = False  # ¿hay voz o audio diegético? (para el ducking de la música)
-
-    for scene in spec.scenes:
-        # Lo que comparten todos los planos de la escena (se calcula una vez).
-        scene.class_ = scene.class_ or classify(scene)
-        refs = character_refs(scene, spec.characters)
-        scene.character_refs = refs  # para la señal de identidad del gate
-        ref_sig = sorted(str(r) for r in refs)
-        rule = select_rule(scene.class_, cfg.routing)
-        subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]
-        strategy = build_strategy(rule.strategy)
-        provider_sig = {p.name: getattr(p, "model", p.name) for p in subset}
-
-        shots = effective_shots(scene)  # D-028: planos reales o 1 implícito (compat)
-        if len(shots) > 1:
-            logger.info("[%s] %s | %d planos", scene.id, scene.class_, len(shots))
-
-        for idx, shot in enumerate(shots):
-            # Plano 1 = el keyframe elegido (scene-addressed); planos 2+ = s2.2, s2.3...
-            shot_id = scene.id if idx == 0 else f"{scene.id}.{idx + 1}"
-            try:  # robustez: un plano que falla no aborta el run
-                clip_path, record, mentry, audio = await _render_shot(
-                    project=project, spec=spec, cfg=cfg, run=run, keyframer=keyframer,
-                    gate=gate, tts=tts, mm=mm, scene=scene, shot=shot, shot_id=shot_id, idx=idx,
-                    refs=refs, ref_sig=ref_sig, rule=rule, subset=subset, strategy=strategy,
-                    provider_sig=provider_sig, keyframe_overrides=keyframe_overrides)
-                clips.append(clip_path)
-                telemetry.record(record)
-                manifest_scenes.append(mentry)
-                audio_applied = audio_applied or audio
-            except Exception as exc:  # noqa: BLE001 — robustez: registra y sigue
-                telemetry.record_failure(shot_id, str(exc))
-                logger.error("[%s] FALLO: %s", shot_id, exc)          # visible en consola
-                logger.debug("[%s] traceback", shot_id, exc_info=True)  # detalle en run.log / -v
+    audio_applied = False
+    for scene, result in zip(spec.scenes, scene_results):
+        if isinstance(result, Exception):
+            telemetry.record_failure(scene.id, str(result))
+            logger.error("[%s] escena fallo: %s", scene.id, result)
+        else:
+            s_clips, s_records, s_manifests, s_audio = result
+            clips.extend(s_clips)
+            for r in s_records:
+                telemetry.record(r)
+            manifest_scenes.extend(s_manifests)
+            audio_applied = audio_applied or s_audio
 
     if not clips:
         telemetry.close()
