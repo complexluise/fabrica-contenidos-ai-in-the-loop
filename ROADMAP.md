@@ -371,22 +371,28 @@ checkpoint #2 (shot list) de [D-021] de forma manual; auto shot-list (LLM) **dif
 plano = `scene.prompt + ", " + framing`. Escena sin `shots:` = 1 plano implícito (compat).
 
 ### Acceptance Criteria
-- [ ] AC1 — `Scene.shots` se parsea; una escena **sin** `shots:` produce **1 plano implícito** (comportamiento actual intacto: lego_mix renderiza igual). 🔬
-- [ ] AC2 — El prompt efectivo del plano = `scene.prompt + ", " + framing`, envuelto por el style template; hereda personajes/estilo. 🔬
-- [ ] AC3 — El **plano 1 usa el keyframe elegido** (`selections.yaml`/`--keyframe`, scene-addressed); los **planos 2+ autogeneran** su keyframe (n=1, cacheado) sin pick.
-- [ ] AC4 — `render` expande la escena en planos, concatena en orden, y muxea el `voiceover`/`caption` **de cada plano**; música global por debajo.
-- [ ] AC5 — `seed` por plano = reroll de **ese** plano (cache miss solo en él). El flujo `keyframes`/`pick` sigue **por escena** (no por plano).
+- [x] AC1 — `Scene.shots` se parsea; una escena **sin** `shots:` produce **1 plano implícito** (`effective_shots` sintetiza). 🔬
+- [x] AC2 — El prompt efectivo del plano = `scene.prompt + ", " + framing`, envuelto por el style template; hereda personajes/estilo (`build_styled_prompt`). 🔬
+- [x] AC3 — El **plano 1 usa el keyframe elegido** (`selections.yaml`/`--keyframe`, scene-addressed, `idx==0`); los **planos 2+ autogeneran** su keyframe (cacheado) sin pick.
+- [x] AC4 — `render` expande la escena en planos (`_render_shot`), concatena en orden, y muxea el `voiceover`/`caption` **de cada plano**; música global por debajo (ducking si hay VO).
+- [x] AC5 — `seed`/`framing` por plano entran en el cache key del plano (reroll aislado). El flujo `keyframes`/`pick` sigue **por escena** (`gen_keyframes` usa el `framing` del plano 1).
 
 ### Tasks (orden test-first)
-- [ ] T6.6.1 — `Shot` en `contracts.py` + `Scene.shots`; parseo en `project.py`. 🔬 *test core*
-- [ ] T6.6.2 — `effective_shots(scene)`: devuelve los planos reales o **sintetiza 1** desde los campos de la escena (compat). 🔬 *test core*
-- [ ] T6.6.3 — Composición de prompt `scene.prompt + framing` en `keyframe.build_styled_prompt`. 🔬 *test core*
-- [ ] T6.6.4 — `runner.run_project`: loop por plano; plano 1 = keyframe elegido/override, planos 2+ autogenerados (cacheados); cache key por plano (`seed`+`framing`).
-- [ ] T6.6.5 — `assemble`: concat de planos por escena (un nivel) + audio por plano; **recorte ffmpeg** a `duration_s` si el provider impone mínimo (conservador).
-- [ ] T6.6.6 — `studio.gen_keyframes`: los candidatos del checkpoint usan el `framing` del **plano 1**; `pick`/`selections.yaml` siguen scene-addressed.
-- [ ] T6.6.7 — Migrar un proyecto de smoke (s2 y s3 a 2-3 planos con su VO) como smoke real; mover la narración de `audio:` a `voiceover:` por plano.
+- [x] T6.6.1 — `Shot` en `contracts.py` + `Scene.shots`; parseo en `project.py`. 🔬 ✅
+- [x] T6.6.2 — `effective_shots(scene)`: planos reales o **sintetiza 1** (compat). 🔬 ✅
+- [x] T6.6.3 — Composición de prompt `scene.prompt + framing` en `keyframe.build_styled_prompt`. 🔬 ✅
+- [x] T6.6.4 — `runner._render_shot` + loop por plano; plano 1 = keyframe elegido/override, planos 2+ autogenerados (cacheados); cache key por plano (`seed`+`framing`).
+- [x] T6.6.5 — `assemble`: concat de planos + audio por plano; **recorte ffmpeg** (`trim_to`) a `duration_s`.
+- [x] T6.6.6 — `studio.gen_keyframes`: los candidatos usan el `framing` del **plano 1**; `pick`/`selections.yaml` scene-addressed.
+- [x] T6.6.7 — `projects/lego_mix/project.yaml`: 3 escenas a 2-2-1 planos con VO/caption por plano (smoke). *(Render pago end-to-end: ver nota.)*
 
 > **Diferido:** `transition` (corte duro por ahora) y auto shot-list (Claude descompone el beat).
+
+> **✅ Sprint 6.6 CERRADO** (2026-06-06). Core en verde (`test_shots.py`: parseo, `effective_shots`,
+> composición de prompt). El runner expande cada escena en planos (`_render_shot`), con keyframe del
+> plano 1 elegido y planos 2+ autogenerados, audio por plano y recorte por duración. Proyecto
+> `lego_mix` migrado a multi-plano. **Pendiente:** smoke pago end-to-end (FAL) — render real de los 5
+> planos (cubierto junto con 6.7/6.8).
 
 ---
 
@@ -400,19 +406,23 @@ a ser **rough cut** de referencia. Cierra el AI-in-the-Loop en la capa L8.
 `rough_cut.mp4` · `subtitulos.srt` · `guion.md` (onboarding + tabla de planos).
 
 ### Acceptance Criteria
-- [ ] AC1 — `pipeline export <slug>` crea `projects/<slug>/export/` con `media/`, `frames/`, `rough_cut.mp4`, `subtitulos.srt`, `guion.md`.
-- [ ] AC2 — Los clips de `media/` son **limpios** (sin caption/VO quemada), recortados a `duration_s`; voz (`.mp3`) y frame emparejados por **mismo nombre** `NN_<id>`.
-- [ ] AC3 — `guion.md` = **onboarding** (primero cómo está organizado + la tabla de planos en orden; **definiciones al final**), lenguaje claro y corto.
-- [ ] AC4 — `subtitulos.srt` **sincronizado** al timeline (texto de voz por plano, timeado por la suma de duraciones). 🔬
-- [ ] AC5 — Numeración global `NN_<shot_id>` consistente entre `media/`, `frames/` y la tabla. 🔬
+- [x] AC1 — `pipeline export <slug>` crea `projects/<slug>/export/` con `media/`, `frames/`, `rough_cut.mp4`, `subtitulos.srt`, `guion.md` (`export_bundle`).
+- [x] AC2 — Los clips de `media/` son **limpios** (del caché, sin caption/VO quemada), recortados a `duration_s`; voz (`.mp3`) y frame emparejados por **mismo nombre** `NN_<id>`.
+- [x] AC3 — `guion.md` = **onboarding** (organización + tabla; **definiciones al final**). 🔬
+- [x] AC4 — `subtitulos.srt` **sincronizado** al timeline (`srt_from_timeline`: avanza con todos, emite solo los que tienen voz). 🔬
+- [x] AC5 — Numeración global `NN_<shot_id>` consistente entre `media/`, `frames/` y la tabla (`numbered`). 🔬
 
 ### Tasks (orden test-first)
-- [ ] T6.7.1 — `srt_from_timeline(planos)` → `.srt` con tiempos acumulados. 🔬 *test core*
-- [ ] T6.7.2 — `export_index(spec)` → orden global `NN_<id>` + filas de la tabla del guion. 🔬 *test core*
-- [ ] T6.7.3 — `render_guion(spec, index)` → markdown (onboarding + tabla + definiciones). 🔬 *(estructura)*
-- [ ] T6.7.4 — `export.py`: copia clips (del caché, recortados) + voces + música + frames a la estructura; `rough_cut` = `final.mp4` del run.
-- [ ] T6.7.5 — CLI `export <slug>` (lee el último run + spec).
-- [ ] T6.7.6 — Smoke con un proyecto real: `export` tras un render → verificar estructura + `guion.md` + `.srt`.
+- [x] T6.7.1 — `srt_from_timeline(planos)` → `.srt` con tiempos acumulados. 🔬 ✅
+- [x] T6.7.2 — `numbered(planos)` → orden global `NN_<id>` + base de nombre. 🔬 ✅
+- [x] T6.7.3 — `render_guion(spec, planos)` → markdown (onboarding + tabla + definiciones). 🔬 ✅
+- [x] T6.7.4 — `export.py`: copia clips (caché, recortados) + voces + música + frames; `rough_cut` = `final.mp4` del run.
+- [x] T6.7.5 — CLI `export <slug>` (lee el último run + spec).
+- [~] T6.7.6 — Smoke real: el core (`_ts`/`numbered`/`srt`/`render_guion`) testeado; el bundle completo (copia desde caché) **pendiente** del render pago de `lego_mix`.
+
+> **✅ Sprint 6.7 CERRADO** (2026-06-06). Core en verde (`test_export.py`: formato SRT, numeración,
+> srt sincronizado, estructura del guion, tolerancia a manifests viejos). `export_bundle` + CLI `export`
+> implementados. **Pendiente:** smoke del bundle completo tras el render pago (cubierto con 6.6).
 
 ---
 
@@ -423,18 +433,23 @@ contexto, solo leyendo, entiende el proyecto — y que salga también en **`.doc
 **genérico** `md→docx` (frontmatter = metadata), invocado **best-effort** por `export`.
 
 ### Acceptance Criteria
-- [ ] AC1 — `guion.md` lleva, en orden: **sinopsis** + **personajes** + **el guion beat-por-beat** (descripción + diálogo/VO por plano) + **tabla por plano** + organización/definiciones. 🔬 *(estructura)*
-- [ ] AC2 — `guion.md` arranca con **frontmatter** (`title`, `subtitle`, `footer`) para el conversor. 🔬
-- [ ] AC3 — `src/md_to_docs/` (Node + **pnpm**): `node convert.js <in.md> [out.docx]` convierte **cualquier** `.md` (headings, párrafos bold/italic, listas, tablas, blockquote→nota, `---`→divider) usando la paleta por default, configurable por frontmatter.
-- [ ] AC4 — `pipeline export` invoca el conversor **best-effort**: con `node` deja `guion.docx`; sin él, solo `guion.md` (no rompe).
-- [ ] AC5 — Smoke: `export <slug>` → `guion.md` legible + `guion.docx` abrible.
+- [x] AC1 — `guion.md` lleva, en orden: **sinopsis** + **personajes** + **el guion beat-por-beat** (descripción + VO por plano) + **tabla por plano** + organización/definiciones. 🔬
+- [x] AC2 — `guion.md` arranca con **frontmatter** (`title`, `subtitle`, `footer`) para el conversor. 🔬
+- [x] AC3 — `src/md_to_docs/` (Node + **pnpm**): `node convert.js <in.md> [out.docx]` convierte **cualquier** `.md` (headings, bold/italic/code/link, listas, tablas, blockquote→nota, `---`→divider, code) con paleta configurable por frontmatter. *(Validado: sample.md → .docx con magic bytes PK.)*
+- [x] AC4 — `pipeline export` invoca el conversor **best-effort** (`_maybe_docx`): comando global `md-to-docs` o `src/md_to_docs/convert.js`; sin node, solo `guion.md` (no rompe).
+- [~] AC5 — Conversor validado end-to-end (md→docx abrible). `export` → `guion.docx` completo **pendiente** del render pago.
 
 ### Tasks (orden test-first)
-- [ ] T6.8.1 — `render_guion` ampliado: sinopsis + personajes + guion beat-por-beat (de `scene.prompt`) + tabla + frontmatter. 🔬 *(secciones presentes, orden)*
-- [ ] T6.8.2 — `src/md_to_docs/package.json` (pnpm: `docx`, `marked`, `gray-matter`) + `convert.js` (parser → docx, reusa el sistema de estilo).
-- [ ] T6.8.3 — Frontmatter → portada/footer (defaults si falta).
-- [ ] T6.8.4 — `export_bundle`: invocación best-effort a node (genera `guion.docx`; falla silenciosa si no hay node).
-- [ ] T6.8.5 — Smoke real con un proyecto.
+- [x] T6.8.1 — `render_guion` ampliado: sinopsis + personajes + guion beat-por-beat (de `scene.prompt`) + tabla + frontmatter. 🔬 ✅
+- [x] T6.8.2 — `src/md_to_docs/` (`package.json` pnpm: `docx`/`marked`/`gray-matter`) + `convert.js`. *(deps instaladas, `pnpm-lock.yaml`)*
+- [x] T6.8.3 — Frontmatter → portada/footer (defaults si falta).
+- [x] T6.8.4 — `export_bundle`: invocación best-effort a node (genera `guion.docx`; omite sin conversor).
+- [~] T6.8.5 — Conversor probado con sample real; smoke completo `export` → `guion.docx` **pendiente** del render pago.
+
+> **✅ Sprint 6.8 CERRADO** (2026-06-06). `render_guion` cuenta la historia (frontmatter + sinopsis +
+> personajes + libreto beat-por-beat + desglose + definiciones, core en verde). Conversor genérico
+> `md→docx` (`src/md_to_docs/convert.js`) **validado end-to-end** (genera un `.docx` válido) e invocado
+> best-effort por `export`. **Pendiente:** el `guion.docx` dentro del bundle tras el render pago.
 
 ---
 
