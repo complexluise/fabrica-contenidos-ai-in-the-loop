@@ -72,3 +72,7 @@ Thumbs.db
 !projects/lego_demo/selections.yaml
 !projects/lego_demo/keyframe_s1.png
 !projects/lego_demo/final_9x16.mp4
+
+# Bundle distribuible (scripts/build.py): dist/ y build/ son artefactos
+dist/
+build/
