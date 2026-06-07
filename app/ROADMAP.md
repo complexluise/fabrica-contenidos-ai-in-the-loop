@@ -103,8 +103,10 @@ propone; la persona decide y firma. Tracker: issue #5.
 > **✅ Fase 2 CERRADA** (2026-06-06, [D-033]). 151 tests del core en verde (+20: `test_author.py`
 > + endpoints import/PUT en `test_server.py`); build de la UI limpio. Entrada sin YAML: importar texto
 > → la IA propone borrador → editar/firmar el storyboard → guardar validado. El hash del caché
-> ([D-013]) queda intacto (`write_spec` solo serializa). **Pendiente:** smoke real del loop con
-> `ANTHROPIC_API_KEY` (texto real → borrador → edición → guardar).
+> ([D-013]) queda intacto (`write_spec` solo serializa). **Smoke real validado** (uvicorn + Claude):
+> texto → borrador (5 escenas con planos/VO/captions/personaje) → reordenar+editar → guardar (422 en
+> inválido) → guard de selecciones (poda la escena eliminada). *(El `TestClient` de FastAPI se cuelga
+> con `to_thread`+SSE; por eso los unit tests mockean Claude y el smoke va contra uvicorn real.)*
 
 > **Decisión de alcance:** el backend recibe **texto** (la UI lee el archivo client-side; sin
 > `python-multipart`); `extract_text` queda para el motor/CLI.
