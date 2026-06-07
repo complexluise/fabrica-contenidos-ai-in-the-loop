@@ -15,6 +15,7 @@ import json
 from pydantic import BaseModel, Field
 
 from .contracts import Scene
+from .project import Character, CharacterDesign
 from .settings import get_settings
 
 _DRAFT_MODEL = "claude-opus-4-8"
@@ -25,6 +26,9 @@ BORRADOR de proyecto que un humano luego editará. Devuelve SOLO un objeto JSON:
 {{
   "title": "título corto y claro",
   "brief": "sinopsis de 1-2 frases",
+  "characters": {{
+    "nombre": {{"design": "descripción visual del personaje para diseñar su cara/figura"}}
+  }},
   "scenes": [
     {{
       "id": "s1",
@@ -44,7 +48,10 @@ Reglas:
 - prompt: lo VISUAL del beat; el plano (framing) le suma el encuadre.
 - duration_s: número en segundos (2 a 8). El de la escena = suma de sus planos.
 - Si una escena tiene un solo plano, igual incluí "shots" con ese plano.
-- No inventes personajes si el texto no los nombra.
+- characters: SOLO los personajes recurrentes que el texto nombra; para cada uno,
+  una "design" (descripción para diseñar su cara). Si el texto no nombra a nadie,
+  devolvé "characters": {{}}.
+- Las escenas referencian a esos personajes por nombre en su "characters".
 
 Texto:
 {text}
@@ -58,6 +65,7 @@ class ProjectDraft(BaseModel):
     brief: str = ""
     style: str = "lego"
     format: str = "9:16"
+    characters: dict[str, Character] = Field(default_factory=dict)
     scenes: list[Scene] = Field(default_factory=list)
 
     def to_spec(self, slug: str):
@@ -69,6 +77,7 @@ class ProjectDraft(BaseModel):
             style=self.style,
             format=self.format,
             scenes=self.scenes,
+            characters=self.characters,
             title=self.title,
             brief=self.brief,
         )
@@ -86,6 +95,33 @@ def _scene_from_raw(raw: dict, idx: int) -> Scene:
     return Scene(**s)
 
 
+def _character_from_raw(name: str, raw) -> Character:
+    """Normaliza un personaje del LLM. `design` puede venir como string (la
+    descripción) o como objeto `{"prompt": ..., "refs": [...]}`. Las refs quedan
+    vacías: el humano las sube luego (banco de personajes, D-019)."""
+    design = None
+    cd = (raw or {}).get("design") if isinstance(raw, dict) else None
+    if isinstance(cd, str) and cd.strip():
+        design = CharacterDesign(prompt=cd.strip(), refs=[])
+    elif isinstance(cd, dict) and cd.get("prompt"):
+        design = CharacterDesign(prompt=cd["prompt"], refs=[])
+    return Character(name=name, design=design)
+
+
+def _parse_characters(raw) -> dict[str, Character]:
+    """Acepta el dict `{nombre: {design}}` (instruido) o una lista `[{name,...}]`."""
+    if isinstance(raw, dict):
+        return {name: _character_from_raw(name, c) for name, c in raw.items()}
+    if isinstance(raw, list):
+        out: dict[str, Character] = {}
+        for c in raw:
+            name = (c or {}).get("name") if isinstance(c, dict) else None
+            if name:
+                out[name] = _character_from_raw(name, c)
+        return out
+    return {}
+
+
 def parse_draft(text: str) -> ProjectDraft:
     """Extrae el objeto JSON de la respuesta del LLM y lo valida. Lógica pura."""
     start = text.find("{")
@@ -99,6 +135,7 @@ def parse_draft(text: str) -> ProjectDraft:
         brief=raw.get("brief") or "",
         style=raw.get("style") or "lego",
         format=str(raw.get("format") or "9:16"),
+        characters=_parse_characters(raw.get("characters")),
         scenes=scenes,
     )
 

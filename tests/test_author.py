@@ -137,3 +137,40 @@ def test_spec_from_dict_url_slug_wins(tmp_path):
 def test_spec_from_dict_rejects_invalid_scene():
     with pytest.raises(Exception):
         spec_from_dict({"scenes": [{"id": "s1", "prompt": "a", "duration_s": -1}]}, "demo")
+
+
+# --- #8: personajes con design: auto en el borrador --------------------------
+
+_CHARS = ('{"title": "X", "characters": {"juan": {"design": "obrero con casco amarillo"}, '
+          '"ana": {"design": "ingeniera"}}, "scenes": [{"id": "s1", "prompt": "a", '
+          '"duration_s": 4, "characters": ["juan"]}]}')
+
+
+def test_parse_draft_parses_characters_with_design():
+    d = parse_draft(_CHARS)
+    assert set(d.characters) == {"juan", "ana"}
+    assert d.characters["juan"].design.prompt == "obrero con casco amarillo"
+    assert d.characters["juan"].design.refs == []  # el humano sube refs luego
+
+
+def test_parse_draft_character_design_object_form():
+    d = parse_draft('{"title": "X", "characters": {"juan": {"design": {"prompt": "obrero"}}}, '
+                    '"scenes": [{"id": "s1", "prompt": "a", "duration_s": 4}]}')
+    assert d.characters["juan"].design.prompt == "obrero"
+
+
+def test_parse_draft_no_characters_ok():
+    d = parse_draft('{"title": "X", "scenes": [{"id": "s1", "prompt": "a", "duration_s": 4}]}')
+    assert d.characters == {}
+
+
+def test_draft_to_spec_carries_characters():
+    spec = parse_draft(_CHARS).to_spec("x")
+    assert "juan" in spec.characters and spec.characters["juan"].design is not None
+
+
+def test_write_spec_round_trips_characters(tmp_path):
+    spec = parse_draft(_CHARS).to_spec("x")
+    out = write_spec(spec, tmp_path / "p.yaml")
+    reloaded = load_project_spec(out)
+    assert reloaded.characters["juan"].design.prompt == "obrero con casco amarillo"

@@ -27,6 +27,12 @@ _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
 _EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters", "shots"}
 
 
+def _available_styles(config_dir: Path) -> list[str]:
+    """Estilos disponibles = `config/styles/*.yaml` (para el selector del import, #10)."""
+    styles_dir = config_dir / "styles"
+    return sorted(p.stem for p in styles_dir.glob("*.yaml")) if styles_dir.exists() else []
+
+
 def _unique_slug(base: str, projects_dir: Path) -> str:
     """Slug de proyecto único y filesystem-safe (no pisa una carpeta existente)."""
     from ..naming import _slugify
@@ -71,6 +77,10 @@ def create_app(projects_dir: Path = Path("projects"),
     def health():
         return {"ok": True}
 
+    @app.get("/api/styles")
+    def list_styles():
+        return _available_styles(config_dir)
+
     @app.get("/api/projects")
     def list_projects():
         from ..project import load_project_spec
@@ -103,11 +113,16 @@ def create_app(projects_dir: Path = Path("projects"),
         if not text:
             raise HTTPException(422, "Pegá o subí un texto para importar.")
         desired = (body.get("slug") or "").strip()
+        style = (body.get("style") or "").strip()
+        if style and style not in _available_styles(config_dir):
+            raise HTTPException(422, f"Estilo desconocido: '{style}'.")
         log = logging.getLogger("pipeline")
 
         async def coro():
             log.info("Descomponiendo el texto en un borrador (Claude)...")
             draft = await asyncio.to_thread(author.draft_project, text)
+            if style:  # estilo elegido en la UI gana sobre el default del borrador (#10)
+                draft.style = style
             slug = _unique_slug(desired or semantic_slug(draft.title), projects_dir)
             project = Project(slug, root=projects_dir)
             write_spec(draft.to_spec(slug), project.spec_path)

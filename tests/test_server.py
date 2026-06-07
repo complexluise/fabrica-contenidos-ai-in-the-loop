@@ -126,6 +126,28 @@ def test_update_project_404_when_missing(tmp_path):
     assert r.status_code == 404
 
 
+def test_list_styles(tmp_path):
+    styles = _client(tmp_path).get("/api/styles").json()
+    assert "lego" in styles and "crochet" in styles
+
+
+def test_import_with_style_override(tmp_path, monkeypatch):
+    from pipeline import author
+
+    draft = author.ProjectDraft(title="X", scenes=[author.Scene(id="s1", prompt="a", duration_s=4)])
+    monkeypatch.setattr(author, "draft_project", lambda text: draft)
+    c = _client(tmp_path)
+    job = c.post("/api/projects/import", json={"text": "hola", "style": "crochet"}).json()
+    assert "__status__:done" in c.get(f"/api/jobs/{job['id']}/stream").text
+    slug = c.get(f"/api/jobs/{job['id']}").json()["result"]["slug"]
+    assert c.get(f"/api/projects/{slug}").json()["style"] == "crochet"
+
+
+def test_import_rejects_unknown_style(tmp_path):
+    r = _client(tmp_path).post("/api/projects/import", json={"text": "hola", "style": "nope"})
+    assert r.status_code == 422
+
+
 def test_update_project_prunes_orphan_selections(tmp_path):
     # AC5: eliminar s2 debe limpiar su selección persistida (D-022).
     d = _make_project(tmp_path)

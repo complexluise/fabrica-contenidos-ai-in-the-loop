@@ -1,9 +1,12 @@
 <script>
+  import { onMount } from "svelte";
   import { get, runJob, humanError } from "../lib/api.js";
   import { studio, goTo, loadProjects, setSlug } from "../lib/studio.svelte.js";
 
   let text = $state("");
   let slug = $state("");
+  let style = $state("lego");
+  let styles = $state(["lego"]);
   let fileName = $state("");
   let dragging = $state(false);
   let busy = $state(false);
@@ -11,6 +14,13 @@
   let err = $state("");
 
   const noKey = $derived(studio.status && !studio.status.keys?.anthropic_api_key);
+
+  onMount(async () => {
+    try {
+      const s = await get("/api/styles");
+      if (s?.length) { styles = s; if (!s.includes(style)) style = s[0]; }
+    } catch { /* deja el default */ }
+  });
 
   async function readFile(file) {
     if (!file) return;
@@ -38,7 +48,7 @@
     }
     busy = true;
     runJob("/api/projects/import", {
-      body: { text, slug: slug.trim() || undefined },
+      body: { text, slug: slug.trim() || undefined, style },
       onLine: (l) => (log = [...log, l]),
       onDone: async (status, jobId) => {
         busy = false;
@@ -104,7 +114,13 @@
 </div>
 
 <div class="row">
-  <label class="slug">
+  <label class="field">
+    <span class="muted">Estilo visual</span>
+    <select bind:value={style}>
+      {#each styles as s}<option value={s}>{s}</option>{/each}
+    </select>
+  </label>
+  <label class="field grow">
     <span class="muted">Nombre (slug) — opcional</span>
     <input bind:value={slug} placeholder="se deriva del título" />
   </label>
@@ -151,9 +167,11 @@
   .spacer { flex: 1; }
   .count { font-size: 12px; }
 
-  .row { margin: 16px 0 4px; }
-  .slug { display: flex; flex-direction: column; gap: 5px; max-width: 360px; font-size: 13px; }
-  .slug input { font-family: var(--font-mono); }
+  .row { margin: 16px 0 4px; display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+  .field.grow { flex: 1; min-width: 200px; }
+  .field input { font-family: var(--font-mono); }
+  .field select { min-width: 140px; }
 
   .bar { margin-top: 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .muted { color: var(--ink-soft); }

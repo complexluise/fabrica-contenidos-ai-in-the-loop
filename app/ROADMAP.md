@@ -111,9 +111,12 @@ propone; la persona decide y firma. Tracker: issue #5.
 > **Decisión de alcance:** el backend recibe **texto** (la UI lee el archivo client-side; sin
 > `python-multipart`); `extract_text` queda para el motor/CLI.
 
-> **Diferido a fases siguientes** (acordado al cortar el alcance): `.docx`/`.pdf`; **personajes con
-> `design:` auto** (habilita el casting desde el import); regenerar una escena del borrador con la IA;
-> plantillas por estilo; subir imágenes de referencia; renombrar el slug de un proyecto ya creado.
+> **Backlog implementado después del cierre** (2026-06-06): **#8 personajes con `design:` auto** en el
+> import (la IA propone personajes con su prompt de diseño → habilita el casting) y **#10 estilo
+> elegible** al importar (`GET /api/styles` + selector en la UI; default `lego`). +8 tests.
+
+> **Diferido a fases siguientes**: `.docx`/`.pdf` (#7); regenerar una escena del borrador con la IA
+> (#9); subir imágenes de referencia (#11); renombrar el slug de un proyecto ya creado (#12).
 
 ---
 
