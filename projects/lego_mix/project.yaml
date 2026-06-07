@@ -1,54 +1,42 @@
-# Proyecto de smoke MULTI-PLANO (D-028): cada escena se realiza como 2-3 planos.
-#   uv run pipeline keyframes lego_mix --n 2   (elige el plano 1 de cada escena)
-#   uv run pipeline pick lego_mix s1=0 s2=0 s3=0
-#   uv run pipeline render lego_mix            (expande planos, audio por plano)
-#   uv run pipeline export lego_mix            (bundle de edicion + guion + srt + docx)
-#
-# El plano 1 usa el keyframe elegido por el humano; los planos 2+ se autogeneran
-# (cacheados, n=1). VO/caption van por plano; la musica global queda por debajo.
 project: lego_mix
 title: Un dia en la ciudad LEGO
-brief: >-
-  Una ciudad construida con LEGO despierta al amanecer, se llena de minifiguras
+brief: Una ciudad construida con LEGO despierta al amanecer, se llena de minifiguras
   yendo al trabajo y late a pleno ritmo cuando el sol esta alto.
 style: lego
-format: "9:16"
+format: '9:16'
 scenes:
-  - id: s1
-    prompt: Ciudad LEGO al amanecer, calles vacias con luz dorada entre los edificios de bloques
-    duration_s: 6
-    beat: apertura
-    ambience: ambiente de ciudad al amanecer, calma, pajaros lejanos, brisa suave
-    shots:
-      - framing: plano general amplio de la ciudad al amanecer
-        duration_s: 3
-        voiceover: Al amanecer, la ciudad aun duerme.
-      - framing: plano detalle de una farola LEGO apagandose
-        duration_s: 3
-        caption: Amanece
-        sfx: zumbido electrico de una farola apagandose
-
-  - id: s2
-    prompt: Las calles de la ciudad LEGO se llenan de minifiguras caminando hacia el trabajo
-    duration_s: 6
-    beat: despertar
-    ambience: murmullo urbano creciente, pasos de multitud en la calle
-    shots:
-      - framing: plano medio de minifiguras saliendo de sus casas
-        duration_s: 3
-        voiceover: Poco a poco, las minifiguras llenan las calles.
-        sfx: puerta de juguete que se abre
-      - framing: travelling lateral siguiendo el flujo por la avenida
-        duration_s: 3
-        sfx: muchos pasos rapidos sobre el pavimento
-
-  - id: s3
-    prompt: El sol esta alto sobre la ciudad LEGO en plena actividad, vehiculos y minifiguras por todas partes
+- id: s1
+  prompt: Ciudad LEGO al amanecer, calles vacias con luz dorada entre los edificios
+    de bloques
+  duration_s: 6
+  beat: apertura
+  ambience: ambiente de ciudad al amanecer, calma, pajaros lejanos, brisa suave
+  shots:
+  - framing: plano general amplio de la ciudad al amanecer
+    duration_s: 3
+    voiceover: Al amanecer, la ciudad aun duerme.
+  - framing: plano detalle de una farola LEGO apagandose
+    duration_s: 3
+    caption: Amanece
+- id: s2
+  prompt: Las calles de la ciudad LEGO se llenan de minifiguras caminando hacia el
+    trabajo
+  duration_s: 6
+  beat: despertar
+  ambience: murmullo urbano creciente, pasos de multitud en la calle
+  shots:
+  - framing: plano medio de minifiguras saliendo de sus casas
+    duration_s: 3
+    voiceover: Poco a poco, las minifiguras llenan las calles.
+  - framing: travelling lateral siguiendo el flujo por la avenida
+    duration_s: 3
+- id: s3
+  prompt: El sol esta alto sobre la ciudad LEGO en plena actividad, vehiculos y minifiguras
+    por todas partes
+  duration_s: 5
+  beat: clima
+  ambience: trafico intenso de ciudad, bocinas lejanas, bullicio
+  shots:
+  - framing: plano general dinamico del trafico bajo el sol del mediodi
     duration_s: 5
-    beat: clima
-    ambience: trafico intenso de ciudad, bocinas lejanas, bullicio
-    shots:
-      - framing: plano general dinamico del trafico bajo el sol del mediodia
-        duration_s: 5
-        voiceover: Con el sol en lo alto, la ciudad late a pleno ritmo.
-        sfx: claxon cercano de un auto
+    voiceover: Con el sol en lo alto, la ciudad late a pleno ritmo.
