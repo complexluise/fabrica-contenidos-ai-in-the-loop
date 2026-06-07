@@ -93,15 +93,16 @@ export function goTo(tab) {
 // --- el bucle, derivado del `stage` que decide el MOTOR (D-032) -------------
 // El front NO recalcula si un paso esta completo: lee `status.stage` (fuente
 // unica) y aca solo mapea ese stage a presentacion (copy + a que pestaña va).
-export const PIPELINE_ORDER = ["sin_claves", "casting", "encuadres", "render", "paquete", "completo"];
+export const PIPELINE_ORDER = ["sin_claves", "guion", "casting", "encuadres", "render", "paquete", "completo"];
 
 // stage -> recomendacion de "siguiente paso" (la copia, no la logica)
 const NEXT = {
-  sin_claves: { tab: "ajustes", label: "Configurar FAL_KEY", why: "Sin la clave de fal.ai no se puede generar nada." },
-  casting: { tab: "elegir", label: "Elegir la cara del personaje", why: "Fijá el casting antes de los encuadres." },
-  encuadres: { tab: "elegir", label: "Elegir encuadres", why: "La IA propone candidatos; vos elegís el de cada escena." },
-  render: { tab: "producir", label: "Armar el video", why: "Ya elegiste todo: la máquina ejecuta." },
-  paquete: { tab: "producir", label: "Armar el paquete de edición", why: "Empaquetá para la editora." },
+  sin_claves: { tab: "ajustes",    label: "Configurar FAL_KEY",              why: "Sin la clave de fal.ai no se puede generar nada." },
+  guion:      { tab: "storyboard", label: "Firmar el plan",                  why: "Revisá las escenas y firmá el plan antes de generar." },
+  casting:    { tab: "elegir",     label: "Elegir la cara del personaje",    why: "Fijá el casting antes de los encuadres." },
+  encuadres:  { tab: "elegir",     label: "Elegir encuadres",                why: "La IA propone candidatos; vos elegís el de cada escena." },
+  render:     { tab: "producir",   label: "Armar el video",                  why: "Ya elegiste todo: la máquina ejecuta." },
+  paquete:    { tab: "producir",   label: "Armar el paquete de edición",     why: "Empaquetá para la editora." },
 };
 
 // Devuelve { tab, label, why } o null si el bucle esta completo.
@@ -111,8 +112,6 @@ export function nextStep(st) {
   if (!st) return { tab: "ajustes", label: "Configurar claves", why: "Empezá por tus API keys." };
   const meta = NEXT[st.stage];
   if (!meta) return null; // completo
-  if (!st.storyboard?.signed)
-    return { tab: "storyboard", label: "Firmar el plan", why: "Revisá las escenas y firmá el plan antes de generar." };
   if (st.stage === "encuadres" && st.keyframes)
     return { ...meta, label: `Elegir encuadres (${st.keyframes.chosen}/${st.keyframes.total})` };
   return meta;
@@ -122,9 +121,9 @@ export function nextStep(st) {
 export function stepDone(id, st) {
   if (!st) return false;
   const at = PIPELINE_ORDER.indexOf(st.stage);
-  if (id === "ajustes") return at > PIPELINE_ORDER.indexOf("sin_claves");
-  if (id === "storyboard") return !!st.storyboard?.signed;
-  if (id === "elegir") return at > PIPELINE_ORDER.indexOf("encuadres");
-  if (id === "producir") return st.stage === "completo";
+  if (id === "ajustes")    return at > PIPELINE_ORDER.indexOf("sin_claves");
+  if (id === "storyboard") return at > PIPELINE_ORDER.indexOf("guion");
+  if (id === "elegir")     return at > PIPELINE_ORDER.indexOf("encuadres");
+  if (id === "producir")   return st.stage === "completo";
   return false;
 }

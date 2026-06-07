@@ -25,6 +25,7 @@ class Stage(str, Enum):
     """El primer paso pendiente del bucle. COMPLETO = no queda nada por hacer."""
 
     SIN_CLAVES = "sin_claves"  # falta FAL_KEY (prerequisito de todo)
+    GUION = "guion"            # storyboard sin firmar (D-035)
     CASTING = "casting"        # hay personajes con design: sin cara elegida
     ENCUADRES = "encuadres"    # faltan keyframes elegidos por escena
     RENDER = "render"          # falta renderizar el video
@@ -34,7 +35,7 @@ class Stage(str, Enum):
 
 # Orden canonico del bucle -> permite preguntar "esta etapa ya paso?".
 STAGE_ORDER: list[Stage] = [
-    Stage.SIN_CLAVES, Stage.CASTING, Stage.ENCUADRES,
+    Stage.SIN_CLAVES, Stage.GUION, Stage.CASTING, Stage.ENCUADRES,
     Stage.RENDER, Stage.PAQUETE, Stage.COMPLETO,
 ]
 
@@ -63,6 +64,7 @@ class RenderState:
 class ProjectState:
     stage: Stage
     scenes_total: int
+    storyboard_signed: bool
     casting: CastingState
     keyframes: KeyframesState
     render: RenderState
@@ -72,6 +74,7 @@ class ProjectState:
         return {
             "stage": self.stage.value,
             "scenes_total": self.scenes_total,
+            "storyboard": {"signed": self.storyboard_signed},
             "casting": vars(self.casting),
             "keyframes": vars(self.keyframes),
             "render": {"done": self.render.done, "run_id": self.render.run_id},
@@ -79,7 +82,8 @@ class ProjectState:
         }
 
 
-def compute_stage(*, has_fal_key: bool, casting: CastingState, keyframes: KeyframesState,
+def compute_stage(*, has_fal_key: bool, storyboard_signed: bool,
+                  casting: CastingState, keyframes: KeyframesState,
                   render_done: bool, export_done: bool) -> Stage:
     """La maquina de estados, pura: el stage es el PRIMER paso incompleto.
 
@@ -88,6 +92,8 @@ def compute_stage(*, has_fal_key: bool, casting: CastingState, keyframes: Keyfra
     """
     if not has_fal_key:
         return Stage.SIN_CLAVES
+    if not storyboard_signed:
+        return Stage.GUION
     if casting.needed > 0 and casting.chosen < casting.needed:
         return Stage.CASTING
     if keyframes.total > 0 and keyframes.chosen < keyframes.total:
@@ -124,13 +130,18 @@ def derive_state(project: Project, spec: ProjectSpec, *, has_fal_key: bool) -> P
         has_candidates=project.candidates_path.exists(),
     )
 
+    storyboard_signed = (project.dir / "storyboard.signed").exists()
+
     run = project.latest_run()
     render = RenderState(done=run is not None, run_id=run.run_id if run is not None else None)
     export_done = (project.dir / "export").exists()
 
     stage = compute_stage(
-        has_fal_key=has_fal_key, casting=casting, keyframes=keyframes,
+        has_fal_key=has_fal_key, storyboard_signed=storyboard_signed,
+        casting=casting, keyframes=keyframes,
         render_done=render.done, export_done=export_done,
     )
-    return ProjectState(stage=stage, scenes_total=len(scene_ids), casting=casting,
-                        keyframes=keyframes, render=render, export_done=export_done)
+    return ProjectState(stage=stage, scenes_total=len(scene_ids),
+                        storyboard_signed=storyboard_signed,
+                        casting=casting, keyframes=keyframes, render=render,
+                        export_done=export_done)

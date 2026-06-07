@@ -22,8 +22,8 @@ def _kf(total=1, chosen=0, cands=False):
 
 
 def _stage(**kw):
-    base = dict(has_fal_key=True, casting=_cast(), keyframes=_kf(1, 1),
-                render_done=True, export_done=True)
+    base = dict(has_fal_key=True, storyboard_signed=True, casting=_cast(),
+                keyframes=_kf(1, 1), render_done=True, export_done=True)
     base.update(kw)
     return compute_stage(**base)
 
@@ -33,6 +33,11 @@ def _stage(**kw):
 def test_sin_claves_gana_a_todo():
     # aunque todo lo demas este hecho, sin FAL_KEY el primer paso son las claves
     assert _stage(has_fal_key=False) is Stage.SIN_CLAVES
+
+
+def test_guion_antes_que_casting():
+    # con claves pero sin storyboard firmado -> GUION (antes que casting/encuadres)
+    assert _stage(storyboard_signed=False) is Stage.GUION
 
 
 def test_casting_antes_que_encuadres():
@@ -76,8 +81,22 @@ def _project(tmp_path):
     return proj
 
 
-def test_derive_proyecto_nuevo_pide_encuadres(tmp_path):
+def _sign(proj):
+    """Crea el marcador storyboard.signed para habilitar los pasos siguientes."""
+    (proj.dir / "storyboard.signed").write_text("", encoding="utf-8")
+
+
+def test_derive_sin_firmar_pide_guion(tmp_path):
     proj = _project(tmp_path)
+    spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
+    st = derive_state(proj, spec, has_fal_key=True)
+    assert st.stage is Stage.GUION
+    assert st.storyboard_signed is False
+
+
+def test_derive_proyecto_firmado_pide_encuadres(tmp_path):
+    proj = _project(tmp_path)
+    _sign(proj)
     spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
     st = derive_state(proj, spec, has_fal_key=True)
     assert st.stage is Stage.ENCUADRES
@@ -86,6 +105,7 @@ def test_derive_proyecto_nuevo_pide_encuadres(tmp_path):
 
 def test_derive_cuenta_selecciones(tmp_path):
     proj = _project(tmp_path)
+    _sign(proj)
     proj.selections_path.write_text(yaml.safe_dump({"s1": "x.png"}), encoding="utf-8")
     spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
     st = derive_state(proj, spec, has_fal_key=True)
@@ -95,6 +115,7 @@ def test_derive_cuenta_selecciones(tmp_path):
 
 def test_derive_casting_pendiente(tmp_path):
     proj = _project(tmp_path)
+    _sign(proj)
     juan = Character(name="juan", design=CharacterDesign(prompt="cara LEGO de juan"))
     spec = _spec([Scene(id="s1", prompt="x", duration_s=5)], {"juan": juan})
     st = derive_state(proj, spec, has_fal_key=True)
