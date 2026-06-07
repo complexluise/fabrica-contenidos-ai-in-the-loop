@@ -453,6 +453,36 @@ contexto, solo leyendo, entiende el proyecto — y que salga también en **`.doc
 
 ---
 
+## Sprint 6.9 — Diseño sonoro: SFX + ambiente (D-034)
+
+**Objetivo:** completar la **banda sonora** (voces ✅ + música ✅ + **efectos** + **ambiente**) sin
+descuadre con la imagen. Motor por defecto: **MMAudio V2** (video-to-audio en fal, $0.001/s) que
+lee los frames del clip ya generado y genera audio **sincronizado**; **audio nativo** (Veo/Kling con
+audio) queda como **premium por `routing.yaml`**. Ver [D-034].
+
+**Forma:** `scene.ambience` (texto, el *lugar*, por escena) + `shot.sfx` (texto, la *acción*, por
+plano), en `project.yaml`. El cue de MMAudio por plano = `shot.sfx` + `ambience` de su escena.
+
+### Acceptance Criteria
+- [ ] AC1 — `scene.ambience` + `shot.sfx` se parsean (contracts/`project.yaml`); sin ellos, el render actual queda **intacto**. 🔬
+- [ ] AC2 — `effective_audio_cue(scene, shot)` = `sfx` del plano + `ambience` de su escena (lógica pura). 🔬
+- [ ] AC3 — Tras generar el clip (mudo), un **paso V2A** (MMAudio, fal) **cacheado** (`video_key + cue`) devuelve el clip con audio sincronizado; sin cue/clave → se omite (best-effort).
+- [ ] AC4 — La mezcla respeta la **jerarquía**: voz (TTS) > audio diegético (MMAudio) > música. `mux_voiceover` pasa a **mezclar (`amix`)**, no reemplazar. 🔬 *(parámetros)*
+- [ ] AC5 — Una escena con **audio nativo** (capability `audio` en `routing.yaml`) va a Veo/Kling y **salta** el paso V2A — **sin tocar código**.
+
+### Tasks (orden test-first)
+- [ ] T6.9.1 — `Scene.ambience` + `Shot.sfx` en `contracts.py` + parseo en `project.py` (y `write_spec`/`spec_to_dict`). 🔬 *core*
+- [ ] T6.9.2 — `effective_audio_cue(scene, shot)` (sfx + ambience de la escena). 🔬 *core*
+- [ ] T6.9.3 — `providers/mmaudio.py` (fal): clip + cue → clip con audio; aislado/mockeable.
+- [ ] T6.9.4 — `runner._render_shot`: paso V2A tras el clip (cacheado `video_key+cue`, best-effort); se omite si la escena usa audio nativo.
+- [ ] T6.9.5 — `audio.mux_voiceover` → **mezcla** (`amix`) sobre el audio diegético, con jerarquía de volumen. 🔬 *(parámetros)* / smoke (ffmpeg).
+- [ ] T6.9.6 — Smoke pago (centavos): `lego_mix` con `ambience`/`sfx` → MMAudio → mezcla; verificar audio sincronizado bajo la voz.
+
+> **Diferido:** diálogo/lip-sync nativo (sigue por TTS); **stems separados por capa** en el export
+> ([D-029]); ThinkSound como alternativa de V2A.
+
+---
+
 ## Sprint 7 — Escala y operación
 
 **Objetivo:** durabilidad, persistencia y observabilidad de producción.

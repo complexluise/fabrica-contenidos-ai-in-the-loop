@@ -58,3 +58,4 @@ es continua entre archivos.
 | D-031 | Studio local: app web local (FastAPI + Svelte, sin auth) sobre el pipeline | Vigente |
 | D-032 | Estado del bucle derivado del disco (fuente única server/UI) | Vigente |
 | D-033 | Entrada desde la app: importar texto -> storyboard editable | Vigente |
+| D-034 | Diseño sonoro: SFX + ambiente vía video-to-audio (MMAudio), nativo premium | Vigente |
