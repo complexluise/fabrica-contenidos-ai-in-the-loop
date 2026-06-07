@@ -98,6 +98,39 @@ def create_app(projects_dir: Path = Path("projects"),
                         out.append({"slug": d.name, "title": d.name, "style": "?", "scenes": 0})
         return out
 
+    # --- administrar proyectos: crear / borrar (#3, Fase 2.5) -------------
+    @app.post("/api/projects")
+    def create_project(body: dict):
+        """Crea un proyecto **en blanco** (además del import): título + estilo,
+        sin escenas. Devuelve el slug (único, derivado del título si no se pasa)."""
+        from ..project import Project, ProjectSpec, write_spec
+
+        title = (body.get("title") or "").strip() or "Nuevo proyecto"
+        style = (body.get("style") or "lego").strip()
+        if style not in _available_styles(config_dir):
+            raise HTTPException(422, f"Estilo desconocido: '{style}'.")
+        slug = _unique_slug((body.get("slug") or "").strip() or title, projects_dir)
+        project = Project(slug, root=projects_dir)
+        write_spec(
+            ProjectSpec(slug=slug, style=style, format="9:16", title=title, scenes=[]),
+            project.spec_path,
+        )
+        return {"slug": slug, "title": title, "style": style}
+
+    @app.delete("/api/projects/{slug}")
+    def delete_project(slug: str):
+        """Borra el proyecto **entero** (spec + cache + runs + export). Destructivo;
+        la UI confirma antes. Devuelve el slug borrado."""
+        import shutil
+
+        from ..project import Project
+
+        project = Project(slug, root=projects_dir)
+        if not project.spec_path.exists():
+            raise HTTPException(404, f"Proyecto '{slug}' no existe.")
+        shutil.rmtree(project.dir)
+        return {"deleted": slug}
+
     # --- entrada desde la app: importar -> storyboard (D-033, Fase 2) -----
     @app.post("/api/projects/import")
     async def import_project(body: dict):

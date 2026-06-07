@@ -135,17 +135,18 @@ frames por plano (#2) son aparte (ver [D-036]/[D-037] y el ROADMAP del motor).
 - [x] AC2 — **Firmar el plan (#5):** el Storyboard tiene un acto explícito **"Firmar el plan"** que
   persiste (`storyboard.signed`); editar sin firmar lo limpia; el paso 2 del bucle **prende el chulo**
   al firmar. 🔬 *(toggle de firmado)* ([D-035])
-- [ ] AC3 — **Administrar proyectos (#3):** crear un proyecto desde la UI, listarlos, abrirlos y
-  **borrarlos** (hoy solo se crean por Importar; falta el alta explícita y el borrado).
+- [x] AC3 — **Administrar proyectos (#3):** crear un proyecto en blanco desde la UI, listarlos, abrirlos
+  y **borrarlos** (con confirmación). El import sigue como alta desde texto. 🔬 *(alta/slug único/borrado/404)*
 
 ### Tasks
 - [x] T2.5.1 — Backend: `PUT` acepta `sign`; `GET /status` reporta `storyboard.signed` (marcador en disco).
 - [x] T2.5.2 — UI: `Configuración` fuera del bucle (sidebar + Inicio); bucle renumerado a 1-4.
 - [x] T2.5.3 — UI: Storyboard con "Firmar el plan" / "Guardar borrador" + estado firmado.
-- [ ] T2.5.4 — Backend: `POST /api/projects` (alta vacía/desde plantilla) + `DELETE /api/projects/{slug}`.
-- [ ] T2.5.5 — UI: pantalla/acciones de gestión de proyectos (nuevo · abrir · borrar).
+- [x] T2.5.4 — Backend: `POST /api/projects` (alta en blanco) + `DELETE /api/projects/{slug}`. 🔬
+- [x] T2.5.5 — UI: gestión en el sidebar (＋ Nuevo con form inline · selector · 🗑 borrar con confirm).
 
-> **Estado:** #4 y #5 cerrados (182 tests verde; +1 de firma). **Pendiente:** #3 (gestión de proyectos).
+> **✅ Fase 2.5 CERRADA** (2026-06-07, [D-035]). #4 (claves a Configuración), #5 (firmar el plan) y
+> #3 (administrar proyectos) cerrados; build de UI limpio.
 
 ---
 
