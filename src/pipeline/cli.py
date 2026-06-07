@@ -97,18 +97,20 @@ async def _run_async(
     return final
 
 
-async def _run_project_async(slug: str, projects_root: Path, config_dir: Path) -> Path:
+async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
+                            profile: str = "prod", concurrency: int = 1) -> Path:
     from .project import Project, load_project_spec
     from .runner import run_project
 
     project = Project(slug, root=projects_root)
     spec = load_project_spec(project.spec_path)
-    cfg = load_config(config_dir, spec.style)
+    cfg = load_config(config_dir, spec.style, profile=profile)
     console.print(
-        f"[bold]Proyecto {slug}[/] · {len(spec.scenes)} escenas · estilo {spec.style}"
+        f"[bold]Proyecto {slug}[/] · {len(spec.scenes)} escenas"
+        f" · estilo {spec.style} · perfil {profile} · concurrencia {concurrency}"
     )
 
-    run, final, totals = await run_project(project, spec, cfg)
+    run, final, totals = await run_project(project, spec, cfg, concurrency=concurrency)
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
         f"  run {run.run_id} · costo: ${totals['total_cost_usd']:.3f}"
@@ -292,15 +294,18 @@ def run(
     brief: Path = typer.Option(None, "--brief", help="Modo smoke: corre un brief YAML suelto a out/ (sin proyecto/cache)."),
     style: str = typer.Option("lego", help="Style slot (solo modo --brief)."),
     fmt: str = typer.Option("9:16", "--format", help="Formato de salida (solo modo --brief)."),
+    profile: str = typer.Option("prod", "--profile", help="Perfil de calidad: prod (ensemble/calidad) o proto (router/barato). D-038."),
+    concurrency: int = typer.Option(1, "--concurrency", help="Escenas en vuelo simultaneo (D-039). Default 1 = serial."),
     config_dir: Path = typer.Option(Path("config"), help="Directorio de config."),
     projects_dir: Path = typer.Option(Path("projects"), help="Raíz de proyectos."),
     out_dir: Path = typer.Option(Path("out"), help="Salida del modo --brief."),
 ):
-    """Genera un video. Por defecto resuelve un proyecto con caché; con --brief corre un smoke suelto."""
+    """Genera un video one-shot. --profile proto para iterar barato; --profile prod para produccion final."""
     if brief is not None:
         asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir))
     else:
-        asyncio.run(_run_project_async(project, projects_dir, config_dir))
+        asyncio.run(_run_project_async(project, projects_dir, config_dir,
+                                       profile=profile, concurrency=concurrency))
 
 
 if __name__ == "__main__":

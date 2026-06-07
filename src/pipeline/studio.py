@@ -279,7 +279,8 @@ def prune_selections(project: Project, scene_ids: list[str]) -> list[str]:
 
 
 async def render(project: Project, spec: ProjectSpec, cfg: Config,
-                 keyframe_overrides: dict[str, Path] | None = None):
+                 keyframe_overrides: dict[str, Path] | None = None,
+                 concurrency: int = 1):
     """Genera el video con los keyframes elegidos por escena.
 
     Dos fuentes de keyframe, con precedencia (D-025): el flag `--keyframe`
@@ -305,4 +306,5 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
             f"Faltan keyframes para: {missing}. "
             "Usa 'pipeline pick <proj> escena=idx' o 'pipeline render <proj> --keyframe escena=ruta'."
         )
-    return await run_project(project, spec, cfg, keyframe_overrides=merged)
+    return await run_project(project, spec, cfg, keyframe_overrides=merged,
+                             concurrency=concurrency)
