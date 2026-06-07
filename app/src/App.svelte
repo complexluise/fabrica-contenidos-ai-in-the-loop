@@ -1,6 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, hasProject } from "./lib/studio.svelte.js";
+  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, hasProject,
+           createProject, deleteProject } from "./lib/studio.svelte.js";
+  import { get, humanError } from "./lib/api.js";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
@@ -12,7 +14,39 @@
   let next = $derived(nextStep(studio.status));
   let keysOk = $derived(studio.status?.keys?.fal_key);
 
-  onMount(loadProjects);
+  // --- gestión de proyectos (#3) ---
+  let styles = $state(["lego"]);
+  let creating = $state(false);     // form de "nuevo" abierto
+  let newTitle = $state("");
+  let newStyle = $state("lego");
+  let busy = $state(false);
+  let pmErr = $state("");
+
+  onMount(async () => {
+    await loadProjects();
+    try {
+      const s = await get("/api/styles");
+      if (s?.length) { styles = s; newStyle = s.includes("lego") ? "lego" : s[0]; }
+    } catch { /* deja el default */ }
+  });
+
+  async function doCreate() {
+    if (!newTitle.trim()) return;
+    busy = true; pmErr = "";
+    try {
+      await createProject(newTitle.trim(), newStyle);
+      creating = false; newTitle = "";
+      goTo("storyboard");  // proyecto en blanco -> a armar el plan
+    } catch (e) { pmErr = humanError(e); } finally { busy = false; }
+  }
+
+  async function doDelete() {
+    if (!current) return;
+    if (!confirm(`¿Borrar "${current.title}"? Se elimina TODO (cache, runs, export). No se puede deshacer.`)) return;
+    busy = true; pmErr = "";
+    try { await deleteProject(current.slug); }
+    catch (e) { pmErr = humanError(e); } finally { busy = false; }
+  }
 
   // Estado de cada paso del bucle para la espina lateral.
   function stageState(id) {
@@ -49,17 +83,40 @@
     </div>
 
     <div class="project">
-      <div class="eyebrow">Proyecto</div>
+      <div class="phead">
+        <span class="eyebrow">Proyecto</span>
+        <button class="mini" title="Nuevo proyecto" onclick={() => (creating = !creating)}>＋ Nuevo</button>
+      </div>
+
+      {#if creating}
+        <div class="create">
+          <input placeholder="Título del proyecto" bind:value={newTitle}
+                 onkeydown={(e) => e.key === "Enter" && doCreate()} />
+          <select bind:value={newStyle}>
+            {#each styles as s}<option value={s}>{s}</option>{/each}
+          </select>
+          <div class="create-actions">
+            <button class="primary small" onclick={doCreate} disabled={busy || !newTitle.trim()}>Crear</button>
+            <button class="ghost small" onclick={() => (creating = false)}>Cancelar</button>
+          </div>
+        </div>
+      {/if}
+
       <div class="select-wrap">
         <select value={studio.slug} onchange={(e) => setSlug(e.currentTarget.value)}>
+          {#if !studio.projects.length}<option value="">(sin proyectos)</option>{/if}
           {#each studio.projects as p}
             <option value={p.slug}>{p.title}</option>
           {/each}
         </select>
+        {#if current}
+          <button class="mini danger" title="Borrar proyecto" onclick={doDelete} disabled={busy}>🗑</button>
+        {/if}
       </div>
       {#if current}
         <div class="pmeta">{current.style} · {current.scenes} escena{current.scenes === 1 ? "" : "s"}</div>
       {/if}
+      {#if pmErr}<div class="pm-err">{pmErr}</div>{/if}
     </div>
 
     <nav class="spine">
@@ -165,8 +222,21 @@
   .brand-t small { color: var(--ink-soft); font-size: 11.5px; }
 
   .project { display: flex; flex-direction: column; gap: 7px; }
-  .select-wrap select { width: 100%; font-size: 15px; font-weight: 600; font-family: var(--font-display); }
+  .phead { display: flex; align-items: center; justify-content: space-between; }
+  .mini {
+    background: transparent; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+    padding: 2px 8px; font-size: 11.5px; font-weight: 700; color: var(--ink-soft); box-shadow: none;
+  }
+  .mini:hover { background: var(--card); color: var(--ink); box-shadow: none; }
+  .mini.danger { flex-shrink: 0; padding: 2px 7px; }
+  .mini.danger:hover { color: var(--red-deep); border-color: var(--red); background: var(--red-wash); }
+  .select-wrap { display: flex; align-items: center; gap: 6px; }
+  .select-wrap select { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; font-family: var(--font-display); }
   .pmeta { font-size: 12px; color: var(--ink-soft); }
+  .create { display: flex; flex-direction: column; gap: 6px; padding: 9px; background: var(--card); border: 1px solid var(--line-2); border-radius: var(--r); }
+  .create input, .create select { width: 100%; font-size: 13px; }
+  .create-actions { display: flex; gap: 6px; }
+  .pm-err { font-size: 11.5px; color: var(--red-deep); }
 
   /* --- la espina del bucle --- */
   .spine { display: flex; flex-direction: column; }

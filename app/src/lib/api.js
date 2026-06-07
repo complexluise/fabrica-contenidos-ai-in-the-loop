@@ -23,6 +23,8 @@ export const put = (path, body) =>
     body: JSON.stringify(body),
   });
 
+export const del = (path) => req(path, { method: "DELETE" });
+
 // Traduce un error crudo (texto del backend o traceback) a algo legible por humanos.
 export function humanError(e) {
   const raw = (e && e.message ? e.message : String(e || "")).trim();

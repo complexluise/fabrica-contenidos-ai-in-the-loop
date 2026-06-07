@@ -56,6 +56,41 @@ def _make_project(tmp_path, slug="demo"):
     return d
 
 
+def test_create_project_blank(tmp_path):
+    c = _client(tmp_path)
+    r = c.post("/api/projects", json={"title": "Mi Proyecto", "style": "lego"})
+    assert r.status_code == 200
+    slug = r.json()["slug"]
+    assert (tmp_path / slug / "project.yaml").exists()
+    # aparece en el listado y abre sin escenas
+    assert any(p["slug"] == slug for p in c.get("/api/projects").json())
+    assert c.get(f"/api/projects/{slug}").json()["scenes"] == []
+
+
+def test_create_project_unique_slug(tmp_path):
+    c = _client(tmp_path)
+    a = c.post("/api/projects", json={"title": "Repetido"}).json()["slug"]
+    b = c.post("/api/projects", json={"title": "Repetido"}).json()["slug"]
+    assert a != b  # no se pisan
+
+
+def test_create_project_rejects_unknown_style(tmp_path):
+    r = _client(tmp_path).post("/api/projects", json={"title": "X", "style": "nope"})
+    assert r.status_code == 422
+
+
+def test_delete_project(tmp_path):
+    c = _client(tmp_path)
+    slug = c.post("/api/projects", json={"title": "Borrame"}).json()["slug"]
+    assert c.delete(f"/api/projects/{slug}").json()["deleted"] == slug
+    assert not (tmp_path / slug).exists()
+    assert c.get(f"/api/projects/{slug}").status_code == 404
+
+
+def test_delete_project_404_when_missing(tmp_path):
+    assert _client(tmp_path).delete("/api/projects/ghost").status_code == 404
+
+
 def test_import_requires_text(tmp_path):
     r = _client(tmp_path).post("/api/projects/import", json={"text": "  "})
     assert r.status_code == 422

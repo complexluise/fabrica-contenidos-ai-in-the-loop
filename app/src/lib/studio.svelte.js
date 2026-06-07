@@ -1,6 +1,6 @@
 // Estado compartido del Studio (Svelte 5 runes) + la definicion del BUCLE.
 // La filosofia vive aca: cada paso dice QUIEN actua (la IA propone / vos decidis).
-import { get } from "./api.js";
+import { get, post, del } from "./api.js";
 
 export const studio = $state({
   projects: [],
@@ -59,6 +59,21 @@ export async function setSlug(slug) {
   studio.slug = slug;
   studio.status = null;
   await refreshStatus();
+}
+
+// Crea un proyecto en blanco y lo abre. Devuelve el slug creado (#3).
+export async function createProject(title, style) {
+  const r = await post("/api/projects", { title, style });
+  await loadProjects();
+  await setSlug(r.slug);
+  return r.slug;
+}
+
+// Borra un proyecto (destructivo) y reubica la selección (#3).
+export async function deleteProject(slug) {
+  await del(`/api/projects/${slug}`);
+  if (studio.slug === slug) studio.slug = "";
+  await loadProjects();
 }
 
 export async function refreshStatus() {
