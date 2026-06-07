@@ -59,3 +59,6 @@ es continua entre archivos.
 | D-032 | Estado del bucle derivado del disco (fuente única server/UI) | Vigente |
 | D-033 | Entrada desde la app: importar texto -> storyboard editable | Vigente |
 | D-034 | Diseño sonoro: SFX + ambiente vía video-to-audio (MMAudio), nativo premium | Vigente |
+| D-035 | UX del bucle: Configuración fuera del bucle + firma explícita del plan | Vigente |
+| D-036 | Biblioteca global de assets reusables (personajes/símbolos/lugares) | Vigente (en diseño) |
+| D-037 | Frame por plano (auto) + cortes cortos (refina D-028) | Vigente (en diseño) |

@@ -489,6 +489,44 @@ plano), en `project.yaml`. El cue de MMAudio por plano = `shot.sfx` + `ambience`
 
 ---
 
+## Sprint 6.10 — Frame por plano + cortes cortos (D-037)
+
+**Objetivo:** que **cada plano** autogenere su propio frame desde su `framing` (no reusar una opción
+para varios planos) y que los planos sean **cortos por default (~2s)**. Refina [D-028]; ver [D-037].
+
+### Acceptance Criteria
+- [ ] AC1 — Cada plano (incluido el 1) genera/usa **su** frame desde su `framing`; no se reusa el de otro plano.
+- [ ] AC2 — El clip se **corta a la duración del plano**; default corto (~2s) cuando no se especifica.
+- [ ] AC3 — Sin checkpoint humano **por plano** (se mantiene el de escena/casting, espíritu de D-028).
+- [ ] AC4 — Cache key por plano intacto (`seed`+`framing`); cambiar el framing regenera solo ese plano.
+
+### Tasks (orden test-first)
+- [ ] T6.10.1 — Default de duración corto (~2s) para planos sin `duration_s` explícito. 🔬 *core*
+- [ ] T6.10.2 — `runner._render_shot`: generar el frame de **cada** plano desde su framing (uniforme).
+- [ ] T6.10.3 — Verificar el recorte (`trim_to`) a la duración corta end-to-end (smoke).
+
+---
+
+## Sprint 9 — Biblioteca global de assets reusables (D-036)
+
+**Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
+consistentemente. Biblioteca global referenciada por nombre (no copias). Ver [D-036].
+
+### Acceptance Criteria
+- [ ] AC1 — Banco global en la raíz (p.ej. `library/characters|symbols|places/`), versionado.
+- [ ] AC2 — Un `project.yaml` referencia un asset del banco **por nombre**; se resuelve a ruta para I/O (hash estable).
+- [ ] AC3 — El asset se diseña/fija una vez y se propaga a los keyframes (igual que el casting, [D-019]).
+- [ ] AC4 — Símbolos y lugares además de personajes (puede arrancar por personajes).
+
+### Tasks
+- [ ] T9.1 — Modelo del banco + resolución de refs globales vs project-relative. 🔬 *core*
+- [ ] T9.2 — Propagación del asset elegido al keyframe (reusa casting/[D-019]).
+- [ ] T9.3 — App: pantalla para crear/elegir assets del banco.
+
+> **Diferido:** versionado de assets, cache global vs por-proyecto (a definir en la implementación).
+
+---
+
 ## Sprint 7 — Escala y operación
 
 **Objetivo:** durabilidad, persistencia y observabilidad de producción.

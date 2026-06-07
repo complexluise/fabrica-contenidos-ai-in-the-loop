@@ -45,7 +45,7 @@ L3  Keyframe Stage          ── escena → imagen de estilo (style LoRA por A
 L4  Provider Adapter        ── 1 interfaz, N backends (Kling/Seedance/Veo/fal...)
 L5  Orchestrator            ── router | cascade | ensemble según clasificación
 L6  Quality Gate            ── Claude visión (fusión de señales), umbral por clase; suave por defecto
-L7  Assembly & Post         ── concat, música, captions, lower-thirds (ffmpeg)
+L7  Assembly & Post         ── banda sonora (voz TTS + SFX/ambiente V2A MMAudio + música) + captions (ffmpeg), concat
 L8  Delivery                ── render multi-formato (9:16 / 1:1 / 16:9)
 L9  Observability           ── costo y latencia por escena
 ```
@@ -110,6 +110,7 @@ class Shot(BaseModel):                          # plano (D-028): unidad atómica
     seed: int = 0                              # reroll del plano (cache miss solo en este plano)
     voiceover: str | None = None               # audio del plano (TTS)
     caption: str | None = None                 # texto en pantalla del plano
+    sfx: str | None = None                     # efectos de sonido de la acción (V2A MMAudio, D-034)
     keyframe: Path | None = None               # rellenado por L3
 
 class Scene(BaseModel):                         # beat (D-028): agrupa planos; comparte prompt+personajes
@@ -123,6 +124,7 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
     shots: list[Shot] = []                      # planos (D-028); vacío = 1 plano implícito (compat)
     keyframe: Path | None = None               # rellenado por L3 (plano 1 = keyframe elegido)
     seed: int = 0                              # reroll: subirlo regenera SOLO esta escena
+    ambience: str | None = None                # sonido del lugar (V2A MMAudio, por escena, D-034)
     character_refs: list[Path] = []            # transitorio: refs resueltas por el runner
 
 # Plano 1 = el keyframe que elige el humano (best-of-N, por escena); planos 2+ se autogeneran

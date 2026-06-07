@@ -72,6 +72,9 @@ No lo enseña, no lo ordena, ni te dice dónde estás.
 [D-021]: ../docs/decisiones/0021-0030.md
 [D-022]: ../docs/decisiones/0021-0030.md
 [D-032]: ../docs/decisiones/0031-0040.md
+[D-035]: ../docs/decisiones/0031-0040.md
+[D-036]: ../docs/decisiones/0031-0040.md
+[D-037]: ../docs/decisiones/0031-0040.md
 
 ---
 
@@ -117,6 +120,32 @@ propone; la persona decide y firma. Tracker: issue #5.
 
 > **Diferido a fases siguientes**: `.docx`/`.pdf` (#7); regenerar una escena del borrador con la IA
 > (#9); subir imágenes de referencia (#11); renombrar el slug de un proyecto ya creado (#12).
+
+---
+
+## Fase 2.5 — Gestión de proyectos y UX del bucle (los "detalles")
+
+**Objetivo:** afinar la operación diaria. Salió de una ronda de feedback de uso. Decisiones:
+[`D-035`](../docs/decisiones/0031-0040.md). El banco reusable de assets (#1) y el cambio de
+frames por plano (#2) son aparte (ver [D-036]/[D-037] y el ROADMAP del motor).
+
+### Acceptance Criteria
+- [x] AC1 — **Claves a Configuración (#4):** las API keys salen del bucle numerado a un acceso
+  **Configuración** (engranaje, fuera del loop); Inicio las muestra **solo si faltan**. ([D-035])
+- [x] AC2 — **Firmar el plan (#5):** el Storyboard tiene un acto explícito **"Firmar el plan"** que
+  persiste (`storyboard.signed`); editar sin firmar lo limpia; el paso 2 del bucle **prende el chulo**
+  al firmar. 🔬 *(toggle de firmado)* ([D-035])
+- [ ] AC3 — **Administrar proyectos (#3):** crear un proyecto desde la UI, listarlos, abrirlos y
+  **borrarlos** (hoy solo se crean por Importar; falta el alta explícita y el borrado).
+
+### Tasks
+- [x] T2.5.1 — Backend: `PUT` acepta `sign`; `GET /status` reporta `storyboard.signed` (marcador en disco).
+- [x] T2.5.2 — UI: `Configuración` fuera del bucle (sidebar + Inicio); bucle renumerado a 1-4.
+- [x] T2.5.3 — UI: Storyboard con "Firmar el plan" / "Guardar borrador" + estado firmado.
+- [ ] T2.5.4 — Backend: `POST /api/projects` (alta vacía/desde plantilla) + `DELETE /api/projects/{slug}`.
+- [ ] T2.5.5 — UI: pantalla/acciones de gestión de proyectos (nuevo · abrir · borrar).
+
+> **Estado:** #4 y #5 cerrados (182 tests verde; +1 de firma). **Pendiente:** #3 (gestión de proyectos).
 
 ---
 
