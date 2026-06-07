@@ -11,16 +11,14 @@
   // estado por estacion del bucle
   function station(id) {
     if (!st) return { done: false, detail: "—", actor: "tu" };
-    if (id === "ajustes")
-      return {
-        done: !!st.keys?.fal_key,
-        detail: st.keys?.fal_key ? "fal.ai lista" : "falta FAL_KEY",
-        actor: "tu",
-      };
     if (id === "importar")
       return { done: true, detail: "proyecto creado", actor: "ia" };
     if (id === "storyboard")
-      return { done: st.scenes_total > 0, detail: `${st.scenes_total} escenas`, actor: "tu" };
+      return {
+        done: !!st.storyboard?.signed,
+        detail: st.storyboard?.signed ? "plan firmado" : `${st.scenes_total} escenas · sin firmar`,
+        actor: "tu",
+      };
     if (id === "elegir") {
       const c = st.casting || {}, k = st.keyframes || {};
       const castOk = c.needed === 0 || c.chosen >= c.needed;
@@ -39,11 +37,10 @@
   }
 
   const STATIONS = [
-    { id: "ajustes",    n: 1, label: "Ajustes",    desc: "Tus claves de API (fal.ai, Anthropic)." },
-    { id: "importar",   n: 2, label: "Importar",   desc: "Pegá un texto; la IA arma el borrador." },
-    { id: "storyboard", n: 3, label: "Storyboard", desc: "Editá y firmá el plan, plano a plano." },
-    { id: "elegir",     n: 4, label: "Elegir",     desc: "La IA genera opciones; vos elegís." },
-    { id: "producir",   n: 5, label: "Producir",   desc: "Se arma el video y el paquete." },
+    { id: "importar",   n: 1, label: "Importar",   desc: "Pegá un texto; la IA arma el borrador." },
+    { id: "storyboard", n: 2, label: "Storyboard", desc: "Editá y firmá el plan, plano a plano." },
+    { id: "elegir",     n: 3, label: "Elegir",     desc: "La IA genera opciones; vos elegís." },
+    { id: "producir",   n: 4, label: "Producir",   desc: "Se arma el video y el paquete." },
   ];
 
   const actorBadge = { tu: ["red", "vos decidís"], ia: ["blue", "la IA hace"], lee: ["", "leer"] };
@@ -60,8 +57,8 @@
 
 {#if st && !st.keys?.fal_key}
   <div class="warn-strip">
-    <b>Falta tu clave de fal.ai.</b> Sin ella no se puede generar nada.
-    <button class="small" onclick={() => goTo("ajustes")}>Ir a Ajustes →</button>
+    <b>Primero: configurá tus claves.</b> Sin la clave de fal.ai no se puede generar nada.
+    <button class="small" onclick={() => goTo("ajustes")}>Ir a Configuración →</button>
   </div>
 {/if}
 

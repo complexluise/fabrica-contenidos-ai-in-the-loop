@@ -175,8 +175,15 @@ def create_app(projects_dir: Path = Path("projects"),
             spec.brief = body["brief"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
+        # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
+        # limpia (el plan cambió → hay que volver a firmar). Estado derivado (D-032).
+        signed_marker = project.dir / "storyboard.signed"
+        if body.get("sign"):
+            signed_marker.write_text("", encoding="utf-8")
+        else:
+            signed_marker.unlink(missing_ok=True)
         return {"saved": str(project.spec_path), "scenes": len(ids),
-                "dropped_selections": dropped}
+                "dropped_selections": dropped, "signed": bool(body.get("sign"))}
 
     @app.get("/api/projects/{slug}")
     def project_detail(slug: str):
@@ -242,6 +249,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return {
             "keys": keys,
             "scenes_total": len(scene_ids),
+            "storyboard": {"signed": (project.dir / "storyboard.signed").exists()},
             "casting": {"needed": len(designed), "chosen": len(cast_chosen),
                         "has_candidates": (project.dir / "cast_candidates.yaml").exists()},
             "keyframes": {"total": len(scene_ids), "chosen": len(chosen_scenes),

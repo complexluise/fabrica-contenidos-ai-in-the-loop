@@ -1,6 +1,6 @@
 <script>
   import { get, put, humanError } from "../lib/api.js";
-  import { goTo, refreshStatus } from "../lib/studio.svelte.js";
+  import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
   let doc = $state(null); // { title, brief, scenes:[{id,beat,prompt,characters,shots:[...]}] }
@@ -75,9 +75,10 @@
     touch();
   }
 
-  async function save() {
+  async function save(sign) {
     error = ""; msg = ""; saving = true;
     const body = {
+      sign: !!sign,
       title: doc.title,
       brief: doc.brief,
       scenes: doc.scenes.map((s) => ({
@@ -95,8 +96,9 @@
     try {
       const r = await put(`/api/projects/${slug}`, body);
       dirty = false;
-      msg = "Guardado." + (r.dropped_selections?.length
-        ? ` (se limpiaron selecciones huérfanas: ${r.dropped_selections.join(", ")})` : "");
+      const dropped = r.dropped_selections?.length
+        ? ` (se limpiaron selecciones huérfanas: ${r.dropped_selections.join(", ")})` : "";
+      msg = (sign ? "Plan firmado." : "Borrador guardado.") + dropped;
       await refreshStatus();
     } catch (e) {
       error = humanError(e);
@@ -104,18 +106,22 @@
       saving = false;
     }
   }
+
+  let signed = $derived(studio.status?.storyboard?.signed);
 </script>
 
 {#if error && !doc}
   <p class="error">{error}</p>
 {:else if doc}
   <header class="head">
-    <div class="eyebrow">Paso 3 · vos decidís</div>
+    <div class="eyebrow">Paso 2 · vos decidís</div>
     <input class="title-in" bind:value={doc.title} oninput={touch} placeholder="Título del proyecto" />
     <p class="lede muted">Editá el plan: escenas y planos. La IA propuso; vos firmás.</p>
     <div class="meta">
       <span class="pill">~{total.toFixed(0)}s</span>
       <span class="pill">{doc.scenes.length} escena{doc.scenes.length === 1 ? "" : "s"}</span>
+      {#if signed && !dirty}<span class="pill ok">✓ firmado</span>
+      {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
     </div>
   </header>
 
@@ -172,14 +178,19 @@
     </section>
   {/each}
 
-  <div class="savebar" class:dirty>
-    <button class="primary" onclick={save} disabled={saving || !dirty}>
-      {saving ? "Guardando…" : dirty ? "Guardar cambios" : "Guardado ✓"}
+  <div class="savebar" class:dirty class:signed={signed && !dirty}>
+    <button class="primary sign" onclick={() => save(true)} disabled={saving}>
+      {saving ? "Firmando…" : signed && !dirty ? "Plan firmado ✓ — volver a firmar" : "Firmar el plan"}
+    </button>
+    <button class="ghost small" onclick={() => save(false)} disabled={saving || !dirty}>
+      Guardar borrador
     </button>
     {#if msg}<span class="ok-msg">✓ {msg}</span>{/if}
     {#if error}<span class="error inline">{error}</span>{/if}
     <span class="spacer"></span>
-    <button class="ghost" onclick={() => goTo("elegir")}>Siguiente: Elegir →</button>
+    {#if signed && !dirty}
+      <button class="ghost" onclick={() => goTo("elegir")}>Siguiente: Elegir →</button>
+    {/if}
   </div>
 {:else}
   <p class="muted">Cargando…</p>
@@ -238,6 +249,11 @@
     background: var(--paper); border-top: 1.5px solid var(--line-2);
   }
   .savebar.dirty { border-top-color: var(--red); }
+  .savebar.signed { border-top-color: var(--ok); }
+  .savebar .sign { background: var(--red); }
+  .savebar.signed .sign { background: var(--ok); }
+  .pill.ok { background: var(--ok); color: #fff; }
+  .pill.warn { background: var(--warn, #e0a800); color: #fff; }
   .ok-msg { color: var(--ok); font-weight: 600; font-size: 13px; }
   .error.inline { margin: 0; font-size: 13px; }
   .muted { color: var(--ink-soft); }

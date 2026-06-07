@@ -113,6 +113,21 @@ def test_update_project_preserves_non_editable_scene_fields(tmp_path):
     assert spec.scenes[0].seed == 7
 
 
+def test_update_project_sign_toggles_storyboard_signed(tmp_path):
+    # #5: firmar marca el storyboard como firmado; editar sin firmar lo limpia.
+    _make_project(tmp_path)
+    c = _client(tmp_path)
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is False
+
+    r = c.put("/api/projects/demo", json={"sign": True,
+              "scenes": [{"id": "s1", "prompt": "x", "duration_s": 4}]})
+    assert r.json()["signed"] is True
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is True
+
+    c.put("/api/projects/demo", json={"scenes": [{"id": "s1", "prompt": "y", "duration_s": 4}]})
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is False
+
+
 def test_update_project_422_on_invalid_scene(tmp_path):
     _make_project(tmp_path)
     r = _client(tmp_path).put("/api/projects/demo", json={

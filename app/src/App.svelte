@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, loadProjects, setSlug, goTo, nextStep, hasProject } from "./lib/studio.svelte.js";
+  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, hasProject } from "./lib/studio.svelte.js";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
@@ -10,6 +10,7 @@
 
   let current = $derived(studio.projects.find((p) => p.slug === studio.slug) || null);
   let next = $derived(nextStep(studio.status));
+  let keysOk = $derived(studio.status?.keys?.fal_key);
 
   onMount(loadProjects);
 
@@ -18,9 +19,9 @@
     const st = studio.status;
     if (id === "inicio") return "info";
     if (id === "importar") return hasProject() ? "done" : "todo";
-    if (id === "storyboard") return hasProject() ? "info" : "todo";
+    if (id === "ajustes") return st?.keys?.fal_key ? "done" : "todo";
+    if (id === "storyboard") return st?.storyboard?.signed ? "done" : "todo";
     if (!st) return "todo";
-    if (id === "ajustes") return st.keys?.fal_key ? "done" : "todo";
     if (id === "elegir") {
       const cast = st.casting || {}, kf = st.keyframes || {};
       const castOk = cast.needed === 0 || cast.chosen >= cast.needed;
@@ -93,6 +94,20 @@
     </nav>
 
     <div class="foot">
+      <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
+              onclick={() => goTo(CONFIG.id)}>
+        <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.7 7.7 0 0 0-1.7-1l-.3-2.5H10.9l-.3 2.5a7.7 7.7 0 0 0-1.7 1l-2.3-1-2 3.4L4.6 11a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.7 7.7 0 0 0 1.7 1l.3 2.5h3.2l.3-2.5a7.7 7.7 0 0 0 1.7-1l2.3 1 2-3.4z"
+            fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        <span class="txt">
+          <span class="lbl">{CONFIG.label}</span>
+          <span class="sub">{keysOk ? "claves listas" : "faltan claves"}</span>
+        </span>
+        {#if !keysOk}<span class="badge-warn">!</span>{/if}
+      </button>
+
       <div class="legend">
         <span><i class="dot blue"></i> la IA propone</span>
         <span><i class="dot red"></i> vos decidís</span>
@@ -232,7 +247,25 @@
   .sub { font-size: 11.5px; color: var(--ink-soft); }
   .step.active .lbl { color: var(--ink); }
 
-  .foot { margin-top: auto; }
+  .foot { margin-top: auto; display: flex; flex-direction: column; gap: 14px; }
+
+  .config {
+    position: relative; display: flex; align-items: center; gap: 11px; width: 100%;
+    text-align: left; background: transparent; border: 1px solid var(--line-2);
+    border-radius: var(--r); padding: 9px 11px; box-shadow: none;
+  }
+  .config:hover { background: rgba(33, 28, 22, 0.05); box-shadow: none; }
+  .config.active { background: var(--card); box-shadow: var(--shadow); }
+  .config.warn { border-color: var(--red); }
+  .config .gear { width: 22px; height: 22px; color: var(--ink-soft); flex-shrink: 0; }
+  .config .lbl { font-weight: 700; font-size: 13.5px; }
+  .config .sub { font-size: 11px; color: var(--ink-soft); }
+  .config.warn .sub { color: var(--red-deep); }
+  .badge-warn {
+    margin-left: auto; width: 18px; height: 18px; border-radius: 50%; background: var(--red);
+    color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center;
+  }
+
   .legend { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--ink-soft); }
   .legend span { display: flex; align-items: center; gap: 7px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }

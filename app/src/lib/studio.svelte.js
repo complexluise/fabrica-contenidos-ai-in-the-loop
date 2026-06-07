@@ -14,14 +14,17 @@ export const studio = $state({
 //   "tu"  -> la persona prepara/decide   (rojo)
 //   "ia"  -> la maquina propone/ejecuta  (azul)
 //   "lee" -> lectura/contexto            (neutro)
+// Ajustes (claves) NO es un paso del bucle: es setup. Vive aparte (CONFIG, #4).
 export const STAGES = [
   { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",          actor: "lee" },
-  { id: "ajustes",    n: 1, label: "Ajustes",    sub: "Tus claves de API",           actor: "tu"  },
-  { id: "importar",   n: 2, label: "Importar",   sub: "Texto -> borrador (la IA)",   actor: "ia"  },
-  { id: "storyboard", n: 3, label: "Storyboard", sub: "Edita y firma el plan",       actor: "tu"  },
-  { id: "elegir",     n: 4, label: "Elegir",     sub: "La IA propone, vos decidis",  actor: "tu"  },
-  { id: "producir",   n: 5, label: "Producir",   sub: "Armar el video y el paquete", actor: "ia"  },
+  { id: "importar",   n: 1, label: "Importar",   sub: "Texto -> borrador (la IA)",   actor: "ia"  },
+  { id: "storyboard", n: 2, label: "Storyboard", sub: "Edita y firma el plan",       actor: "tu"  },
+  { id: "elegir",     n: 3, label: "Elegir",     sub: "La IA propone, vos decidis",  actor: "tu"  },
+  { id: "producir",   n: 4, label: "Producir",   sub: "Armar el video y el paquete", actor: "ia"  },
 ];
+
+// Configuración (claves de API): setup transversal, fuera del bucle numerado (#4).
+export const CONFIG = { id: "ajustes", label: "Configuración", sub: "Claves de API" };
 
 // Glosario: traducir la jerga a lenguaje humano (se muestra inline).
 export const GLOSARIO = {
@@ -79,7 +82,10 @@ export function nextStep(st) {
     return { tab: "importar", label: "Importar un guion", why: "Empezá pegando o subiendo tu texto." };
   if (!st) return { tab: "ajustes", label: "Configurar claves", why: "Empezá por tus API keys." };
   if (!st.keys?.fal_key)
-    return { tab: "ajustes", label: "Configurar FAL_KEY", why: "Sin la clave de fal.ai no se puede generar nada." };
+    return { tab: "ajustes", label: "Configurar las claves", why: "Sin la clave de fal.ai no se puede generar nada." };
+
+  if (!st.storyboard?.signed)
+    return { tab: "storyboard", label: "Firmar el plan", why: "Revisá las escenas y firmá el plan antes de generar." };
 
   const cast = st.casting || {};
   if (cast.needed > 0 && cast.chosen < cast.needed)

@@ -37,8 +37,8 @@
 </script>
 
 <header class="head">
-  <div class="eyebrow">Paso 1 · vos preparás</div>
-  <h1>Ajustes</h1>
+  <div class="eyebrow">Configuración · setup</div>
+  <h1>Configuración</h1>
   <p class="lede">
     Tus claves de API. Se guardan en un archivo <code>.env</code> <b>local</b> — nunca salen de tu máquina.
     Dejá un campo vacío para no cambiarlo.
