@@ -129,6 +129,8 @@ def _shot_to_dict(sh: Shot) -> dict:
         d["voiceover"] = sh.voiceover
     if sh.caption:
         d["caption"] = sh.caption
+    if sh.sfx:
+        d["sfx"] = sh.sfx
     return d
 
 
@@ -157,6 +159,8 @@ def _scene_to_dict(s: Scene) -> dict:
         d["voiceover"] = s.voiceover
     if s.voice_id:
         d["voice_id"] = s.voice_id
+    if s.ambience:
+        d["ambience"] = s.ambience
     if s.seed:
         d["seed"] = s.seed
     if s.shots:  # vacío = 1 plano implícito; no se persiste (compat)
@@ -255,7 +259,11 @@ class Project:
 
     def __init__(self, slug: str, root: Path = Path("projects")):
         self.slug = slug
-        self.dir = Path(root) / slug
+        # `dir` (y por tanto `cache_dir`, `runs_dir`, etc.) debe ser **absoluto**:
+        # las rutas cacheadas se persisten en `casting.yaml`/`selections.yaml` y
+        # se re-consumen desde otros CWDs; si son relativas se duplican al
+        # resolverlas contra `project.dir` (bug visto en `gen_keyframes`).
+        self.dir = (Path(root) / slug).resolve()
 
     @property
     def cache_dir(self) -> Path:

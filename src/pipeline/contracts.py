@@ -55,6 +55,7 @@ class Shot(BaseModel):
     seed: int = 0  # reroll del plano (cache miss solo en este plano)
     voiceover: Optional[str] = None  # audio del plano (TTS)
     caption: Optional[str] = None  # texto en pantalla del plano
+    sfx: Optional[str] = None  # efectos de sonido de la accion (V2A MMAudio, D-034)
     keyframe: Optional[Path] = None  # rellenado por L3
 
 
@@ -75,6 +76,7 @@ class Scene(BaseModel):
     caption: Optional[str] = None  # texto en pantalla (lower-third), opcional
     voiceover: Optional[str] = None  # texto narrado (TTS ElevenLabs), opcional
     voice_id: Optional[str] = None  # override de voz por escena (si no, default del proyecto)
+    ambience: Optional[str] = None  # sonido del lugar (V2A MMAudio, por escena, D-034)
     character_refs: list[Path] = Field(default_factory=list)  # transitorio: refs resueltas por el runner
 
     model_config = {"populate_by_name": True}

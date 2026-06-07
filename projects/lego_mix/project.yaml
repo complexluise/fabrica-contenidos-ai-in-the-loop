@@ -18,6 +18,7 @@ scenes:
     prompt: Ciudad LEGO al amanecer, calles vacias con luz dorada entre los edificios de bloques
     duration_s: 6
     beat: apertura
+    ambience: ambiente de ciudad al amanecer, calma, pajaros lejanos, brisa suave
     shots:
       - framing: plano general amplio de la ciudad al amanecer
         duration_s: 3
@@ -25,23 +26,29 @@ scenes:
       - framing: plano detalle de una farola LEGO apagandose
         duration_s: 3
         caption: Amanece
+        sfx: zumbido electrico de una farola apagandose
 
   - id: s2
     prompt: Las calles de la ciudad LEGO se llenan de minifiguras caminando hacia el trabajo
     duration_s: 6
     beat: despertar
+    ambience: murmullo urbano creciente, pasos de multitud en la calle
     shots:
       - framing: plano medio de minifiguras saliendo de sus casas
         duration_s: 3
         voiceover: Poco a poco, las minifiguras llenan las calles.
+        sfx: puerta de juguete que se abre
       - framing: travelling lateral siguiendo el flujo por la avenida
         duration_s: 3
+        sfx: muchos pasos rapidos sobre el pavimento
 
   - id: s3
     prompt: El sol esta alto sobre la ciudad LEGO en plena actividad, vehiculos y minifiguras por todas partes
     duration_s: 5
     beat: clima
+    ambience: trafico intenso de ciudad, bocinas lejanas, bullicio
     shots:
       - framing: plano general dinamico del trafico bajo el sol del mediodia
         duration_s: 5
         voiceover: Con el sol en lo alto, la ciudad late a pleno ritmo.
+        sfx: claxon cercano de un auto

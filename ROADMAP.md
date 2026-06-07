@@ -464,22 +464,28 @@ audio) queda como **premium por `routing.yaml`**. Ver [D-034].
 plano), en `project.yaml`. El cue de MMAudio por plano = `shot.sfx` + `ambience` de su escena.
 
 ### Acceptance Criteria
-- [ ] AC1 — `scene.ambience` + `shot.sfx` se parsean (contracts/`project.yaml`); sin ellos, el render actual queda **intacto**. 🔬
-- [ ] AC2 — `effective_audio_cue(scene, shot)` = `sfx` del plano + `ambience` de su escena (lógica pura). 🔬
-- [ ] AC3 — Tras generar el clip (mudo), un **paso V2A** (MMAudio, fal) **cacheado** (`video_key + cue`) devuelve el clip con audio sincronizado; sin cue/clave → se omite (best-effort).
-- [ ] AC4 — La mezcla respeta la **jerarquía**: voz (TTS) > audio diegético (MMAudio) > música. `mux_voiceover` pasa a **mezclar (`amix`)**, no reemplazar. 🔬 *(parámetros)*
-- [ ] AC5 — Una escena con **audio nativo** (capability `audio` en `routing.yaml`) va a Veo/Kling y **salta** el paso V2A — **sin tocar código**.
+- [x] AC1 — `scene.ambience` + `shot.sfx` se parsean (contracts/`project.yaml`) y round-trip por `write_spec`; sin ellos, el render queda **intacto**. 🔬
+- [x] AC2 — `effective_audio_cue(scene, shot)` = `sfx` del plano + `ambience` de su escena (lógica pura). 🔬
+- [x] AC3 — Tras el clip (mudo), un **paso V2A** (MMAudio, fal) **cacheado** (`sfx` ← `video_key + cue + seed`) devuelve el clip con audio; sin cue/clave → se omite (best-effort).
+- [x] AC4 — Mezcla con **jerarquía** voz > diegético (0.6) > música (0.25). `mux_voiceover` **mezcla (`amix`)** sobre el audio del clip, no reemplaza. 🔬 *(filtro/parámetros)*
+- [x] AC5 — Si el clip **ya trae audio** (modelo nativo tipo Veo, vía `routing.yaml`), se respeta y **se salta** el V2A (`_has_audio`) — sin tocar código.
 
 ### Tasks (orden test-first)
-- [ ] T6.9.1 — `Scene.ambience` + `Shot.sfx` en `contracts.py` + parseo en `project.py` (y `write_spec`/`spec_to_dict`). 🔬 *core*
-- [ ] T6.9.2 — `effective_audio_cue(scene, shot)` (sfx + ambience de la escena). 🔬 *core*
-- [ ] T6.9.3 — `providers/mmaudio.py` (fal): clip + cue → clip con audio; aislado/mockeable.
-- [ ] T6.9.4 — `runner._render_shot`: paso V2A tras el clip (cacheado `video_key+cue`, best-effort); se omite si la escena usa audio nativo.
-- [ ] T6.9.5 — `audio.mux_voiceover` → **mezcla** (`amix`) sobre el audio diegético, con jerarquía de volumen. 🔬 *(parámetros)* / smoke (ffmpeg).
-- [ ] T6.9.6 — Smoke pago (centavos): `lego_mix` con `ambience`/`sfx` → MMAudio → mezcla; verificar audio sincronizado bajo la voz.
+- [x] T6.9.1 — `Scene.ambience` + `Shot.sfx` en `contracts.py` + parseo y `spec_to_dict`/`write_spec`. 🔬 ✅
+- [x] T6.9.2 — `audio.effective_audio_cue(scene, shot)` (sfx + ambience de la escena). 🔬 ✅
+- [x] T6.9.3 — `providers/mmaudio.py` (fal `fal-ai/mmaudio-v2`): clip + cue → clip con audio; aislado/mockeable.
+- [x] T6.9.4 — `runner._render_shot`: paso V2A tras el recorte (cacheado, best-effort); se omite si el clip ya trae audio.
+- [x] T6.9.5 — `audio.mux_voiceover` → **mezcla** (`amix`) sobre el diegético, con jerarquía (`vo_mix_filter`). 🔬 ✅
+- [~] T6.9.6 — `projects/lego_mix` con `ambience`/`sfx` listo como target. **Smoke pago (centavos) pendiente** (MMAudio real + mezcla).
 
 > **Diferido:** diálogo/lip-sync nativo (sigue por TTS); **stems separados por capa** en el export
 > ([D-029]); ThinkSound como alternativa de V2A.
+
+> **✅ Sprint 6.9 CERRADO** (2026-06-06). Core en verde (`test_sound.py`: parseo/round-trip, cue,
+> filtro de mezcla; +9). SFX (acción, por plano) + ambiente (lugar, por escena) → cue → **MMAudio V2**
+> (V2A en fal, lee los frames → sincronizado, $0.001/s), cacheado y best-effort; la voz se **mezcla**
+> encima del diegético y la música queda por debajo. Audio nativo (Veo/Kling) se respeta y salta el
+> V2A. **Pendiente:** smoke pago end-to-end con `lego_mix` (junto con el de 6.6/6.7/6.8).
 
 ---
 
