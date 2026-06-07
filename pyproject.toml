@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-pipeline = "pipeline.cli:app"
+pipeline = "pipeline.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]

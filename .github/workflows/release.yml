@@ -1,0 +1,80 @@
+name: release
+
+# Dispara con un tag tipo v0.1.0. Hace matriz windows/macos/linux,
+# corre scripts/build.py --zip, y sube los zips como assets del release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # para crear el release
+
+jobs:
+  build:
+    name: build-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: video-gen-pipeline-windows
+          - os: macos-latest
+            artifact_name: video-gen-pipeline-macos
+          - os: ubuntu-latest
+            artifact_name: video-gen-pipeline-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.4.16"
+
+      - name: Cache venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+
+      - name: Sync deps (api + studio + dev)
+        run: uv sync --extra apis --extra studio --extra dev
+
+      - name: Install pyinstaller
+        run: uv pip install pyinstaller
+
+      # macOS y Linux no tienen ffmpeg en PATH por default. Lo instalamos.
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Build bundle
+        run: python scripts/build.py --zip --skip-install
+
+      - name: Upload zip as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ github.ref_name }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish-release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release with all zips
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          draft: false
+          fail_on_unmatched_files: true
