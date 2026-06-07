@@ -29,6 +29,26 @@ def test_providers_capabilities_are_sets():
     assert "audio" in provs["veo"].capabilities
 
 
+def test_audio_block_loaded_from_config(tmp_path):
+    # D-034: el modelo de post de audio vive en config (no hardcodeado), con su costo.
+    cfg = load_config(CONFIG_DIR, "lego")
+    assert "mmaudio" in cfg.audio
+    assert cfg.audio["mmaudio"].model == "fal-ai/mmaudio-v2"
+    assert cfg.audio["mmaudio"].cost_per_second == 0.001
+    # y NO entra al routing (no compite con los providers de video)
+    assert "mmaudio" not in cfg.providers
+
+
+def test_audio_block_absent_is_empty(tmp_path):
+    (tmp_path / "providers.yaml").write_text(
+        "providers:\n  k:\n    backend: fal\n    model: m\n    cost_per_second: 0.0\n",
+        encoding="utf-8",
+    )
+    from pipeline.config import load_audio
+
+    assert load_audio(tmp_path / "providers.yaml") == {}
+
+
 def test_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         load_routing(Path("config") / "no_existe.yaml")

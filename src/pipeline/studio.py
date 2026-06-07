@@ -19,7 +19,16 @@ from .config import Config
 from .contact_sheet import build_contact_sheet, write_and_open
 from .keyframe import KeyframeGenerator, build_styled_prompt
 from .naming import readable_name, semantic_slug
-from .project import Character, Project, ProjectSpec, cache_key, character_refs, effective_shots
+from .project import (
+    Character,
+    Project,
+    ProjectSpec,
+    _resolve_under,
+    cache_key,
+    character_refs,
+    effective_shots,
+    resolve_refs,
+)
 from .runner import _keyframe_inputs, run_project
 
 logger = logging.getLogger(__name__)
@@ -100,6 +109,7 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
 
     for name, ch in designed.items():
         ref_sig = sorted(str(r) for r in ch.design.refs)
+        refs_resolved = resolve_refs(project.dir, ch.design.refs)  # project-relative -> abs
         paths: list[Path] = []        # hash (verdad del caché, estable para pick-cast)
         display: list[Path] = []      # alias legibles (<personaje>_cara_<idx>.png)
         for i in range(n):
@@ -114,7 +124,7 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
                     logger.info("[%s] cara %d/%d (cache hit)", name, i + 1, n)
                 else:
                     logger.info("[%s] cara %d/%d | generando...", name, i + 1, n)
-                    tmp = await keyframer.generate_design(ch.design.prompt, ch.design.refs, seed=i)
+                    tmp = await keyframer.generate_design(ch.design.prompt, refs_resolved, seed=i)
                     stored = project.cache_store("cast", key, tmp, ".png")
                 alias = _alias(project, "faces", name, "cara", i, stored)
                 paths.append(stored)
@@ -146,7 +156,10 @@ def record_cast_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos de casting para '{name}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{name}' (0..{len(cands) - 1}).")
-        casting[name] = cands[idx]
+        # Resuelve a absoluto: el manifest nuevo trae paths absolutos
+        # (post-fix de `Project.dir`); el viejo (pre-fix) trae CWD-relativos.
+        # `.resolve()` cubre ambos casos (idempotente en absolutos).
+        casting[name] = str(Path(cands[idx]).resolve())
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -159,12 +172,16 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
     Para cuando la cara del personaje ya existe (de afuera o decidida): se toma,
     no se elige. Escribe en `casting.yaml` (lo mismo que `pick-cast`), así las
     escenas la heredan vía `apply_casting`.
+
+    Las rutas se resuelven contra `project.dir` (formato del yaml: project-
+    relative, p.ej. `refs/x.png`). Absolutas se respetan.
     """
     casting = load_casting(project)
     for name, path in faces.items():
-        if not Path(path).exists():
-            raise RuntimeError(f"La cara directa de '{name}' no existe: {path}")
-        casting[name] = str(path)
+        resolved = _resolve_under(project.dir, path)
+        if not resolved.exists():
+            raise RuntimeError(f"La cara directa de '{name}' no existe: {resolved}")
+        casting[name] = str(resolved)
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -181,6 +198,7 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
     for scene in spec.scenes:
         refs = character_refs(scene, spec.characters)
         scene.character_refs = refs
+        refs_resolved = resolve_refs(project.dir, refs)  # project-relative -> abs
         ref_sig = sorted(str(r) for r in refs)
         anchor = effective_shots(scene)[0]  # el keyframe elegido = plano 1 (D-028)
         styled = build_styled_prompt(scene, cfg.style, anchor.framing)
@@ -198,7 +216,7 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
                     logger.info("[%s] keyframe %d/%d (cache hit)", scene.id, i + 1, n)
                 else:
                     logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
-                    tmp = await keyframer.generate(scene, ref_images=refs, seed=i, framing=anchor.framing)
+                    tmp = await keyframer.generate(scene, ref_images=refs_resolved, seed=i, framing=anchor.framing)
                     stored = project.cache_store("keyframes", key, tmp, ".png")
                 alias = _alias(project, "keyframes", scene.id, slug, i, stored)
                 paths.append(stored)
@@ -232,7 +250,9 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos para '{sid}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{sid}' (0..{len(cands) - 1}).")
-        selections[sid] = cands[idx]
+        # Resuelve a absoluto: idem `record_cast_picks` (manifests viejos con
+        # CWD-relativos + nuevos absolutos).
+        selections[sid] = str(Path(cands[idx]).resolve())
 
     project.selections_path.write_text(
         yaml.safe_dump(selections, sort_keys=False, allow_unicode=True), encoding="utf-8"

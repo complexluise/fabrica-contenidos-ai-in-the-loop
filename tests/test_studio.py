@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.contact_sheet import build_contact_sheet
-from pipeline.studio import parse_overrides, parse_picks
+from pipeline.studio import parse_overrides, parse_picks, resolve_refs
 
 
 # --- contact sheet ----------------------------------------------------------
@@ -77,3 +77,54 @@ def test_parse_overrides_rejects_bad_format():
 def test_parse_overrides_rejects_empty_path():
     with pytest.raises(ValueError):
         parse_overrides(["s1="])
+
+
+# --- resolución de refs project-relative ------------------------------------
+# El `project.yaml` y los flags `--face` declaran rutas project-relative
+# (p.ej. `refs/x.png`); hay que resolverlas contra `project.dir` antes de
+# pasárselas al keyframer o validar existencia.
+
+def test_resolve_refs_relative_against_base(tmp_path):
+    base = tmp_path
+    out = resolve_refs(base, [Path("refs/a.png"), Path("refs/b.png")])
+    assert out == [base / "refs/a.png", base / "refs/b.png"]
+    assert all(p.is_absolute() for p in out)
+
+
+def test_resolve_refs_keeps_absolute_paths(tmp_path):
+    abs_path = tmp_path / "abs.png"
+    out = resolve_refs(tmp_path, [abs_path])
+    assert out == [abs_path]
+
+
+def test_set_cast_faces_resolves_relative_against_project_dir(tmp_path):
+    """Bug original: `Path('refs/x.png').exists()` buscaba contra CWD, no
+    contra el proyecto. El fix resuelve contra `project.dir`."""
+    from pipeline.project import Project
+    from pipeline.studio import set_cast_faces
+
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "refs").mkdir()
+    face = project_dir / "refs" / "cara.png"
+    face.write_bytes(b"x")
+
+    proj = Project("proj", root=tmp_path)
+    out = set_cast_faces(proj, {"juan": Path("refs/cara.png")})
+    assert out.exists()
+    import yaml as _y
+    casting = _y.safe_load(out.read_text(encoding="utf-8"))
+    assert casting["juan"].endswith("refs" + __import__("os").sep + "cara.png")
+
+
+def test_set_cast_faces_raises_with_resolved_path_in_message(tmp_path):
+    """El error debe mostrar la ruta **resuelta** (la que de verdad no existe),
+    no la cruda del usuario, para que sea accionable."""
+    from pipeline.project import Project
+    from pipeline.studio import set_cast_faces
+
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    proj = Project("proj", root=tmp_path)
+    with pytest.raises(RuntimeError, match=r"no existe"):
+        set_cast_faces(proj, {"juan": Path("refs/missing.png")})

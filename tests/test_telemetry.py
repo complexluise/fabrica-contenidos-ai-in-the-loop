@@ -22,6 +22,17 @@ def test_totals_sum_cost_and_latency(tmp_path):
     t.close()
 
 
+def test_audio_cost_counts_in_total_and_own_provider_line(tmp_path):
+    # D-034: el costo del paso V2A (MMAudio) suma al total y aparece como su
+    # propia línea en cost_by_provider (no se atribuye al provider de video).
+    t = Telemetry("r1", db_path=tmp_path / "t.sqlite")
+    t.record(_rec("s1", "kling", 0.12, 30, audio_provider="mmaudio", audio_cost_usd=0.005))
+    totals = t.totals()
+    assert totals["total_cost_usd"] == 0.125
+    assert totals["cost_by_provider"] == {"kling": 0.12, "mmaudio": 0.005}
+    t.close()
+
+
 def test_record_failure_counts_in_totals(tmp_path):
     t = Telemetry("r1", db_path=tmp_path / "t.sqlite")
     t.record(_rec("s1", "kling", 0.12, 30))

@@ -15,19 +15,23 @@ from pathlib import Path
 
 import httpx
 
+from ..config import ProviderConfig
 from .fal_kling import _extract_video_url
-
-_MODEL = "fal-ai/mmaudio-v2"
 
 
 class MMAudioV2:
-    """Genera audio diegético (sfx + ambiente) para un clip vía MMAudio en fal."""
+    """Genera audio diegético (sfx + ambiente) para un clip vía MMAudio en fal.
+
+    El modelo y el costo salen de la config (`audio.mmaudio` en providers.yaml,
+    D-034), no hardcodeados — igual que el resto de los modelos del proyecto.
+    """
 
     name = "mmaudio"
 
-    def __init__(self, api_key: str, model: str = _MODEL, timeout: float = 600.0):
+    def __init__(self, api_key: str, cfg: ProviderConfig, timeout: float = 600.0):
         self._api_key = api_key
-        self.model = model
+        self.model = cfg.model
+        self.cost_per_second = cfg.cost_per_second
         self._timeout = timeout
 
     async def add_audio(self, clip: Path, cue: str, out_path: Path, seed: int = 0) -> Path:

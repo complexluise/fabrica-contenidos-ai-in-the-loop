@@ -225,6 +225,23 @@ def effective_shots(scene: Scene) -> list[Shot]:
                  voiceover=scene.voiceover, caption=scene.caption, keyframe=scene.keyframe)]
 
 
+def _resolve_under(base: Path, p: Path) -> Path:
+    """Resuelve una ruta contra `base` si es relativa; absoluta se queda igual.
+
+    Los proyectos declaran refs en `project.yaml` y el humano pasa `--face
+    nombre=refs/x.png`: ambos son project-relative. Sin esto, `Path(...).exists()`
+    y `fal_client.upload_file` buscan contra el CWD y revientan si el repo se corre
+    desde otra carpeta. Se resuelve **solo para I/O** — el cache key sigue usando la
+    ruta relativa (estable y portable, no se mete el path absoluto en el hash)."""
+    p = Path(p)
+    return (base / p).resolve() if not p.is_absolute() else p
+
+
+def resolve_refs(base: Path, refs: list[Path]) -> list[Path]:
+    """Resuelve una lista de refs contra `base`. Lógica pura (testeable)."""
+    return [_resolve_under(base, Path(r)) for r in refs]
+
+
 def character_refs(scene: Scene, characters: dict[str, Character]) -> list[Path]:
     """Reúne las referencias de los personajes de la escena (orden, sin duplicados)."""
     out: list[Path] = []

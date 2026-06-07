@@ -52,6 +52,10 @@ class Config(BaseModel):
     providers: dict[str, ProviderConfig]
     routing: RoutingConfig
     style: StyleConfig
+    # Post de audio (D-034): modelos que NO compiten en el routing (p.ej. el paso
+    # video-to-audio MMAudio). Viven aparte de `providers:` para no entrar al
+    # router/cascade/ensemble. Vacio si no hay bloque `audio:`.
+    audio: dict[str, ProviderConfig] = Field(default_factory=dict)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -66,6 +70,12 @@ def load_providers(path: Path) -> dict[str, ProviderConfig]:
     return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
 
 
+def load_audio(path: Path) -> dict[str, ProviderConfig]:
+    """Modelos de post de audio (bloque `audio:` de providers.yaml). D-034."""
+    raw = _load_yaml(path).get("audio", {})
+    return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
+
+
 def load_routing(path: Path) -> RoutingConfig:
     return RoutingConfig(**_load_yaml(path))
 
@@ -77,6 +87,7 @@ def load_style(path: Path) -> StyleConfig:
 def load_config(config_dir: Path, style: str) -> Config:
     """Carga la config completa para un estilo dado."""
     providers = load_providers(config_dir / "providers.yaml")
+    audio = load_audio(config_dir / "providers.yaml")
     routing = load_routing(config_dir / "routing.yaml")
     style_cfg = load_style(config_dir / "styles" / f"{style}.yaml")
-    return Config(providers=providers, routing=routing, style=style_cfg)
+    return Config(providers=providers, routing=routing, style=style_cfg, audio=audio)

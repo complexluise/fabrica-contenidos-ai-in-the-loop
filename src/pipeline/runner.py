@@ -31,7 +31,14 @@ from .deliver import reframe
 from .gate import FusedGate
 from .keyframe import KeyframeGenerator, build_styled_prompt
 from .post import burn_lower_third, default_font
-from .project import Project, ProjectSpec, cache_key, character_refs, effective_shots
+from .project import (
+    Project,
+    ProjectSpec,
+    cache_key,
+    character_refs,
+    effective_shots,
+    resolve_refs,
+)
 from .providers.base import build_provider
 from .providers.elevenlabs_tts import ElevenLabsTTS
 from .providers.mmaudio import MMAudioV2
@@ -79,6 +86,10 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     (scene-addressed); los planos 2+ autogeneran su keyframe (cacheado, sin pick).
     Devuelve (clip_path, SceneRecord, manifest_entry, audio_applied).
     """
+    # Refs project-relative -> absolutas SOLO para I/O (keyframer + gate). El cache
+    # key sigue con `ref_sig` (relativo, estable). Mismo criterio que studio (D-034).
+    refs_io = resolve_refs(project.dir, refs)
+
     # --- L3 keyframe (cacheado, con identidad de personaje) ---
     styled = build_styled_prompt(scene, cfg.style, shot.framing)
     kf_key = cache_key("keyframe", _keyframe_inputs(styled, cfg, ref_sig))
@@ -93,7 +104,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
             logger.info("[%s] keyframe (cache hit): %s", shot_id, kf_hit.name)
         else:
             logger.info("[%s] %s | generando keyframe...", shot_id, scene.class_)
-            tmp = await keyframer.generate(scene, ref_images=refs, framing=shot.framing)
+            tmp = await keyframer.generate(scene, ref_images=refs_io, framing=shot.framing)
             keyframe = project.cache_store("keyframes", kf_key, tmp, ".png")
             logger.info("[%s] keyframe generado: %s", shot_id, keyframe.name)
 
@@ -102,7 +113,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed,
-        "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs,
+        "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
     })
 
     # --- L5 video (cacheado) ---
@@ -141,6 +152,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     cue = effective_audio_cue(scene, shot)
     diegetic_applied = False
     sfx_key = None
+    audio_provider = ""
+    audio_cost = 0.0
     if cue and mm is not None and not _has_audio(clip_path):
         try:
             sfx_key = cache_key("sfx", {"video_key": vid_key, **sfx_inputs(cue, mm.model, shot.seed)})
@@ -153,7 +166,9 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
                 scratch = run.dir / "_sfx" / f"{shot_id}.mp4"
                 await mm.add_audio(clip_path, cue, scratch, seed=shot.seed)
                 clip_path = project.cache_store("sfx", sfx_key, scratch, ".mp4")
+                audio_cost = round(mm.cost_per_second * shot.duration_s, 4)  # solo si se generó
             diegetic_applied = True
+            audio_provider = mm.name
         except Exception:
             pass  # sin diegético antes que perder el plano
 
@@ -189,7 +204,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
         cost_usd=result.cost_usd, latency_s=result.latency_s,
         attempt=result.raw_meta.get("attempts", 1),
         passed=result.raw_meta.get("gate_passed", True),
-        cached=cached, keyframe_key=kf_key, video_key=vid_key)
+        cached=cached, keyframe_key=kf_key, video_key=vid_key,
+        audio_provider=audio_provider, audio_cost_usd=audio_cost)
     manifest_entry = {
         "id": shot_id, "scene": scene.id, "beat": scene.beat, "class": scene.class_,
         "strategy": rule.strategy, "provider": result.provider,
@@ -232,10 +248,11 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     # si algún plano trae un cue y hay FAL_KEY. Best-effort.
     any_cue = any(effective_audio_cue(s, sh) for s in spec.scenes for sh in effective_shots(s))
     mm = None
-    if any_cue:
+    audio_cfg = cfg.audio.get("mmaudio")  # modelo+costo desde config (D-034)
+    if any_cue and audio_cfg is not None:
         fal_key_env = get_settings().fal_key
         if fal_key_env:
-            mm = MMAudioV2(fal_key_env)
+            mm = MMAudioV2(fal_key_env, audio_cfg)
 
     manifest_scenes: list[dict] = []
     clips = []

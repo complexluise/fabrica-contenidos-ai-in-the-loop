@@ -30,6 +30,8 @@ class SceneRecord:
     cached: bool = False  # True si salio del cache (costo 0)
     keyframe_key: str = ""
     video_key: str = ""
+    audio_provider: str = ""   # paso de post de audio (V2A MMAudio, D-034); "" si no hubo
+    audio_cost_usd: float = 0.0  # costo del V2A (0 en cache hit o si no aplica)
     ts: float = field(default_factory=time.time)
 
 
@@ -48,6 +50,8 @@ CREATE TABLE IF NOT EXISTS scene_runs (
     cached INTEGER NOT NULL,
     keyframe_key TEXT NOT NULL,
     video_key TEXT NOT NULL,
+    audio_provider TEXT NOT NULL DEFAULT '',
+    audio_cost_usd REAL NOT NULL DEFAULT 0,
     ts REAL NOT NULL
 );
 """
@@ -76,8 +80,8 @@ class Telemetry:
             """INSERT INTO scene_runs
                (run_id, scene_id, provider, strategy, scene_class,
                 cost_usd, latency_s, attempt, passed, cached,
-                keyframe_key, video_key, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                keyframe_key, video_key, audio_provider, audio_cost_usd, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rec.run_id,
                 rec.scene_id,
@@ -91,6 +95,8 @@ class Telemetry:
                 int(rec.cached),
                 rec.keyframe_key,
                 rec.video_key,
+                rec.audio_provider,
+                rec.audio_cost_usd,
                 rec.ts,
             ),
         )
@@ -98,11 +104,13 @@ class Telemetry:
 
     def totals(self) -> dict:
         """Agrega totales de la corrida (los del objeto en memoria)."""
-        total_cost = sum(r.cost_usd for r in self._records)
+        total_cost = sum(r.cost_usd + r.audio_cost_usd for r in self._records)
         total_latency = sum(r.latency_s for r in self._records)
         by_provider: dict[str, float] = {}
         for r in self._records:
             by_provider[r.provider] = by_provider.get(r.provider, 0.0) + r.cost_usd
+            if r.audio_provider and r.audio_cost_usd:  # el V2A como su propia línea (D-034)
+                by_provider[r.audio_provider] = by_provider.get(r.audio_provider, 0.0) + r.audio_cost_usd
         return {
             "run_id": self.run_id,
             "scenes": len({r.scene_id for r in self._records}),
