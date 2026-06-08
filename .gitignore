@@ -31,23 +31,9 @@ cache/
 # Imagenes de referencia locales (no subir al repo)
 data/
 
-# Proyectos: trackear solo project.yaml; cache y runs son artefactos locales
-projects/*/cache/
-projects/*/runs/
-projects/*/_scratch/
-projects/*/candidates.yaml
-projects/*/selections.yaml
-projects/*/keyframes_review.html
-projects/*/cast_candidates.yaml
-projects/*/casting.yaml
-projects/*/cast_review.html
-# Variantes Windows de las hojas de contacto (generadas)
-projects/*/*_win.html
-# Alias legibles humano-facing (D-026): copias del cache por hash
-projects/*/keyframes/
-projects/*/faces/
-# Bundle de export para edicion (D-029): salida generada desde el ultimo run
-projects/*/export/
+# Proyectos: nada se sube por accidente. Un proyecto se versiona solo si esta
+# en la allowlist explicita al final del archivo (hoy: lego_demo como showcase).
+projects/*/
 
 # Node (conversor md->docx D-030; UI Svelte D-031)
 node_modules/
@@ -65,10 +51,11 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Excepcion: lego_demo es el ejemplo de referencia (showcase curado).
-# Versionamos la entrada, la decision humana y un resultado, para que el flujo
-# completo se vea sin generar nada. El resto de artefactos siguen ignorados.
-# (Estas negaciones van al final para ganarle a las reglas globales *.png/*.mp4.)
+# Excepcion: lego_demo es el unico proyecto versionado (showcase curado).
+# Solo la entrada, la decision humana y un resultado. El resto queda fuera:
+# un `git add .` accidental nunca sube un proyecto privado.
+!projects/lego_demo/README.md
+!projects/lego_demo/project.yaml
 !projects/lego_demo/selections.yaml
 !projects/lego_demo/keyframe_s1.png
 !projects/lego_demo/final_9x16.mp4
