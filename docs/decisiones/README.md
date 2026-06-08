@@ -62,3 +62,12 @@ es continua entre archivos.
 | D-035 | UX del bucle: Configuración fuera del bucle + firma explícita del plan | Vigente |
 | D-036 | Biblioteca global de assets reusables (personajes/símbolos/lugares) | Vigente (en diseño) |
 | D-037 | Frame por plano (auto) + cortes cortos (refina D-028) | Vigente (en diseño) |
+| D-038 | Perfiles de calidad `proto`/`prod` seleccionables desde el CLI | Vigente |
+| D-039 | Escenas en paralelo: semáforo de concurrencia en el runner | Vigente |
+| D-040 | Inputs: foco rojo (gesto humano) + textarea base + texturas por nivel editorial | Vigente |
+
+### [0041-0050.md](0041-0050.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-041 | Ojos semánticos: `pipeline describe` (Haiku ve y evalúa cada plano) | Vigente |
+| D-042 | Edición autónoma mixta: movis (CLI) + mcp-video (MCP), sin EDL | Vigente |
