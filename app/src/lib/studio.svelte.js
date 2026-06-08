@@ -122,6 +122,7 @@ export function stepDone(id, st) {
   if (!st) return false;
   const at = PIPELINE_ORDER.indexOf(st.stage);
   if (id === "ajustes")    return at > PIPELINE_ORDER.indexOf("sin_claves");
+  if (id === "importar")   return at > PIPELINE_ORDER.indexOf("guion");
   if (id === "storyboard") return at > PIPELINE_ORDER.indexOf("guion");
   if (id === "elegir")     return at > PIPELINE_ORDER.indexOf("encuadres");
   if (id === "producir")   return st.stage === "completo";

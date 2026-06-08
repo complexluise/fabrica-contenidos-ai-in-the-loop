@@ -155,9 +155,11 @@
     border: 2px dashed var(--line-2); border-radius: var(--r-lg);
     padding: 10px; background: var(--card); transition: border-color 0.15s, background 0.15s;
   }
+  /* dragging = la máquina recibe (azul); typing = el humano escribe (rojo) */
   .drop.dragging { border-color: var(--blue); background: var(--blue-wash, #eef3fb); }
+  .drop:focus-within:not(.dragging) { border-color: var(--red); border-style: solid; }
   .drop textarea {
-    width: 100%; border: none; resize: vertical; font-size: 15px; line-height: 1.5;
+    width: 100%; border: none; resize: vertical; font-size: 15px; line-height: 1.55;
     background: transparent; padding: 8px 10px;
   }
   .drop textarea:focus { outline: none; box-shadow: none; }

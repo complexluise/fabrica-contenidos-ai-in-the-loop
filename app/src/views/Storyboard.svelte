@@ -208,8 +208,12 @@
   .meta { display: flex; gap: 7px; }
 
   .card.pad { padding: 12px 16px; margin: 12px 0; }
-  .lbl { display: block; font-size: 12px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px; }
-  .brief-in, .prompt-in { width: 100%; resize: vertical; font-size: 14.5px; line-height: 1.5; }
+  .lbl { display: block; font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }
+  /* nivel editorial: inset dentro de card, no compiten con el contorno del card */
+  .brief-in, .prompt-in {
+    width: 100%; resize: vertical; font-size: 14.5px; line-height: 1.6;
+    background: var(--paper-2); border-color: var(--line);
+  }
 
   .toolbar { display: flex; align-items: center; gap: 8px; margin: 24px 0 10px; }
   .toolbar h2 { margin: 0; }
@@ -218,7 +222,12 @@
   .scene { background: var(--card); border: 1.5px solid var(--line); border-radius: var(--r); margin: 9px 0; overflow: hidden; }
   .shead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--paper-2); border-bottom: 1px solid var(--line); }
   .sid { font-weight: 700; color: var(--blue-deep); flex-shrink: 0; }
-  .beat-in { max-width: 220px; font-size: 13px; padding: 3px 8px; }
+  /* beat: campo inline en cabecera, se funde con el fondo paper-2 del shead */
+  .beat-in {
+    max-width: 220px; font-size: 13px; padding: 3px 8px;
+    background: transparent; border-color: var(--line); border-radius: var(--r-sm);
+  }
+  .beat-in:focus { background: var(--card); }
   .who { color: var(--ink-soft); font-size: 12px; }
   .dur { color: var(--ink-soft); font-size: 12px; }
 
@@ -236,11 +245,23 @@
   .shot { border: 1px dashed var(--line-2); border-radius: var(--r-sm); padding: 9px 11px; }
   .shot-h { display: flex; align-items: center; gap: 8px; }
   .ptag { background: var(--blue); color: #fff; border-radius: var(--r-sm); padding: 1px 9px; font-size: 12px; font-weight: 700; flex-shrink: 0; }
-  .fr-in { flex: 1; font-size: 13.5px; padding: 4px 8px; }
-  .num-in { width: 56px; text-align: right; font-family: var(--font-mono); padding: 4px 6px; }
+  /* campos de plano: subdued, se funden con el contenedor de plano (no compiten con el dashed card) */
+  .fr-in {
+    flex: 1; font-size: 13.5px; padding: 4px 8px;
+    background: transparent; border-color: var(--line); border-radius: var(--r-sm);
+  }
+  .fr-in:focus { background: var(--card); }
+  .num-in {
+    width: 56px; text-align: right; font-family: var(--font-mono); padding: 4px 6px;
+    background: transparent; border-color: var(--line); border-radius: var(--r-sm);
+  }
+  .num-in:focus { background: var(--card); }
   .s { font-size: 12px; }
   .shot-fields { display: flex; gap: 8px; margin-top: 7px; }
-  .vo-in, .cap-in { flex: 1; font-size: 13px; padding: 4px 8px; }
+  .vo-in, .cap-in {
+    flex: 1; font-size: 13px; padding: 4px 8px;
+    background: var(--paper-2); border-color: var(--line); border-radius: var(--r-sm);
+  }
   .addshot { align-self: flex-start; }
 
   .savebar {
