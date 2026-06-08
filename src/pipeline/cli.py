@@ -98,7 +98,7 @@ async def _run_async(
 
 
 async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
-                            profile: str = "prod", concurrency: int = 1) -> Path:
+                            profile: str = "proto", concurrency: int = 1) -> Path:
     from .project import Project, load_project_spec
     from .runner import run_project
 
@@ -294,7 +294,7 @@ def run(
     brief: Path = typer.Option(None, "--brief", help="Modo smoke: corre un brief YAML suelto a out/ (sin proyecto/cache)."),
     style: str = typer.Option("lego", help="Style slot (solo modo --brief)."),
     fmt: str = typer.Option("9:16", "--format", help="Formato de salida (solo modo --brief)."),
-    profile: str = typer.Option("prod", "--profile", help="Perfil de calidad: prod (ensemble/calidad) o proto (router/barato). D-038."),
+    profile: str = typer.Option("proto", "--profile", help="Perfil de calidad: proto (router/barato, default) o prod (ensemble/calidad). D-038."),
     concurrency: int = typer.Option(1, "--concurrency", help="Escenas en vuelo simultaneo (D-039). Default 1 = serial."),
     config_dir: Path = typer.Option(Path("config"), help="Directorio de config."),
     projects_dir: Path = typer.Option(Path("projects"), help="Raíz de proyectos."),
