@@ -27,6 +27,7 @@ from .project import (
     cache_key,
     character_refs,
     effective_shots,
+    relativize,
     resolve_refs,
 )
 from .runner import _keyframe_inputs, run_project
@@ -156,10 +157,9 @@ def record_cast_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos de casting para '{name}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{name}' (0..{len(cands) - 1}).")
-        # Resuelve a absoluto: el manifest nuevo trae paths absolutos
-        # (post-fix de `Project.dir`); el viejo (pre-fix) trae CWD-relativos.
-        # `.resolve()` cubre ambos casos (idempotente en absolutos).
-        casting[name] = str(Path(cands[idx]).resolve())
+        # Persiste project-relative (portable, D-044): la cara vive en cache/
+        # del proyecto -> queda como `cache/cast/<hash>.png`.
+        casting[name] = relativize(project.dir, cands[idx])
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -181,7 +181,7 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
         resolved = _resolve_under(project.dir, path)
         if not resolved.exists():
             raise RuntimeError(f"La cara directa de '{name}' no existe: {resolved}")
-        casting[name] = str(resolved)
+        casting[name] = relativize(project.dir, resolved)  # portable (D-044)
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -250,9 +250,9 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos para '{sid}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{sid}' (0..{len(cands) - 1}).")
-        # Resuelve a absoluto: idem `record_cast_picks` (manifests viejos con
-        # CWD-relativos + nuevos absolutos).
-        selections[sid] = str(Path(cands[idx]).resolve())
+        # Persiste project-relative (portable, D-044): el candidato vive en
+        # cache/ del proyecto -> queda como `cache/keyframes/<hash>.png`.
+        selections[sid] = relativize(project.dir, cands[idx])
 
     project.selections_path.write_text(
         yaml.safe_dump(selections, sort_keys=False, allow_unicode=True), encoding="utf-8"
@@ -288,16 +288,20 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
     selección persistida (`selections.yaml`, el ciclo de candidatos). Una escena
     queda satisfecha por cualquiera de las dos.
     """
-    flag = keyframe_overrides or {}
-    for sid, p in flag.items():  # error temprano y claro si la ruta no existe
-        if not Path(p).exists():
-            raise RuntimeError(f"El keyframe directo de '{sid}' no existe: {p}")
+    # Rutas resueltas para I/O contra el proyecto (project-relative -> abs, D-044):
+    # selections.yaml y --keyframe son portables (relativos al proyecto).
+    flag: dict[str, Path] = {}
+    for sid, p in (keyframe_overrides or {}).items():  # error temprano si no existe
+        resolved = _resolve_under(project.dir, p)
+        if not resolved.exists():
+            raise RuntimeError(f"El keyframe directo de '{sid}' no existe: {resolved}")
+        flag[sid] = resolved
 
     selections = {}
     if project.selections_path.exists():
         selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
 
-    merged: dict[str, Path] = {sid: Path(p) for sid, p in selections.items()}
+    merged: dict[str, Path] = {sid: _resolve_under(project.dir, p) for sid, p in selections.items()}
     merged.update(flag)  # el flag tiene precedencia (D-025)
 
     missing = [s.id for s in spec.scenes if s.id not in merged]

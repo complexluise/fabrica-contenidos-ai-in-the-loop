@@ -115,7 +115,9 @@ def test_set_cast_faces_resolves_relative_against_project_dir(tmp_path):
     assert out.exists()
     import yaml as _y
     casting = _y.safe_load(out.read_text(encoding="utf-8"))
-    assert casting["juan"].endswith("refs" + __import__("os").sep + "cara.png")
+    # Persistido project-relative con forward-slash (D-044): portable entre
+    # Windows/WSL y entre maquinas.
+    assert casting["juan"] == "refs/cara.png"
 
 
 def test_set_cast_faces_raises_with_resolved_path_in_message(tmp_path):
