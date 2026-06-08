@@ -16,7 +16,10 @@ def extract_frame(video_path: Path, at_seconds: float = 1.0) -> Path:
     ff = shutil.which("ffmpeg")
     if not ff:
         raise RuntimeError("ffmpeg no está en el PATH (necesario para el gate).")
-    out = Path(tempfile.gettempdir()) / f"frame_{abs(hash(str(video_path))) & 0xFFFFFF:06x}.png"
+    # El nombre incluye `at_seconds`: varios frames del mismo clip (D-041, describe)
+    # no deben pisarse entre sí.
+    tag = f"{abs(hash(str(video_path))) & 0xFFFFFF:06x}_{int(round(at_seconds * 1000)):07d}"
+    out = Path(tempfile.gettempdir()) / f"frame_{tag}.png"
     subprocess.run(
         [ff, "-y", "-ss", str(at_seconds), "-i", str(video_path), "-frames:v", "1", str(out)],
         check=True, capture_output=True,
