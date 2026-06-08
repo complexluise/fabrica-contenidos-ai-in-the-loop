@@ -48,6 +48,7 @@ L6  Quality Gate            ── Claude visión (fusión de señales), umbral 
 L7  Assembly & Post         ── banda sonora (voz TTS + SFX/ambiente V2A MMAudio + música) + captions (ffmpeg), concat
 L8  Delivery                ── render multi-formato (9:16 / 1:1 / 16:9)
 L9  Observability           ── costo y latencia por escena
+L10 Edición autónoma        ── describe (Haiku, ojos) + graphics (movis) + mcp-video (montaje); sin editora
 ```
 
 > **Modo interactivo (AI-in-the-Loop, [D-021]/[D-022]):** sobre estas capas hay **checkpoints
@@ -60,6 +61,16 @@ L9  Observability           ── costo y latencia por escena
 > texto/voz quemada + voces + música, emparejados por `NN_<id>`), `frames/` (keyframes), `rough_cut.mp4`
 > (referencia de orden), `subtitulos.srt` y `guion.md` (onboarding + tabla de planos). El `final.mp4`
 > del run es el rough cut, no el definitivo.
+>
+> **Edición autónoma (L10, [D-041]/[D-042]):** cuando **no hay editora**, un agente (Opus) cierra
+> el corte priorizando **el mensaje sobre el pulido**. Tres piezas con roles separados: **`pipeline
+> describe`** = los *ojos* (Claude **Haiku** describe/evalúa cada plano → `descriptions.yaml`:
+> usable / en-mensaje / roto); **`pipeline graphics`** = el *artista* (**movis** genera motion
+> graphics deterministas — lower-thirds, placas — a `export/graphics/`, por el CLI); y **mcp-video**
+> = el *ingeniero* (servidor **MCP** guardrailed que el agente usa directo para montar: trim/merge/
+> overlay/subtítulos/normalize/mix/checkpoint/export → `final_cut.mp4`). **Sin EDL propio**: la
+> reproducibilidad la dan los receipts de mcp-video + los artefactos deterministas. La excepción a
+> "CLI = contrato" (mcp-video entra directo, acotado a edición) está justificada en [D-042].
 >
 > **El CLI es un contrato dual-audiencia ([D-023]):** la misma superficie la consumen humanos y
 > agentes (opencode, claude code). Por eso el CLI es **auto-descriptivo** (`--list`/`--help`,
@@ -412,6 +423,7 @@ legible y tomable a mano:
 video_gen_pipeline/
 ├─ SPEC.md
 ├─ pyproject.toml
+├─ .mcp.json               # registra mcp-video (MCP, vía uvx) para edición autónoma ([D-042])
 ├─ config/
 │  ├─ providers.yaml        # costo/seg, capabilities por backend
 │  ├─ routing.yaml          # escena→estrategia→provider + umbrales + enforce (gate)
@@ -429,6 +441,9 @@ video_gen_pipeline/
 │  ├─ assemble.py           # L7
 │  ├─ post.py               # L7 — lower-thirds de marca (ffmpeg drawtext)
 │  ├─ deliver.py            # L8
+│  ├─ export.py             # L8 — bundle para edición ([D-029])
+│  ├─ describe.py           # L10 — ojos: Haiku describe/evalúa cada plano ([D-041])
+│  ├─ graphics.py           # L10 — artista: motion graphics con movis ([D-042])
 │  ├─ telemetry.py          # L9
 │  ├─ project.py            # §7 proyecto + caché + banco de personajes/casting
 │  ├─ runner.py             # orquesta una corrida (keyframe→video→gate→ensamblaje)
@@ -442,6 +457,8 @@ video_gen_pipeline/
 ```
 > `gate/clip.py` y `gate/aesthetic.py` están **dormidas** (extra `[vision]`, torch); el gate por
 > defecto usa solo Claude visión ([D-017]).
+> `graphics.py` (motion graphics, movis) vive tras el extra `[edit]`; **mcp-video** no es dependencia
+> del proyecto: corre por `uvx` desde `.mcp.json` (env liviano, sin torch/whisper). Ver [D-042].
 
 ---
 

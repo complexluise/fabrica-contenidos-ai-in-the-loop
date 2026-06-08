@@ -532,6 +532,33 @@ para varios planos) y que los planos sean **cortos por default (~2s)**. Refina [
 
 ---
 
+## Sprint 6.12 — Edición autónoma: describe + movis + mcp-video (D-041, D-042) ⭐ SIGUIENTE
+
+**Objetivo:** cerrar el bucle **sin editora humana**. Un agente (Opus) monta el corte final
+priorizando **el mensaje sobre el pulido**, con tres piezas de roles separados: **`describe`** (los
+ojos: Haiku evalúa cada plano), **`graphics`** (el artista: movis genera motion graphics) y
+**mcp-video** (el ingeniero: servidor MCP guardrailed para el montaje). Ver [D-041]/[D-042].
+
+### Acceptance Criteria
+- [ ] AC1 — `pipeline describe <slug>` genera `projects/<slug>/descriptions.yaml` con `{usable, on_message, issues, description}` por plano, leyendo del último run. 🔬 *(prompt/parseo)*
+- [ ] AC2 — Sin `ANTHROPIC_API_KEY`, `describe` emite warning y sale 0 con salida vacía (no rompe). 🔬
+- [ ] AC3 — `pipeline graphics <slug>` produce `export/graphics/` (lower-thirds por plano con `caption`, `title.mp4`, `end.mp4`) de forma determinista. 🔬 *(selección desde el manifest)*
+- [ ] AC4 — Si falta el extra `[edit]`, `graphics` falla con un mensaje claro que dice cómo instalarlo (`uv sync --extra edit`).
+- [ ] AC5 — `.mcp.json` registra `mcp-video` vía `uvx`; el agente lo ve como servidor MCP y no es dependencia del proyecto.
+- [ ] AC6 — La skill `narrative-cut` documenta el bucle `export → describe → graphics → (agente vía mcp-video) → final_cut.mp4` y pasa el smoke de contrato (`pipeline describe --help`, `pipeline graphics --help`).
+
+### Tasks (orden test-first)
+- [x] T6.12.1 — ADRs D-041 y D-042 en `docs/decisiones/`; SPEC (L10) y ROADMAP.
+- [ ] T6.12.2 — `describe.py`: `describe_prompt` + `parse_description`. 🔬 *core*
+- [ ] T6.12.3 — `gate/frames.py::extract_frame` incluye `at_seconds` en el nombre (evita colisión). 🔬 *core*
+- [ ] T6.12.4 — `describe.py::describe_bundle` (Haiku + frames) y subcomando `describe` en `cli.py`.
+- [ ] T6.12.5 — `graphics.py`: `lower_thirds`/`title_spec`/`end_spec`. 🔬 *core*
+- [ ] T6.12.6 — `graphics.py::render_graphics` (movis) + subcomando `graphics` en `cli.py` + extra `[edit]`.
+- [ ] T6.12.7 — `.mcp.json` (mcp-video por `uvx`) + `skills/narrative-cut/SKILL.md` + fila en `skills/README.md`.
+- [ ] T6.12.8 — Smoke real: `export → describe → graphics` sobre `lego_mix`; corte final vía mcp-video.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
