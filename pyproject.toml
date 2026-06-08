@@ -28,6 +28,11 @@ studio = [  # app local (D-031): backend FastAPI + servidor
     "fastapi>=0.110",
     "uvicorn>=0.29",
 ]
+edit = [  # edición autónoma (D-042): motion graphics con movis. Trae Qt/opencv (sin torch).
+          # mcp-video NO va aquí: corre por uvx desde .mcp.json (no es dep del proyecto).
+    "movis>=0.7.1",
+    "numpy<2",  # movis 0.7.1 hace float() sobre arrays shape-(1,): numpy 2.x lo rompe.
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

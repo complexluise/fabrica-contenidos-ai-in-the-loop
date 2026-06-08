@@ -289,6 +289,47 @@ def export(
 
 
 @app.command()
+def describe(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    config_dir: Path = typer.Option(Path("config")),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[L10] Ojos: Haiku describe/evalua cada plano del bundle -> descriptions.yaml (D-041)."""
+    from .describe import describe_bundle
+
+    proj, _spec, _cfg = _load_project(project, projects_dir, config_dir)
+    console.print(f"[bold]{project}[/] · describiendo planos con Haiku…")
+    path = describe_bundle(proj)
+    console.print(
+        f"\n[bold green]Listo[/] {path}\n"
+        f"  por plano: description · on_message · usable · issues"
+    )
+
+
+@app.command()
+def graphics(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    config_dir: Path = typer.Option(Path("config")),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[L10] Artista: motion graphics (movis) -> export/graphics/ (lower-thirds, titulo, cierre) (D-042)."""
+    try:
+        import movis  # noqa: F401
+    except ImportError:
+        console.print("[red]Falta el extra 'edit'.[/] Instala: [cyan]uv sync --extra edit[/]")
+        raise typer.Exit(1)
+    from .graphics import render_graphics
+
+    proj, spec, _cfg = _load_project(project, projects_dir, config_dir)
+    console.print(f"[bold]{project}[/] · generando motion graphics con movis…")
+    out = render_graphics(proj, spec)
+    console.print(
+        f"\n[bold green]Graphics listos[/] {out}\n"
+        f"  lower-thirds por plano (lt_<base>.png, con alpha) · title.mp4 · end.mp4"
+    )
+
+
+@app.command()
 def run(
     project: str = typer.Argument(..., help="Slug del proyecto (projects/<slug>/project.yaml) o, con --brief, ignorado."),
     brief: Path = typer.Option(None, "--brief", help="Modo smoke: corre un brief YAML suelto a out/ (sin proyecto/cache)."),
