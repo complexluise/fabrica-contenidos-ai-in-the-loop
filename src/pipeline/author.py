@@ -1,8 +1,9 @@
 """L1 - Autoría asistida: texto libre -> borrador de proyecto (D-033, Fase 2 app).
 
 El Checkpoint #1 de [D-021] hecho interfaz: la persona pega/sube un texto y la IA
-**propone** un borrador (título, brief, escenas con planos); luego la persona lo
-**edita y firma** en el storyboard. La IA descompone; la persona decide.
+**propone** un borrador completo (título, brief, escenas con planos, diálogo, sonido,
+música); luego la persona lo **edita y firma** en el storyboard. La IA descompone;
+la persona decide.
 
 `parse_draft` es lógica pura (testeable: parseo del JSON del LLM); `draft_project`
 es I/O (Claude, smoke). El borrador se materializa con `project.write_spec`.
@@ -20,40 +21,112 @@ from .settings import get_settings
 
 _DRAFT_MODEL = "claude-opus-4-8"
 
-_DRAFT_PROMPT = """Eres un asistente de producción de video. Convierte el texto en un
-BORRADOR de proyecto que un humano luego editará. Devuelve SOLO un objeto JSON:
+# Persona del sistema: director-guionista con formación completa.
+_DRAFT_SYSTEM = """\
+Sos un director-guionista audiovisual con formación en narrativa visual, diseño de
+sonido y storytelling transmedia. Tu trabajo es descomponer ideas en storyboards de
+producción concretos y completos.
+
+Cuando te dan un texto —brief, guion, idea— lo transformás en un documento de producción
+listo para ejecutar. Nunca dejás campos vacíos que importen: si hay personajes que hablan,
+hay diálogo escrito; si hay acción, hay SFX pensados; si hay momentos clave, están marcados
+como `hero`; cada escena tiene su espacio sonoro (ambience) porque el sonido construye el
+lugar tanto como la imagen.
+
+Pensás en arcos emocionales, no en listas de hechos. Cada beat tiene una función narrativa.\
+"""
+
+_DRAFT_PROMPT = """\
+Convertí el siguiente texto en un borrador de proyecto audiovisual completo.
+Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
 
 {{
-  "title": "título corto y claro",
-  "brief": "sinopsis de 1-2 frases",
+  "title": "título corto y evocador",
+  "brief": "2-3 frases: tono + arco narrativo + intención emocional del video",
+  "style": "lego",
+  "format": "9:16",
   "characters": {{
-    "nombre": {{"design": "descripción visual del personaje para diseñar su cara/figura"}}
+    "NombrePersonaje": {{
+      "design": "descripción visual DETALLADA: rasgos físicos, ropa, expresión característica, paleta de colores, estilo visual que lo hace reconocible"
+    }}
   }},
   "scenes": [
     {{
       "id": "s1",
-      "prompt": "descripción visual del beat (setting + personajes, SIN diálogo)",
-      "duration_s": 5,
-      "beat": "etiqueta narrativa corta (p.ej. 'apertura')",
-      "characters": ["nombres que aparecen"],
+      "beat": "etiqueta narrativa del momento (ej: 'apertura', 'conflicto', 'revelación', 'clímax', 'cierre')",
+      "class": "hero|standard|volume",
+      "prompt": "descripción VISUAL del setting + personajes + acción física. Lo que la cámara VE. Sin diálogo. Incluí atmósfera, iluminación, estado emocional expresado visualmente.",
+      "duration_s": 6,
+      "dialogue": "líneas literales de diálogo como en un guion: 'Personaje: frase exacta.' — null si la escena es sin diálogo",
+      "ambience": "el espacio sonoro del lugar: room tone + sonidos pasivos del entorno. Siempre presente. Ej: 'tráfico lejano y lluvia sobre asfalto', 'silencio de biblioteca con páginas pasando y aire acondicionado'",
+      "characters": ["NombrePersonaje"],
+      "requirements": {{
+        "needs_audio": false,
+        "needs_lipsync": false
+      }},
       "shots": [
-        {{"framing": "encuadre/acción del plano", "duration_s": 3,
-          "voiceover": "texto narrado o null", "caption": "texto en pantalla o null"}}
+        {{
+          "framing": "tipo de plano + movimiento de cámara + acción específica. Ej: 'PG con paneo lento de izquierda a derecha sobre la ciudad al amanecer', 'PP de manos abriendo el sobre, cámara fija'",
+          "duration_s": 3,
+          "voiceover": "texto para voz en off narrativa. null si no hay narrador en este plano.",
+          "caption": "texto en pantalla / lower-third / subtítulo. null si no corresponde.",
+          "sfx": "el sonido concreto de la ACCIÓN de este plano. Ej: 'clic de cerradura y puerta crujiendo', 'teclas de laptop y pitido de notificación'. null si no aporta narrativamente."
+        }}
       ]
     }}
   ]
 }}
 
-Reglas:
-- prompt: lo VISUAL del beat; el plano (framing) le suma el encuadre.
-- duration_s: número en segundos (2 a 8). El de la escena = suma de sus planos.
-- Si una escena tiene un solo plano, igual incluí "shots" con ese plano.
-- characters: SOLO los personajes recurrentes que el texto nombra; para cada uno,
-  una "design" (descripción para diseñar su cara). Si el texto no nombra a nadie,
-  devolvé "characters": {{}}.
-- Las escenas referencian a esos personajes por nombre en su "characters".
+━━━ CRITERIOS DE DIRECCIÓN ━━━
 
-Texto:
+**`class`** — jerarquía de producción:
+• `"hero"`: el momento climático/emocional del video. Máximo 2. Alta producción.
+• `"standard"`: escenas narrativas principales. La mayoría.
+• `"volume"`: establishing shots, transiciones, relleno visual rápido.
+
+**`prompt`** — la descripción visual del beat:
+• Describí lo que la cámara VE: atmósfera, luz, acción física, composición del cuadro.
+• No repitas el diálogo. No describas emociones abstractas; describí lo que las expresa.
+• Incluí el estilo visual: si es de noche, si hay contraluz, si el espacio es íntimo o épico.
+
+**`dialogue`** — lo que se dice:
+• Escribí líneas literales, no resúmenes. "Martina: 'No sabía que ibas a volver.'"
+• Si needs_lipsync es true, el modelo de video sincronizará labios.
+• Si hay diálogo significativo → needs_audio: true.
+• Si es escena de acción sin habla → null.
+
+**`ambience`** — el espacio sonoro:
+• SIEMPRE presente. Define dónde está el espectador.
+• Es el fondo constante: no la música, no los efectos puntuales. El "room tone" del lugar.
+• Sé específico: no "sonidos de ciudad" sino "bocinas lejanas, lluvia fina, pisadas en charcos".
+
+**`sfx`** — efectos de sonido de la acción:
+• Solo los que suman información narrativa o dramatismo.
+• Un plano con alguien abriendo una caja: "cartón rasgándose, crujido de tapa".
+• Un plano de paisaje estático sin acción específica: null.
+• No repitas el ambience acá.
+
+**`shots`** — la gramática visual:
+• Vocabulario: PG (plano general), PM (plano medio), PP (primer plano), PD (plano detalle), PE (plano entero).
+• Movimientos: paneo, travelling, zoom in/out, cámara fija, handheld (cámara al hombro), drone.
+• Cada plano tiene una razón dramática: no listés planos por listar.
+
+**`voiceover`** — narración:
+• Solo cuando el video tiene un narrador explícito (documental, publicitario con voz en off).
+• No uses voiceover para describir lo que ya se ve.
+
+**`caption`** — texto en pantalla:
+• Úsalo para datos que refuerzan la narrativa: nombre de lugar, fecha, estadísticas, citas.
+• También para subtítulos si hay diálogo que conviene ver escrito.
+
+━━━ REGLAS DE ESTRUCTURA ━━━
+• Mínimo 3 escenas, máximo 8 (para un video de 30-90 segundos).
+• duration_s de la escena = suma de sus planos (2 a 6 segundos por plano).
+• La progresión de beats debe tener arco: apertura → nudo → clímax → cierre.
+• Si el texto no nombra personajes recurrentes → "characters": {{}}.
+• needs_lipsync: true SOLO si hay diálogo en close-up de cara hablando.
+
+Texto a convertir:
 {text}
 """
 
@@ -87,12 +160,13 @@ def _scene_from_raw(raw: dict, idx: int) -> Scene:
     """Normaliza una escena del LLM en un Scene válido (rellena lo que falte)."""
     s = dict(raw)
     s.setdefault("id", f"s{idx + 1}")
-    # duration_s es obligatorio (>0): derivar de los planos o caer a un default.
+    # duration_s obligatorio (>0): derivar de los planos o caer a un default.
     if not s.get("duration_s"):
         shots = s.get("shots") or []
         total = sum(float(sh.get("duration_s") or 0) for sh in shots)
         s["duration_s"] = total or 5
-    return Scene(**s)
+    # Usar model_validate para manejar el alias "class" -> class_ correctamente.
+    return Scene.model_validate(s)
 
 
 def _character_from_raw(name: str, raw) -> Character:
@@ -145,13 +219,16 @@ def draft_project(text: str) -> ProjectDraft:
     try:
         import anthropic
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("Instala el extra [apis] para usar Claude: uv sync --extra apis") from exc
+        raise RuntimeError(
+            "Instala el extra [apis] para usar Claude: uv sync --extra apis"
+        ) from exc
 
     key = get_settings().require("anthropic_api_key", "borrador de proyecto")
     client = anthropic.Anthropic(api_key=key)
     msg = client.messages.create(
         model=_DRAFT_MODEL,
-        max_tokens=4000,
+        max_tokens=8000,
+        system=_DRAFT_SYSTEM,
         messages=[{"role": "user", "content": _DRAFT_PROMPT.format(text=text)}],
     )
     return parse_draft(msg.content[0].text)
