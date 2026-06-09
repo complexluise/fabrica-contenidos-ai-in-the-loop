@@ -22,7 +22,7 @@
     if (!slug) return;
     doc = null; error = ""; msg = ""; dirty = false;
     cand = { keyframes: {}, cast: {}, selections: {} };
-    editing = {};
+    editing = {}; expanded = {};
 
     get(`/api/projects/${slug}`)
       .then((d) => {
@@ -54,11 +54,13 @@
   const sceneDur = (s) => s.shots.reduce((a, sh) => a + (Number(sh.duration_s) || 0), 0);
   const total = $derived(doc ? doc.scenes.reduce((a, s) => a + sceneDur(s), 0) : 0);
 
-  // Devuelve la URL del keyframe elegido para una escena, o null
+  // Devuelve la URL del keyframe elegido para una escena, o null.
+  // selections.yaml guarda rutas relativas al directorio del proyecto
+  // (ej: "cache/keyframes/abc.png"), no índices. Las convertimos a /files/{slug}/...
   function selectedKf(sceneId) {
-    const idx = cand.selections?.[sceneId];
-    if (idx == null) return null;
-    return cand.keyframes?.[sceneId]?.[idx] ?? null;
+    const selPath = cand.selections?.[sceneId];
+    if (!selPath) return null;
+    return `/files/${slug}/${String(selPath).replace(/\\/g, "/")}`;
   }
   const hasKfCands = (sceneId) => (cand.keyframes?.[sceneId]?.length ?? 0) > 0;
 
@@ -262,7 +264,8 @@
     <section class="scene" class:is-editing={isEditing}>
 
       <!-- Cabecera: siempre visible -->
-      <div class="shead">
+      <div class="shead" class:clickable={!isEditing}
+           onclick={!isEditing ? () => toggleExpand(s.id) : null}>
         <span class="sid mono">{s.id}</span>
         {#if isEditing}
           <input class="beat-in" bind:value={s.beat} oninput={touch} placeholder="beat / título de la escena" />
@@ -273,18 +276,15 @@
           <span class="who">{s.characters.join(", ")}</span>
         {/if}
         <span class="dur mono">{sceneDur(s).toFixed(0)}s</span>
-        <span class="spacer"></span>
-        <button class="icon" title="Subir" onclick={() => move(i, -1)} disabled={i === 0}>↑</button>
-        <button class="icon" title="Bajar" onclick={() => move(i, 1)} disabled={i === doc.scenes.length - 1}>↓</button>
-        <button class="icon danger" title="Eliminar escena" onclick={() => deleteScene(i)}>✕</button>
         {#if !isEditing}
-          <button class="icon expand-tog" class:open={isExpanded}
-                  onclick={() => toggleExpand(s.id)}
-                  title={isExpanded ? "Colapsar" : "Ver todo"}>
-            {isExpanded ? "▲" : "▼"}
-          </button>
+          <span class="expand-hint muted">{isExpanded ? "▲" : "▼"}</span>
         {/if}
-        <button class="small {isEditing ? 'primary' : 'ghost'} edit-btn" onclick={() => toggleEdit(s.id)}>
+        <span class="spacer"></span>
+        <button class="icon" title="Subir" onclick={(e) => { e.stopPropagation(); move(i, -1); }} disabled={i === 0}>↑</button>
+        <button class="icon" title="Bajar" onclick={(e) => { e.stopPropagation(); move(i, 1); }} disabled={i === doc.scenes.length - 1}>↓</button>
+        <button class="icon danger" title="Eliminar escena" onclick={(e) => { e.stopPropagation(); deleteScene(i); }}>✕</button>
+        <button class="small {isEditing ? 'primary' : 'ghost'} edit-btn"
+                onclick={(e) => { e.stopPropagation(); toggleEdit(s.id); }}>
           {isEditing ? (dirty ? "Guardar" : "Listo") : "Editar"}
         </button>
       </div>
@@ -513,6 +513,9 @@
     display: flex; align-items: center; gap: 10px; padding: 10px 14px;
     background: var(--paper-2); border-bottom: 1px solid var(--line);
   }
+  .shead.clickable { cursor: pointer; }
+  .shead.clickable:hover { background: color-mix(in srgb, var(--paper-2) 80%, var(--blue) 20%); }
+  .expand-hint { font-size: 11px; flex-shrink: 0; }
   .sid { font-family: var(--font-mono); font-weight: 700; color: var(--blue-deep); flex-shrink: 0; font-size: 13px; }
   .beat-label {
     font-family: var(--font-display); font-weight: 600; font-size: 15px;
