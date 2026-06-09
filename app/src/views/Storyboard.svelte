@@ -62,9 +62,11 @@
   const hasKfCands = (sceneId) => (cand.keyframes?.[sceneId]?.length ?? 0) > 0;
 
   const hasAudio = (sh) => !!(sh.voiceover || sh.caption || sh.sfx);
-  function toggleAudio(sceneId, j) {
+  function toggleAudio(sceneId, j, sh) {
     const k = `${sceneId}_${j}`;
-    expandedAudio = { ...expandedAudio, [k]: !expandedAudio[k] };
+    // Calcula el estado VISIBLE actual (igual que la expresion en el template)
+    const currentOpen = expandedAudio[k] !== false && (!!expandedAudio[k] || hasAudio(sh));
+    expandedAudio = { ...expandedAudio, [k]: !currentOpen };
   }
 
   function toggleEdit(id) {
@@ -301,7 +303,7 @@
           <div class="shots">
             {#each s.shots as sh, j}
               {@const ak = `${s.id}_${j}`}
-              {@const audioOpen = !!expandedAudio[ak] || hasAudio(sh)}
+              {@const audioOpen = expandedAudio[ak] !== false && (!!expandedAudio[ak] || hasAudio(sh))}
               <div class="shot">
                 <div class="shot-h">
                   <span class="ptag">P{j + 1}</span>
@@ -309,7 +311,7 @@
                   <input class="num-in" type="number" min="1" step="1" bind:value={sh.duration_s} oninput={touch} />
                   <span class="muted s">s</span>
                   <button class="audio-tog" class:open={audioOpen}
-                          onclick={() => toggleAudio(s.id, j)}
+                          onclick={() => toggleAudio(s.id, j, sh)}
                           title={audioOpen ? "Cerrar audio" : "Agregar vo / caption / sfx"}>
                     {hasAudio(sh) ? "♪" : "~"}
                   </button>
