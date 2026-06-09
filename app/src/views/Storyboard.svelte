@@ -1,5 +1,5 @@
 <script>
-  import { get, put, humanError } from "../lib/api.js";
+  import { get, put, post, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
@@ -11,6 +11,11 @@
   let msg   = $state("");
   let dirty = $state(false);
   let saving = $state(false);
+  let music = $state(null);       // URL del archivo de música cargado
+  let musicPrompt = $state("");
+  let musicBusy = $state(false);
+  let musicErr = $state("");
+  let showMusicGen = $state(false);
 
   $effect(() => {
     if (!slug) return;
@@ -20,6 +25,7 @@
 
     get(`/api/projects/${slug}`)
       .then((d) => {
+        music = d.music || null;
         doc = {
           title: d.title || "",
           brief: d.brief || "",
@@ -109,6 +115,45 @@
     touch();
   }
 
+  async function uploadMusic(fileInput) {
+    const file = fileInput.files[0];
+    if (!file) return;
+    musicErr = ""; musicBusy = true;
+    try {
+      const buf = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const r = await post(`/api/projects/${slug}/music/upload`,
+        { data: b64, filename: file.name });
+      music = r.url;
+    } catch (e) {
+      musicErr = humanError(e);
+    } finally {
+      musicBusy = false;
+      fileInput.value = "";
+    }
+  }
+
+  async function generateMusic() {
+    if (!musicPrompt.trim()) return;
+    musicErr = ""; musicBusy = true;
+    try {
+      const job = await post(`/api/projects/${slug}/music/generate`,
+        { prompt: musicPrompt, duration_s: total || 30 });
+      // Poll until done
+      let done = false;
+      while (!done) {
+        await new Promise(r => setTimeout(r, 2500));
+        const j = await get(`/api/jobs/${job.job_id}`);
+        if (j.status === "done") { music = j.result?.url || null; done = true; }
+        else if (j.status === "error") { musicErr = j.error || "Error generando musica"; done = true; }
+      }
+    } catch (e) {
+      musicErr = humanError(e);
+    } finally {
+      musicBusy = false;
+    }
+  }
+
   async function save(sign) {
     error = ""; msg = ""; saving = true;
     const body = {
@@ -161,6 +206,38 @@
     <span class="lbl">Sinopsis</span>
     <textarea class="brief-in" bind:value={doc.brief} oninput={touch} rows="2"
               placeholder="Una o dos frases sobre el proyecto"></textarea>
+  </section>
+
+  <section class="card pad music-card">
+    <span class="lbl">Musica de fondo</span>
+    {#if music}
+      <audio class="music-player" src={music} controls></audio>
+      <span class="music-name muted">{music.split("/").pop()}</span>
+    {:else}
+      <span class="muted music-empty">Sin musica — subí un archivo o generá con IA</span>
+    {/if}
+    <div class="music-actions">
+      <label class="btn small ghost music-upload-lbl" class:disabled={musicBusy}>
+        {musicBusy ? "..." : "Subir archivo"}
+        <input type="file" accept="audio/*" class="hidden-input"
+               onchange={(e) => uploadMusic(e.target)} disabled={musicBusy} />
+      </label>
+      <button class="small ghost" onclick={() => { showMusicGen = !showMusicGen; musicErr = ""; }}
+              disabled={musicBusy}>
+        {showMusicGen ? "Cancelar" : "Generar con IA"}
+      </button>
+    </div>
+    {#if showMusicGen}
+      <div class="music-gen">
+        <input class="music-prompt-in" bind:value={musicPrompt} disabled={musicBusy}
+               placeholder="ej: upbeat electronic cumbia, bright and energetic" />
+        <button class="small machine" onclick={generateMusic}
+                disabled={musicBusy || !musicPrompt.trim()}>
+          {musicBusy ? "Generando…" : "Generar"}
+        </button>
+      </div>
+    {/if}
+    {#if musicErr}<p class="music-err">{musicErr}</p>{/if}
   </section>
 
   <div class="toolbar">
@@ -520,4 +597,22 @@
   .ok-msg { color: var(--ok); font-weight: 600; font-size: 13px; }
   .error.inline { margin: 0; font-size: 13px; }
   .muted { color: var(--ink-soft); }
+
+  /* --- Musica de fondo --- */
+  .music-card { display: flex; flex-direction: column; gap: 10px; }
+  .music-player { width: 100%; height: 36px; }
+  .music-name { font-size: 11.5px; }
+  .music-empty { font-size: 13px; }
+  .music-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .music-upload-lbl {
+    display: inline-flex; align-items: center; cursor: pointer;
+  }
+  .music-upload-lbl.disabled { opacity: 0.5; pointer-events: none; }
+  .hidden-input { display: none; }
+  .music-gen { display: flex; gap: 8px; align-items: center; }
+  .music-prompt-in {
+    flex: 1; font-size: 13px; padding: 5px 10px;
+    background: var(--paper-2); border-color: var(--line); border-radius: var(--r-sm);
+  }
+  .music-err { color: var(--red); font-size: 12.5px; margin: 0; }
 </style>

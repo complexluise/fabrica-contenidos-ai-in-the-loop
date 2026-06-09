@@ -323,6 +323,13 @@ def add_candidate_upload(project: Project, scene_id: str, data: bytes, suffix: s
     return dest
 
 
+def set_project_music(project: Project, spec: ProjectSpec, src: Path) -> None:
+    """Fija la musica de fondo del proyecto y persiste en project.yaml."""
+    from .project import write_spec
+    spec.music = src.resolve()
+    write_spec(spec, project.spec_path)
+
+
 def record_picks(project: Project, picks: dict[str, int]) -> Path:
     """Valida y persiste la elección humana (selections.yaml). Resumible."""
     if not project.candidates_path.exists():

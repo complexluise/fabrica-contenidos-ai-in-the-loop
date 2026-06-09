@@ -238,8 +238,9 @@ def create_app(projects_dir: Path = Path("projects"),
             "design": ch.design.prompt if ch.design else None,
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
+        music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
-                "style": spec.style, "format": spec.format,
+                "style": spec.style, "format": spec.format, "music": music_url,
                 "characters": characters, "scenes": scenes}
 
     @app.get("/api/projects/{slug}/candidates")
@@ -337,6 +338,60 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(422, "El campo 'data' no es base64 válido.")
         dest = studio.add_candidate_upload(project, scene_id, data, suffix)
         return {"url": file_url(dest), "scene": scene_id, "file": dest.name}
+
+    @app.post("/api/projects/{slug}/music/upload")
+    async def upload_music(slug: str, body: dict):
+        """Sube un archivo de audio como música de fondo (base64 en JSON).
+
+        Body: { "data": "<base64>", "filename": "pista.mp3" }
+        """
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        raw = (body.get("data") or "").strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 del audio).")
+        filename = body.get("filename") or "music.mp3"
+        suffix = Path(filename).suffix.lower() or ".mp3"
+        if suffix not in {".mp3", ".wav", ".ogg", ".m4a", ".aac"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = project.dir / "cache" / f"music{suffix}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        studio.set_project_music(project, spec, dest)
+        return {"url": file_url(dest), "file": dest.name}
+
+    @app.post("/api/projects/{slug}/music/generate")
+    async def generate_music(slug: str, body: dict):
+        """Genera música con stable-audio (fal.ai). Job/SSE.
+
+        Body: { "prompt": "...", "duration_s": 30 }
+        """
+        from .. import studio
+        from ..music import generate_music_fal
+
+        project, spec, _cfg = load(slug)
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(422, "Falta 'prompt' para generar la música.")
+        duration_s = float(body.get("duration_s") or 30.0)
+        s = get_settings()
+        if not s.fal_key:
+            raise HTTPException(503, "FAL_KEY no configurada.")
+        out_path = project.dir / "cache" / "music_generated.wav"
+
+        async def coro():
+            dest = await generate_music_fal(prompt, duration_s, out_path, s.fal_key)
+            studio.set_project_music(project, spec, dest)
+            return {"url": file_url(dest), "file": dest.name}
+
+        return jobs.spawn("music", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/cast")
     async def gen_cast(slug: str, n: int = 4):
