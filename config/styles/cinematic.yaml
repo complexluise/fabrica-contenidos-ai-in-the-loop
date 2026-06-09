@@ -1,0 +1,9 @@
+style: cinematic
+keyframe:
+  backend: fal
+  model: "fal-ai/flux-pro/v1.1"
+  ref_model: "fal-ai/nano-banana/edit"
+prompt_template: >
+  {scene_prompt}, cinematic photography, dramatic lighting, shallow depth of field,
+  film grain, high contrast, professional color grading, 4K resolution
+negative_prompt: "cartoon, illustration, anime, drawing, low quality, deformed, blurry"
