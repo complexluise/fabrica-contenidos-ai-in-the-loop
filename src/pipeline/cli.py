@@ -184,15 +184,17 @@ def pick_cast(
 def keyframes(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     n: int = typer.Option(4, "--n", help="Candidatos de keyframe por escena."),
+    concurrency: int = typer.Option(5, "--concurrency", "-c", help="Requests simultaneos a fal.ai (default 5, max recomendado 10)."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
-    """[AI-in-the-Loop] Genera N keyframes/escena y abre la hoja de contactos para elegir."""
+    """[AI-in-the-Loop] Genera N keyframes/escena en paralelo y abre la hoja de contactos."""
     from .studio import gen_keyframes
 
     proj, spec, cfg = _load_project(project, projects_dir, config_dir)
-    console.print(f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos...")
-    sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n))
+    total = len(spec.scenes) * n
+    console.print(f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos = {total} imagenes | concurrencia {concurrency}")
+    sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n, concurrency=concurrency))
     console.print(
         f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
         f"  elige con: [cyan]pipeline pick {project} "

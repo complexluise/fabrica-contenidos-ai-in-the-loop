@@ -285,13 +285,14 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- jobs de generación ----------------------------------------------
     @app.post("/api/projects/{slug}/keyframes")
-    async def gen_keyframes(slug: str, n: int = 4):
+    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.gen_keyframes(project, spec, cfg, n, open_sheet=False)
+            sheet = await studio.gen_keyframes(project, spec, cfg, n,
+                                               open_sheet=False, concurrency=concurrency)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("keyframes", slug, coro()).to_dict()

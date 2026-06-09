@@ -23,6 +23,8 @@ class ElevenLabsTTS:
 
     name = "elevenlabs"
 
+    cost_per_char = 0.00024  # eleven_turbo_v2_5 pricing (USD/char)
+
     def __init__(self, api_key: str, model: str = DEFAULT_VOICE_MODEL, timeout: float = 120.0):
         self._api_key = api_key
         self.model = model

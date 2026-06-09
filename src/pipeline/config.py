@@ -26,6 +26,7 @@ class KeyframeConfig(BaseModel):
     lora: str | None = None
     strength: float = 0.9
     ref_model: str | None = None  # modelo de edición con referencia (consistencia de personaje)
+    cost_per_image: float = 0.003  # costo estimado por imagen generada (fal-ai/flux-lora)
 
 
 class StyleConfig(BaseModel):

@@ -32,6 +32,7 @@ class FalProvider(BaseProvider):
 
     async def _submit_fal(self, req: GenRequest) -> str:
         """Envia el job a fal y devuelve la URL del video. Mockeable en tests."""
+        import asyncio
         import fal_client
 
         key = get_settings().require("fal_key", "generacion de video via fal.ai")
@@ -44,7 +45,10 @@ class FalProvider(BaseProvider):
         if req.seed is not None:
             arguments["seed"] = req.seed
 
-        result = await client.subscribe(self.model, arguments=arguments)
+        result = await asyncio.wait_for(
+            client.subscribe(self.model, arguments=arguments),
+            timeout=360,  # 6 min — video generation puede tardar en cola
+        )
         return _extract_video_url(result)
 
     async def _download(self, url: str, req: GenRequest) -> Path:

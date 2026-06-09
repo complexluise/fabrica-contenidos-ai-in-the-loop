@@ -10,6 +10,7 @@ Flujo por etapas con estado en el proyecto:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -189,44 +190,73 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
 
 
 async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int,
-                        open_sheet: bool = True) -> Path:
-    """Genera N candidatos de keyframe por escena y escribe la hoja de contactos."""
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
-    groups: dict[str, list[Path]] = {}
-    manifest: dict[str, list[str]] = {}
+                        open_sheet: bool = True, concurrency: int = 5) -> Path:
+    """Genera N candidatos de keyframe por escena en paralelo (semaforo=concurrency).
 
+    Todas las (escena x candidato) se lanzan a la vez limitadas por el semaforo.
+    fal.ai flux-lora soporta ~10 requests simultaneos en plan Pro; 5 es seguro.
+    """
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    sem = asyncio.Semaphore(concurrency)
+
+    # Pre-computa metadatos por escena (sincrono, sin I/O)
+    scene_meta = []
     for scene in spec.scenes:
         refs = character_refs(scene, spec.characters)
         scene.character_refs = refs
-        refs_resolved = resolve_refs(project.dir, refs)  # project-relative -> abs
+        refs_resolved = resolve_refs(project.dir, refs)
         ref_sig = sorted(str(r) for r in refs)
-        anchor = effective_shots(scene)[0]  # el keyframe elegido = plano 1 (D-028)
+        anchor = effective_shots(scene)[0]
         styled = build_styled_prompt(scene, cfg.style, anchor.framing)
-        slug = semantic_slug(f"{scene.prompt} {anchor.framing}".strip())  # nombre legible (D-026)
-        paths: list[Path] = []        # hash (verdad del caché, estable para pick/render)
-        display: list[Path] = []      # alias legibles (lo que ve el humano en la hoja)
-        for i in range(n):
-            try:  # robustez: un candidato que falla no tira los demás
-                inputs = _keyframe_inputs(styled, cfg, ref_sig)
-                inputs["seed"] = i  # candidato i: seed distinto -> imagen distinta
-                key = cache_key("keyframe", inputs)
-                hit = project.cache_lookup("keyframes", key, ".png")
-                if hit is not None:
-                    stored = hit
-                    logger.info("[%s] keyframe %d/%d (cache hit)", scene.id, i + 1, n)
-                else:
-                    logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
-                    tmp = await keyframer.generate(scene, ref_images=refs_resolved, seed=i, framing=anchor.framing)
-                    stored = project.cache_store("keyframes", key, tmp, ".png")
-                alias = _alias(project, "keyframes", scene.id, slug, i, stored)
-                paths.append(stored)
-                display.append(alias)
-                logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("[%s] keyframe %d/%d FALLO: %s", scene.id, i + 1, n, exc)
-                logger.debug("[%s] traceback", scene.id, exc_info=True)
-        groups[scene.id] = display
-        manifest[scene.id] = [str(p) for p in paths]
+        slug = semantic_slug(f"{scene.prompt} {anchor.framing}".strip())
+        scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
+
+    async def _one(scene, refs_resolved, ref_sig, anchor, styled, slug, i):
+        """Genera un solo candidato bajo el semaforo."""
+        async with sem:
+            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            inputs["seed"] = i
+            key = cache_key("keyframe", inputs)
+            hit = project.cache_lookup("keyframes", key, ".png")
+            if hit is not None:
+                logger.info("[%s] keyframe %d/%d (cache hit)", scene.id, i + 1, n)
+                stored = hit
+            else:
+                logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
+                tmp = await keyframer.generate(scene, ref_images=refs_resolved,
+                                               seed=i, framing=anchor.framing)
+                stored = project.cache_store("keyframes", key, tmp, ".png")
+            alias = _alias(project, "keyframes", scene.id, slug, i, stored)
+            logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
+            return stored, alias
+
+    # Lanza todas las tareas en paralelo, preserva (scene_idx, candidate_idx) para reensamblar
+    tasks = [
+        (s_idx, i, asyncio.ensure_future(_one(*meta, i)))
+        for s_idx, meta in enumerate(scene_meta)
+        for i in range(n)
+    ]
+
+    results: dict[int, list[tuple[int, Path, Path]]] = {i: [] for i in range(len(spec.scenes))}
+    raw = await asyncio.gather(*(t for _, _, t in tasks), return_exceptions=True)
+
+    for (s_idx, i, _), outcome in zip(tasks, raw):
+        scene = spec.scenes[s_idx]
+        if isinstance(outcome, Exception):
+            logger.error("[%s] keyframe %d/%d FALLO: %s", scene.id, i + 1, n, outcome)
+            logger.debug("[%s] traceback", scene.id, exc_info=outcome)
+        else:
+            stored, alias = outcome
+            results[s_idx].append((i, stored, alias))
+
+    # Reensambla en orden de candidato (gather no garantiza orden interno por escena)
+    groups: dict[str, list[Path]] = {}
+    manifest: dict[str, list[str]] = {}
+    for s_idx, meta in enumerate(scene_meta):
+        scene = spec.scenes[s_idx]
+        ordered = sorted(results[s_idx], key=lambda x: x[0])
+        groups[scene.id] = [alias for _, _, alias in ordered]
+        manifest[scene.id] = [str(stored) for _, stored, _ in ordered]
 
     project.candidates_path.write_text(
         yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"

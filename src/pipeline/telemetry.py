@@ -32,6 +32,8 @@ class SceneRecord:
     video_key: str = ""
     audio_provider: str = ""   # paso de post de audio (V2A MMAudio, D-034); "" si no hubo
     audio_cost_usd: float = 0.0  # costo del V2A (0 en cache hit o si no aplica)
+    keyframe_cost_usd: float = 0.0  # costo de generacion del keyframe (flux-lora; 0 en cache hit)
+    tts_cost_usd: float = 0.0  # costo de voz en off (ElevenLabs o kokoro; 0 si no hubo VO)
     ts: float = field(default_factory=time.time)
 
 
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS scene_runs (
     video_key TEXT NOT NULL,
     audio_provider TEXT NOT NULL DEFAULT '',
     audio_cost_usd REAL NOT NULL DEFAULT 0,
+    keyframe_cost_usd REAL NOT NULL DEFAULT 0,
+    tts_cost_usd REAL NOT NULL DEFAULT 0,
     ts REAL NOT NULL
 );
 """
@@ -80,37 +84,35 @@ class Telemetry:
             """INSERT INTO scene_runs
                (run_id, scene_id, provider, strategy, scene_class,
                 cost_usd, latency_s, attempt, passed, cached,
-                keyframe_key, video_key, audio_provider, audio_cost_usd, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                keyframe_key, video_key, audio_provider, audio_cost_usd,
+                keyframe_cost_usd, tts_cost_usd, ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                rec.run_id,
-                rec.scene_id,
-                rec.provider,
-                rec.strategy,
-                rec.scene_class,
-                rec.cost_usd,
-                rec.latency_s,
-                rec.attempt,
-                int(rec.passed),
-                int(rec.cached),
-                rec.keyframe_key,
-                rec.video_key,
-                rec.audio_provider,
-                rec.audio_cost_usd,
-                rec.ts,
+                rec.run_id, rec.scene_id, rec.provider, rec.strategy, rec.scene_class,
+                rec.cost_usd, rec.latency_s, rec.attempt, int(rec.passed), int(rec.cached),
+                rec.keyframe_key, rec.video_key, rec.audio_provider, rec.audio_cost_usd,
+                rec.keyframe_cost_usd, rec.tts_cost_usd, rec.ts,
             ),
         )
         self._conn.commit()
 
     def totals(self) -> dict:
         """Agrega totales de la corrida (los del objeto en memoria)."""
-        total_cost = sum(r.cost_usd + r.audio_cost_usd for r in self._records)
+        video_cost   = sum(r.cost_usd for r in self._records)
+        audio_cost   = sum(r.audio_cost_usd for r in self._records)
+        kf_cost      = sum(r.keyframe_cost_usd for r in self._records)
+        tts_cost     = sum(r.tts_cost_usd for r in self._records)
+        total_cost   = video_cost + audio_cost + kf_cost + tts_cost
         total_latency = sum(r.latency_s for r in self._records)
         by_provider: dict[str, float] = {}
         for r in self._records:
             by_provider[r.provider] = by_provider.get(r.provider, 0.0) + r.cost_usd
-            if r.audio_provider and r.audio_cost_usd:  # el V2A como su propia línea (D-034)
+            if r.audio_provider and r.audio_cost_usd:
                 by_provider[r.audio_provider] = by_provider.get(r.audio_provider, 0.0) + r.audio_cost_usd
+            if r.keyframe_cost_usd:
+                by_provider["flux-lora (keyframe)"] = by_provider.get("flux-lora (keyframe)", 0.0) + r.keyframe_cost_usd
+            if r.tts_cost_usd:
+                by_provider["tts"] = by_provider.get("tts", 0.0) + r.tts_cost_usd
         return {
             "run_id": self.run_id,
             "scenes": len({r.scene_id for r in self._records}),
@@ -118,6 +120,12 @@ class Telemetry:
             "cache_hits": sum(1 for r in self._records if r.cached),
             "failed_scenes": len(self._failures),
             "total_cost_usd": round(total_cost, 4),
+            "cost_breakdown": {
+                "video_usd": round(video_cost, 4),
+                "keyframe_usd": round(kf_cost, 4),
+                "sfx_usd": round(audio_cost, 4),
+                "tts_usd": round(tts_cost, 4),
+            },
             "total_latency_s": round(total_latency, 2),
             "cost_by_provider": {k: round(v, 4) for k, v in by_provider.items()},
         }

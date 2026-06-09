@@ -8,6 +8,7 @@
   let kindStatus = $state({ render: "", export: "" });
   let err = $state("");
   let showLog = $state(true);
+  let profile = $state("proto"); // "proto" | "prod"
 
   let st = $derived(studio.status);
   let hasFal = $derived(!!st?.keys?.fal_key);
@@ -18,9 +19,24 @@
   // listo para renderizar = el paso "Elegir" esta hecho (lo decide el motor)
   let ready = $derived(stepDone("elegir", st));
 
+  const PROFILES = {
+    proto: {
+      label: "Prototipo",
+      desc: "Un modelo, sin ensemble. Barato y rapido para validar el storyboard.",
+      badge: "rapido",
+    },
+    prod: {
+      label: "Produccion",
+      desc: "Hero en ensemble (mejor de N), gate de calidad, modelos premium.",
+      badge: "calidad",
+    },
+  };
+
   function run(kind) {
     log = []; err = ""; running = kind; kindStatus = { ...kindStatus, [kind]: "running" };
+    const body = kind === "render" ? { profile } : undefined;
     runJob(`/api/projects/${slug}/${kind}`, {
+      body,
       onLine: (l) => (log = [...log, l]),
       onDone: async (s) => {
         running = ""; kindStatus = { ...kindStatus, [kind]: s };
@@ -67,6 +83,23 @@
         </button>
       </div>
     </div>
+
+    <!-- Selector de calidad -->
+    <div class="profile-row">
+      {#each Object.entries(PROFILES) as [key, p]}
+        <button
+          class="profile-opt"
+          class:active={profile === key}
+          disabled={!!running}
+          onclick={() => (profile = key)}
+        >
+          <span class="profile-label">{p.label}</span>
+          <span class="profile-badge {key}">{p.badge}</span>
+          <span class="profile-desc">{p.desc}</span>
+        </button>
+      {/each}
+    </div>
+
     {#if finalUrl}
       <video class="preview" src={finalUrl} controls playsinline>
         <track kind="captions" />
@@ -141,6 +174,28 @@
   }
   .step.is-done .num { background: var(--ok); border-color: var(--ok); color: #fff; }
   .step-act { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+  /* --- selector de perfil --- */
+  .profile-row {
+    display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
+  }
+  .profile-opt {
+    flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 3px;
+    padding: 12px 14px; border-radius: var(--r); border: 2px solid var(--line);
+    background: var(--paper); text-align: left; cursor: pointer;
+    box-shadow: none; transition: border-color .15s, background .15s;
+  }
+  .profile-opt:hover:not(:disabled) { border-color: var(--blue); background: var(--blue-wash); }
+  .profile-opt.active { border-color: var(--blue); background: var(--blue-wash); }
+  .profile-opt:disabled { opacity: 0.5; cursor: default; }
+  .profile-label { font-weight: 700; font-size: 14px; color: var(--ink); }
+  .profile-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 99px; width: fit-content;
+  }
+  .profile-badge.proto { background: #fef3c7; color: #92400e; }
+  .profile-badge.prod  { background: #dcfce7; color: #166534; }
+  .profile-desc { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 
   .preview { margin-top: 14px; max-width: 280px; border-radius: var(--r); border: 1px solid var(--line); background: #000; }
   .hint { font-size: 13px; margin: 10px 0 0; }

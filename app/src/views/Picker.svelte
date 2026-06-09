@@ -1,5 +1,5 @@
 <script>
-  import { get, post, runJob, humanError } from "../lib/api.js";
+  import { get, post, runJob, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
@@ -103,9 +103,8 @@
     sceneErr = { ...sceneErr, [sceneId]: "" };
     try {
       const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
       await post(`/api/projects/${slug}/candidates/${sceneId}/upload`, {
-        data: b64, filename: file.name,
+        data: bufToBase64(buf), filename: file.name,
       });
       await load();
     } catch (e) {

@@ -1,5 +1,5 @@
 <script>
-  import { get, put, post, humanError } from "../lib/api.js";
+  import { get, put, post, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
@@ -130,9 +130,8 @@
     musicErr = ""; musicBusy = true;
     try {
       const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
       const r = await post(`/api/projects/${slug}/music/upload`,
-        { data: b64, filename: file.name });
+        { data: bufToBase64(buf), filename: file.name });
       music = r.url;
     } catch (e) {
       musicErr = humanError(e);
