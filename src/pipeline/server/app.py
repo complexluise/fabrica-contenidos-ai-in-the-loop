@@ -24,7 +24,8 @@ _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
 
 # Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
 # requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
-_EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters", "shots"}
+_EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters",
+                   "shots", "dialogue", "ambience"}
 
 
 def _available_styles(config_dir: Path) -> list[str]:
@@ -225,9 +226,11 @@ def create_app(projects_dir: Path = Path("projects"),
         _project, spec, _cfg = load(slug)
         scenes = [{
             "id": s.id, "beat": s.beat, "class": s.class_, "prompt": s.prompt,
+            "dialogue": s.dialogue, "ambience": s.ambience,
             "characters": s.characters,
             "shots": [{"framing": sh.framing, "duration_s": sh.duration_s,
-                       "voiceover": sh.voiceover, "caption": sh.caption}
+                       "voiceover": sh.voiceover, "caption": sh.caption,
+                       "sfx": sh.sfx}
                       for sh in effective_shots(s)],
         } for s in spec.scenes]
         characters = [{
@@ -249,8 +252,14 @@ def create_app(projects_dir: Path = Path("projects"),
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             return {k: [file_url(p) for p in v] for k, v in data.items()}
 
+        def load_yaml(path: Path) -> dict:
+            if not path.exists():
+                return {}
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
         return {"keyframes": read(project.candidates_path),
-                "cast": read(project.dir / "cast_candidates.yaml")}
+                "cast": read(project.dir / "cast_candidates.yaml"),
+                "selections": load_yaml(project.selections_path)}
 
     @app.get("/api/projects/{slug}/status")
     def project_status(slug: str):
