@@ -5,7 +5,8 @@
   let { slug } = $props();
   let doc   = $state(null);
   let cand  = $state({ keyframes: {}, cast: {}, selections: {} });
-  let editing = $state({});     // { [sceneId]: true } tarjetas en modo edicion
+  let editing = $state({});      // { [sceneId]: true } tarjetas en modo edicion
+  let expanded = $state({});     // { [sceneId]: true } vista detalle en modo lectura
   let expandedAudio = $state({}); // { "sceneId_shotIdx": true } audio por plano
   let error = $state("");
   let msg   = $state("");
@@ -67,6 +68,10 @@
     // Calcula el estado VISIBLE actual (igual que la expresion en el template)
     const currentOpen = expandedAudio[k] !== false && (!!expandedAudio[k] || hasAudio(sh));
     expandedAudio = { ...expandedAudio, [k]: !currentOpen };
+  }
+
+  function toggleExpand(id) {
+    expanded = { ...expanded, [id]: !expanded[id] };
   }
 
   function toggleEdit(id) {
@@ -250,6 +255,7 @@
 
   {#each doc.scenes as s, i (s.id)}
     {@const isEditing = !!editing[s.id]}
+    {@const isExpanded = !!expanded[s.id]}
     {@const kfUrl = selectedKf(s.id)}
     {@const hasCands = hasKfCands(s.id)}
 
@@ -271,6 +277,13 @@
         <button class="icon" title="Subir" onclick={() => move(i, -1)} disabled={i === 0}>↑</button>
         <button class="icon" title="Bajar" onclick={() => move(i, 1)} disabled={i === doc.scenes.length - 1}>↓</button>
         <button class="icon danger" title="Eliminar escena" onclick={() => deleteScene(i)}>✕</button>
+        {#if !isEditing}
+          <button class="icon expand-tog" class:open={isExpanded}
+                  onclick={() => toggleExpand(s.id)}
+                  title={isExpanded ? "Colapsar" : "Ver todo"}>
+            {isExpanded ? "▲" : "▼"}
+          </button>
+        {/if}
         <button class="small {isEditing ? 'primary' : 'ghost'} edit-btn" onclick={() => toggleEdit(s.id)}>
           {isEditing ? (dirty ? "Guardar" : "Listo") : "Editar"}
         </button>
@@ -332,51 +345,106 @@
         </div>
 
       {:else}
-        <!-- MODO LECTURA: documento visual con thumbnail del keyframe -->
-        <div class="read-body">
-          <div class="read-text">
-            {#if s.beat}
-              <p class="beat-display">{s.beat}</p>
-            {/if}
-            <p class="prompt-display">{s.prompt || "—"}</p>
-            {#if s.dialogue}
-              <p class="dialogue-display">{s.dialogue}</p>
-            {/if}
-            {#if s.ambience}
-              <p class="ambience-display">~ {s.ambience}</p>
-            {/if}
-            <div class="shots-chips">
-              {#each s.shots as sh, j}
-                <span class="chip">
-                  <span class="chip-n">P{j + 1}</span>
-                  <span class="chip-fr">{sh.framing || "—"}</span>
-                  <span class="chip-dur">{sh.duration_s}s</span>
-                  {#if sh.sfx}<span class="chip-sfx" title={sh.sfx}>♪</span>{/if}
-                  {#if sh.voiceover}<span class="chip-vo" title={sh.voiceover}>vo</span>{/if}
-                </span>
-              {/each}
+        <!-- MODO LECTURA -->
+        {#if !isExpanded}
+          <!-- COLAPSADO: resumen compacto, click para expandir -->
+          <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0">
+            <div class="read-compact-text">
+              <p class="prompt-preview">{s.prompt || "—"}</p>
+              <div class="shots-chips">
+                {#each s.shots as sh, j}
+                  <span class="chip">
+                    <span class="chip-n">P{j + 1}</span>
+                    <span class="chip-fr">{sh.framing || "—"}</span>
+                    <span class="chip-dur">{sh.duration_s}s</span>
+                    {#if sh.sfx}<span class="chip-sfx" title={sh.sfx}>♪</span>{/if}
+                    {#if sh.voiceover}<span class="chip-vo" title={sh.voiceover}>vo</span>{/if}
+                  </span>
+                {/each}
+              </div>
             </div>
+            {#if kfUrl}
+              <img class="kf-mini" src={kfUrl} alt="keyframe {s.id}" />
+            {:else}
+              <div class="kf-mini empty-mini">
+                <span class="muted" style="font-size:11px">{hasCands ? "candidatos" : "sin kf"}</span>
+              </div>
+            {/if}
           </div>
 
-          <div class="kf-col">
-            {#if kfUrl}
-              <img class="kf-thumb" src={kfUrl} alt="keyframe {s.id}" />
-              <button class="small ghost kf-btn" onclick={() => goTo("elegir")}>Cambiar →</button>
-            {:else if hasCands}
-              <div class="kf-placeholder pending">
-                <span class="kf-icon">◈</span>
-                <span class="muted kf-hint">candidatos listos</span>
-                <button class="small machine kf-btn" onclick={() => goTo("elegir")}>Elegir →</button>
-              </div>
-            {:else}
-              <div class="kf-placeholder empty">
-                <span class="kf-icon muted">◇</span>
-                <span class="muted kf-hint">sin keyframe</span>
-                <button class="small ghost kf-btn" onclick={() => goTo("elegir")}>Generar →</button>
+        {:else}
+          <!-- EXPANDIDO: toda la información, organizada en L1 / L2 / L3 -->
+          <div class="read-full">
+
+            <!-- L1 — Visual -->
+            <div class="rf-section">
+              <span class="rf-lbl">Visual</span>
+              <p class="rf-prompt">{s.prompt || "—"}</p>
+            </div>
+
+            <!-- L2 — Audio de escena -->
+            {#if s.dialogue || s.ambience}
+              <div class="rf-section rf-audio-grid">
+                {#if s.dialogue}
+                  <div class="rf-audio-col">
+                    <span class="rf-lbl">Dialogo</span>
+                    <p class="rf-dialogue">{s.dialogue}</p>
+                  </div>
+                {/if}
+                {#if s.ambience}
+                  <div class="rf-audio-col">
+                    <span class="rf-lbl">Ambience</span>
+                    <p class="rf-ambience">{s.ambience}</p>
+                  </div>
+                {/if}
               </div>
             {/if}
+
+            <!-- L3 — Planos -->
+            <div class="rf-section">
+              <span class="rf-lbl">Planos</span>
+              <div class="rf-shots">
+                {#each s.shots as sh, j}
+                  <div class="rf-shot">
+                    <div class="rf-shot-h">
+                      <span class="ptag">P{j + 1}</span>
+                      <span class="rf-framing">{sh.framing || "—"}</span>
+                      <span class="rf-dur mono">{sh.duration_s}s</span>
+                    </div>
+                    {#if sh.sfx || sh.voiceover || sh.caption}
+                      <div class="rf-cues">
+                        {#if sh.sfx}
+                          <span class="rf-cue sfx-cue"><span class="cue-tag">sfx</span>{sh.sfx}</span>
+                        {/if}
+                        {#if sh.voiceover}
+                          <span class="rf-cue vo-cue"><span class="cue-tag">vo</span>{sh.voiceover}</span>
+                        {/if}
+                        {#if sh.caption}
+                          <span class="rf-cue cc-cue"><span class="cue-tag">cc</span>{sh.caption}</span>
+                        {/if}
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Keyframe -->
+            <div class="rf-kf-row">
+              {#if kfUrl}
+                <img class="rf-thumb" src={kfUrl} alt="keyframe {s.id}" />
+                <button class="small ghost" onclick={() => goTo("elegir")}>Cambiar →</button>
+              {:else if hasCands}
+                <span class="muted" style="font-size:12px">◈ candidatos listos —</span>
+                <button class="small machine" onclick={() => goTo("elegir")}>Elegir →</button>
+              {:else}
+                <span class="muted" style="font-size:12px">◇ sin keyframe —</span>
+                <button class="small ghost" onclick={() => goTo("elegir")}>Generar →</button>
+              {/if}
+            </div>
+
           </div>
-        </div>
+        {/if}
       {/if}
 
     </section>
@@ -464,33 +532,20 @@
   .icon:disabled { opacity: 0.35; }
   .icon.danger:hover:not(:disabled) { background: var(--red-wash); color: var(--red-deep); border-color: var(--red); }
 
-  /* --- MODO LECTURA --- */
-  .read-body {
-    display: grid;
-    grid-template-columns: 1fr 200px;
+  /* --- MODO LECTURA COLAPSADO --- */
+  .read-compact {
+    display: flex; align-items: stretch; gap: 0;
+    cursor: pointer; transition: background 0.12s;
   }
-  .read-text {
-    padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;
-    border-right: 1px solid var(--line);
+  .read-compact:hover { background: var(--paper-2); }
+  .read-compact-text {
+    flex: 1; padding: 13px 18px; display: flex; flex-direction: column; gap: 8px;
   }
-  .beat-display {
-    font-family: var(--font-display); font-size: 20px; font-weight: 600;
-    letter-spacing: -0.02em; line-height: 1.15; color: var(--ink); margin: 0;
-  }
-  .prompt-display {
-    font-size: 13.5px; line-height: 1.7; color: var(--ink-2); margin: 0;
-    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  .dialogue-display {
-    font-style: italic; font-size: 13px; color: var(--ink-2); margin: 0;
-    border-left: 2.5px solid var(--line-2); padding-left: 10px;
+  .prompt-preview {
+    font-size: 13px; line-height: 1.65; color: var(--ink-2); margin: 0;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .ambience-display {
-    font-size: 12px; color: var(--ink-soft); margin: 0;
-    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  .shots-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+  .shots-chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
     background: var(--paper-2); border: 1px solid var(--line);
@@ -501,28 +556,79 @@
   .chip-dur { font-family: var(--font-mono); color: var(--ink-soft); font-size: 11px; }
   .chip-sfx { color: var(--blue-deep); font-size: 11px; }
   .chip-vo { color: var(--ink-soft); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
-
-  /* Columna del keyframe */
-  .kf-col {
-    background: var(--paper-2); padding: 14px 12px;
-    display: flex; flex-direction: column; align-items: center;
-    gap: 8px; justify-content: center;
+  .kf-mini {
+    width: 140px; flex-shrink: 0; object-fit: cover; border-left: 1px solid var(--line);
+    display: block;
   }
-  .kf-thumb {
-    width: 100%; border-radius: var(--r-sm);
+  .empty-mini {
+    width: 140px; flex-shrink: 0; background: var(--paper-2);
+    border-left: 1px solid var(--line); display: flex;
+    align-items: center; justify-content: center;
+  }
+
+  /* --- MODO LECTURA EXPANDIDO --- */
+  .read-full { padding: 0 18px 18px; display: flex; flex-direction: column; gap: 0; }
+  .rf-section {
+    padding: 14px 0; border-bottom: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .rf-section:last-of-type { border-bottom: none; }
+  .rf-lbl {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink-soft);
+  }
+  .rf-prompt {
+    font-size: 14px; line-height: 1.72; color: var(--ink); margin: 0;
+  }
+
+  /* L2: Diálogo + Ambience */
+  .rf-audio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .rf-audio-col { display: flex; flex-direction: column; gap: 4px; }
+  .rf-dialogue {
+    font-size: 13px; line-height: 1.6; color: var(--ink-2); margin: 0;
+    font-style: italic; border-left: 2.5px solid var(--line-2); padding-left: 10px;
+  }
+  .rf-ambience {
+    font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); margin: 0;
+  }
+
+  /* L3: Planos */
+  .rf-shots { display: flex; flex-direction: column; gap: 9px; }
+  .rf-shot {
+    border-left: 3px solid var(--blue); padding-left: 12px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .rf-shot-h { display: flex; align-items: center; gap: 10px; }
+  .rf-framing { font-size: 13.5px; color: var(--ink); flex: 1; }
+  .rf-dur { font-size: 12px; color: var(--ink-soft); }
+  .rf-cues { display: flex; flex-direction: column; gap: 3px; padding-left: 2px; }
+  .rf-cue { font-size: 12px; color: var(--ink-2); display: flex; gap: 8px; align-items: baseline; }
+  .cue-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-soft); min-width: 22px;
+  }
+  .sfx-cue .cue-tag { color: var(--blue-deep); }
+  .vo-cue .cue-tag  { color: var(--ink-soft); }
+  .cc-cue .cue-tag  { color: var(--ink-soft); }
+
+  /* Keyframe en modo expandido */
+  .rf-kf-row {
+    padding-top: 14px; display: flex; align-items: center; gap: 12px;
+  }
+  .rf-thumb {
+    height: 80px; border-radius: var(--r-sm);
     border: 1px solid var(--line-2); object-fit: cover;
     aspect-ratio: 16 / 9; display: block;
   }
-  .kf-placeholder {
-    width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-sm);
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 6px;
+
+  /* Boton expand en cabecera */
+  .expand-tog {
+    width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+    background: var(--paper); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+    font-size: 12px; color: var(--ink-soft); box-shadow: none;
   }
-  .kf-placeholder.empty { border: 1.5px dashed var(--line-2); background: var(--paper); }
-  .kf-placeholder.pending { border: 1.5px dashed var(--blue); background: var(--blue-wash); }
-  .kf-icon { font-size: 22px; line-height: 1; }
-  .kf-hint { font-size: 11px; }
-  .kf-btn { font-size: 11.5px; padding: 3px 10px; }
+  .expand-tog:hover { background: var(--card); color: var(--ink); }
+  .expand-tog.open { background: var(--blue-wash); color: var(--blue-deep); border-color: var(--blue); }
 
   /* --- MODO EDICIÓN --- */
   .sbody { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
