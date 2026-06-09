@@ -294,6 +294,50 @@ def create_app(projects_dir: Path = Path("projects"),
 
         return jobs.spawn("keyframes", slug, coro()).to_dict()
 
+    @app.post("/api/projects/{slug}/keyframes/{scene_id}")
+    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2, body: dict = {}):
+        """Genera N keyframes para UNA escena con prompt_tweak opcional."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        tweak = (body.get("prompt_tweak") or "").strip()
+
+        async def coro():
+            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n, prompt_tweak=tweak)
+            return {"scene": scene_id, "n": n}
+
+        return jobs.spawn("keyframes", f"{slug}/{scene_id}", coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/candidates/{scene_id}/upload")
+    async def upload_candidate(slug: str, scene_id: str, body: dict):
+        """Sube una imagen como candidato manual (base64 en JSON).
+
+        Body: { "data": "<base64>", "filename": "foto.png" }
+        La imagen entra al pool de candidatos y se selecciona igual que un generado.
+        """
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        raw = (body.get("data") or "").strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 de la imagen).")
+        filename = body.get("filename") or "upload.png"
+        suffix = Path(filename).suffix.lower() or ".png"
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}. Usá PNG, JPG o WEBP.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = studio.add_candidate_upload(project, scene_id, data, suffix)
+        return {"url": file_url(dest), "scene": scene_id, "file": dest.name}
+
     @app.post("/api/projects/{slug}/cast")
     async def gen_cast(slug: str, n: int = 4):
         from .. import studio

@@ -3,14 +3,18 @@
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
-  let cand = $state({ keyframes: {}, cast: {} });
-  let kfPicks = $state({}); // escena -> indice
+  let cand  = $state({ keyframes: {}, cast: {} });
+  let kfPicks   = $state({}); // escena -> indice
   let castPicks = $state({}); // personaje -> indice
-  let busy = $state(""); // "keyframes" | "cast" | ""
-  let progress = $state(""); // ultima linea del job en vivo
-  let err = $state("");
+  let busy  = $state(""); // "keyframes" | "cast" | "scene:<id>" | "upload:<id>"
+  let progress = $state("");
+  let err   = $state("");
   let saved = $state(false);
-  let n = $state(2);
+  let n     = $state(2);
+
+  // Estado por escena para generación individual
+  let sceneTweak  = $state({}); // { sceneId: "texto del ajuste" }
+  let sceneErr    = $state({}); // { sceneId: "mensaje de error" }
 
   let hasFal = $derived(!!studio.status?.keys?.fal_key);
 
@@ -24,24 +28,72 @@
   $effect(() => {
     if (slug) {
       kfPicks = {}; castPicks = {}; progress = ""; err = ""; saved = false;
+      sceneTweak = {}; sceneErr = {};
       load();
     }
   });
 
+  // Generación global (todas las escenas)
   function generate(kind) {
     busy = kind; err = ""; saved = false;
-    progress = "Pidiéndole opciones a la IA…";
+    progress = "Pidiendole opciones a la IA...";
     runJob(`/api/projects/${slug}/${kind}?n=${n}`, {
       onLine: (l) => (progress = l),
       onDone: async (status) => {
         busy = "";
-        progress = status === "done" ? "Listo. Elegí abajo." : "";
-        if (status !== "done") err = `La generación terminó como: ${status}.`;
-        await load();
-        await refreshStatus();
+        progress = status === "done" ? "Listo. Elegi abajo." : "";
+        if (status !== "done") err = `La generacion termino como: ${status}.`;
+        await load(); await refreshStatus();
       },
       onError: (e) => { busy = ""; progress = ""; err = humanError(e); },
     });
+  }
+
+  // Generación por escena con prompt tweak opcional
+  function generateScene(sceneId) {
+    const busyKey = `scene:${sceneId}`;
+    busy = busyKey;
+    sceneErr = { ...sceneErr, [sceneId]: "" };
+    const tweak = (sceneTweak[sceneId] || "").trim();
+    const body = tweak ? { prompt_tweak: tweak } : {};
+    runJob(`/api/projects/${slug}/keyframes/${sceneId}?n=${n}`,
+      {
+        body,
+        onLine: (l) => (progress = l),
+        onDone: async (status) => {
+          busy = "";
+          if (status !== "done")
+            sceneErr = { ...sceneErr, [sceneId]: `Termino como: ${status}.` };
+          await load();
+        },
+        onError: (e) => {
+          busy = "";
+          sceneErr = { ...sceneErr, [sceneId]: humanError(e) };
+        },
+      }
+    );
+  }
+
+  // Upload de imagen propia como candidato
+  async function uploadImage(sceneId, fileInput) {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const busyKey = `upload:${sceneId}`;
+    busy = busyKey;
+    sceneErr = { ...sceneErr, [sceneId]: "" };
+    try {
+      const buf = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      await post(`/api/projects/${slug}/candidates/${sceneId}/upload`, {
+        data: b64, filename: file.name,
+      });
+      await load();
+    } catch (e) {
+      sceneErr = { ...sceneErr, [sceneId]: humanError(e) };
+    } finally {
+      busy = "";
+      fileInput.value = "";
+    }
   }
 
   async function savePicks() {
@@ -59,10 +111,9 @@
   }
 
   const entries = (o) => Object.entries(o || {});
-  // Solo ofrecer casting si hay personajes con 'design:' (si no, el motor falla).
   let needsCast = $derived((studio.status?.casting?.needed ?? 0) > 0);
   let hasCast = $derived(entries(cand.cast).length > 0);
-  let hasKf = $derived(entries(cand.keyframes).length > 0);
+  let hasKf   = $derived(entries(cand.keyframes).length > 0);
   let nothing = $derived(!hasCast && !hasKf);
   let anyPick = $derived(Object.keys(kfPicks).length + Object.keys(castPicks).length > 0);
 </script>
@@ -80,13 +131,13 @@
   <div class="gen-l">
     <div class="eyebrow" style="color:var(--blue-deep)">La IA propone</div>
     <p class="muted gen-help">
-      Generá un puñado de candidatos.
+      Generá un puñado de candidatos para todas las escenas a la vez.
       {#if needsCast}<b>Casting</b> = la cara del personaje (se fija una vez). {/if}
       <b>Encuadres</b> = la imagen base de cada escena.
     </p>
   </div>
   <div class="gen-controls">
-    <label class="n">opciones
+    <label class="n-lbl">opciones
       <input type="number" min="1" max="8" bind:value={n} />
     </label>
     {#if needsCast}
@@ -101,9 +152,10 @@
 </div>
 
 {#if !hasFal}
-  <p class="note">🔒 Para generar necesitás tu clave de fal.ai. <button class="small ghost" onclick={() => goTo("ajustes")}>Configurarla</button></p>
+  <p class="note">🔒 Para generar necesitás tu clave de fal.ai.
+    <button class="small ghost" onclick={() => goTo("ajustes")}>Configurarla</button></p>
 {/if}
-{#if busy}
+{#if busy === "keyframes" || busy === "cast"}
   <div class="progress mono"><span class="spin"></span>{progress}</div>
 {/if}
 {#if err}<p class="error">{err}</p>{/if}
@@ -135,19 +187,46 @@
 {#if hasKf}
   <section>
     <h2 class="sec">Encuadres <span class="muted small-h">la imagen base de cada escena</span></h2>
-    {#each entries(cand.keyframes) as [scene, urls]}
+    {#each entries(cand.keyframes) as [sceneId, urls]}
+      {@const busyScene = busy === `scene:${sceneId}`}
+      {@const busyUpload = busy === `upload:${sceneId}`}
+      {@const anyBusy = !!busy}
       <div class="group">
         <div class="group-h">
-          <b class="scene-id">{scene}</b>
-          {#if kfPicks[scene] != null}<span class="badge red">elegido · {kfPicks[scene]}</span>{/if}
+          <b class="scene-id">{sceneId}</b>
+          {#if kfPicks[sceneId] != null}<span class="badge red">elegido · {kfPicks[sceneId]}</span>{/if}
         </div>
+
+        <!-- Controles por escena -->
+        <div class="scene-ctrl">
+          <input class="tweak-in" bind:value={sceneTweak[sceneId]}
+                 placeholder="ajuste opcional: 'más cerrado', 'de perfil', 'menos rojo'…"
+                 disabled={anyBusy} />
+          <button class="small machine" onclick={() => generateScene(sceneId)}
+                  disabled={anyBusy || !hasFal}>
+            {busyScene ? "Generando…" : "+ variantes"}
+          </button>
+          <!-- Upload: label actúa como botón, input hidden -->
+          <label class="small ghost upload-lbl" class:disabled={anyBusy}>
+            {busyUpload ? "Subiendo…" : "Subir imagen"}
+            <input type="file" accept="image/png,image/jpeg,image/webp" class="file-hidden"
+                   disabled={anyBusy}
+                   onchange={(e) => uploadImage(sceneId, e.currentTarget)} />
+          </label>
+        </div>
+
+        {#if busyScene}
+          <div class="scene-progress"><span class="spin sm"></span>{progress || "Generando…"}</div>
+        {/if}
+        {#if sceneErr[sceneId]}<p class="error sm-err">{sceneErr[sceneId]}</p>{/if}
+
         <div class="lighttable">
           {#each urls as url, i}
-            <button class="cell" class:sel={kfPicks[scene] === i}
-                    onclick={() => { kfPicks = { ...kfPicks, [scene]: i }; saved = false; }}>
-              <img src={url} alt="{scene} {i}" loading="lazy" />
+            <button class="cell" class:sel={kfPicks[sceneId] === i}
+                    onclick={() => { kfPicks = { ...kfPicks, [sceneId]: i }; saved = false; }}>
+              <img src={url} alt="{sceneId} {i}" loading="lazy" />
               <span class="idx">{i}</span>
-              {#if kfPicks[scene] === i}<span class="stamp">elegido</span>{/if}
+              {#if kfPicks[sceneId] === i}<span class="stamp">elegido</span>{/if}
             </button>
           {/each}
         </div>
@@ -190,12 +269,13 @@
   .gen-l { flex: 1; min-width: 220px; }
   .gen-help { font-size: 13px; margin: 4px 0 0; max-width: 52ch; }
   .gen-controls { display: flex; align-items: center; gap: 9px; }
-  .n { display: flex; flex-direction: column; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); gap: 3px; }
-  .n input { width: 64px; font-family: var(--font-mono); }
+  .n-lbl { display: flex; flex-direction: column; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); gap: 3px; }
+  .n-lbl input { width: 64px; font-family: var(--font-mono); }
 
   .note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
   .progress { display: flex; align-items: center; gap: 10px; background: var(--blue-wash); border: 1px solid #b9c2ee; color: var(--blue-deep); border-radius: var(--r); padding: 10px 14px; font-size: 13px; }
-  .spin { width: 13px; height: 13px; border: 2px solid var(--blue-deep); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .spin { width: 13px; height: 13px; border: 2px solid var(--blue-deep); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  .spin.sm { width: 11px; height: 11px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .sec { margin: 28px 0 6px; }
@@ -204,13 +284,32 @@
   .group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 16px; }
   .scene-id { font-family: var(--font-mono); color: var(--blue-deep); }
 
-  /* mesa de luz: panel hundido oscuro para que las imagenes resalten */
+  /* Controles por escena: tweak + generar + subir */
+  .scene-ctrl {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .tweak-in {
+    flex: 1; min-width: 200px; font-size: 13px; padding: 5px 10px;
+    background: var(--paper-2); border-color: var(--line); border-radius: var(--r-sm);
+  }
+  .upload-lbl {
+    cursor: pointer; user-select: none;
+    display: inline-flex; align-items: center;
+  }
+  .upload-lbl.disabled { opacity: 0.5; pointer-events: none; }
+  .file-hidden { display: none; }
+  .scene-progress {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--blue-deep); font-size: 12px; margin-bottom: 8px;
+    font-family: var(--font-mono);
+  }
+  .sm-err { font-size: 13px; margin: 0 0 8px; }
+
+  /* mesa de luz */
   .lighttable {
     display: flex; flex-wrap: wrap; gap: 12px;
-    background: #2a251e;
-    border: 1px solid var(--line-2);
-    border-radius: var(--r);
-    padding: 14px;
+    background: #2a251e; border: 1px solid var(--line-2);
+    border-radius: var(--r); padding: 14px;
     box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.35);
   }
   .cell {

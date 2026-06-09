@@ -235,6 +235,94 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
     return write_and_open(html, project.dir / "keyframes_review.html", open_browser=open_sheet)
 
 
+async def gen_keyframes_scene(
+    project: Project, spec: ProjectSpec, cfg: Config,
+    scene_id: str, n: int,
+    prompt_tweak: str = "",
+) -> None:
+    """Genera N keyframes para UNA escena y hace MERGE en candidates.yaml existente.
+
+    `prompt_tweak` se concatena al framing del plano 1 antes de pasar por el
+    style template — cambia el cache key sin tocar el prompt base de la escena.
+    Usa seed offset = len(candidatos actuales) para nunca pisar entradas previas.
+    """
+    scene = next((s for s in spec.scenes if s.id == scene_id), None)
+    if scene is None:
+        raise ValueError(f"Escena '{scene_id}' no encontrada en el proyecto.")
+
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    refs = character_refs(scene, spec.characters)
+    scene.character_refs = refs
+    refs_resolved = resolve_refs(project.dir, refs)
+    ref_sig = sorted(str(r) for r in refs)
+    anchor = effective_shots(scene)[0]
+
+    framing = f"{anchor.framing}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor.framing
+    styled = build_styled_prompt(scene, cfg.style, framing)
+    slug = semantic_slug(f"{scene.prompt} {framing}".strip())
+
+    manifest: dict[str, list[str]] = {}
+    if project.candidates_path.exists():
+        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    existing = manifest.get(scene_id, [])
+    seed_offset = len(existing)  # seeds distintos = cache keys distintos
+
+    new_paths: list[str] = []
+    for i in range(n):
+        seed = seed_offset + i
+        try:
+            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            inputs["seed"] = seed
+            key = cache_key("keyframe", inputs)
+            hit = project.cache_lookup("keyframes", key, ".png")
+            if hit is not None:
+                stored = hit
+                logger.info("[%s] keyframe seed=%d (cache hit)", scene_id, seed)
+            else:
+                logger.info("[%s] keyframe seed=%d | generando...", scene_id, seed)
+                tmp = await keyframer.generate(scene, ref_images=refs_resolved,
+                                               seed=seed, framing=framing)
+                stored = project.cache_store("keyframes", key, tmp, ".png")
+            _alias(project, "keyframes", scene_id, slug, seed, stored)
+            new_paths.append(str(stored))
+            logger.info("[%s] keyframe seed=%d listo", scene_id, seed)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[%s] keyframe seed=%d FALLO: %s", scene_id, seed, exc)
+            logger.debug("[%s] traceback", scene_id, exc_info=True)
+
+    manifest[scene_id] = existing + new_paths
+    project.candidates_path.write_text(
+        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+
+
+def add_candidate_upload(project: Project, scene_id: str, data: bytes, suffix: str) -> Path:
+    """Guarda una imagen subida manualmente como candidato de keyframe.
+
+    La imagen entra al pool de candidatos igual que un generado — el humano
+    la selecciona normalmente. Usa hash del contenido para evitar duplicados.
+    """
+    import hashlib
+
+    if not suffix.startswith("."):
+        suffix = f".{suffix}"
+    key = hashlib.sha256(data).hexdigest()[:16]
+    dest = project.cache_dir / "keyframes" / f"upload_{key}{suffix}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+
+    manifest: dict[str, list[str]] = {}
+    if project.candidates_path.exists():
+        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    existing = manifest.get(scene_id, [])
+    if str(dest) not in existing:
+        manifest[scene_id] = existing + [str(dest)]
+        project.candidates_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return dest
+
+
 def record_picks(project: Project, picks: dict[str, int]) -> Path:
     """Valida y persiste la elección humana (selections.yaml). Resumible."""
     if not project.candidates_path.exists():
