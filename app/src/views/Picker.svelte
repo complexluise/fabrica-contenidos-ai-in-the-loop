@@ -56,7 +56,7 @@
     sceneErr = { ...sceneErr, [sceneId]: "" };
     const tweak = (sceneTweak[sceneId] || "").trim();
     const body = tweak ? { prompt_tweak: tweak } : {};
-    runJob(`/api/projects/${slug}/keyframes/${sceneId}?n=${n}`,
+    runJob(`/api/projects/${slug}/keyframes/${sceneId}?n=1`,
       {
         body,
         onLine: (l) => (progress = l),
