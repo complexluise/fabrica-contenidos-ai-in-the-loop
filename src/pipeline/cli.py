@@ -53,12 +53,12 @@ async def _run_async(
     telemetry = Telemetry(run_id)
 
     scenes: list[Scene] = load_brief(brief)
-    console.print(f"[bold]Run {run_id}[/] · {len(scenes)} escenas · estilo {style}")
+    console.print(f"[bold]Run {run_id}[/] - {len(scenes)} escenas - estilo {style}")
 
     clips: list[Path] = []
     for scene in scenes:
         scene.class_ = scene.class_ or classify(scene)
-        console.print(f"  · {scene.id} [{scene.class_}] -> keyframe")
+        console.print(f"  - {scene.id} [{scene.class_}] -> keyframe")
         scene.keyframe = await keyframer.generate(scene)
 
         result = await router.run(scene, providers, gate)
@@ -78,8 +78,8 @@ async def _run_async(
             )
         )
         console.print(
-            f"    {result.provider} · ${result.cost_usd:.3f} · {result.latency_s:.1f}s"
-            f" · gate={'ok' if result.raw_meta.get('gate_passed', True) else 'fail'}"
+            f"    {result.provider} - ${result.cost_usd:.3f} - {result.latency_s:.1f}s"
+            f" - gate={'ok' if result.raw_meta.get('gate_passed', True) else 'fail'}"
         )
 
     stitched = concat_clips(clips, out_dir / "_stitched.mp4")
@@ -92,7 +92,7 @@ async def _run_async(
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
         f"  costo total: ${totals['total_cost_usd']:.3f}"
-        f" · latencia: {totals['total_latency_s']:.1f}s · reporte: {report}"
+        f" - latencia: {totals['total_latency_s']:.1f}s - reporte: {report}"
     )
     return final
 
@@ -106,16 +106,16 @@ async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
     spec = load_project_spec(project.spec_path)
     cfg = load_config(config_dir, spec.style, profile=profile)
     console.print(
-        f"[bold]Proyecto {slug}[/] · {len(spec.scenes)} escenas"
-        f" · estilo {spec.style} · perfil {profile} · concurrencia {concurrency}"
+        f"[bold]Proyecto {slug}[/] - {len(spec.scenes)} escenas"
+        f" - estilo {spec.style} - perfil {profile} - concurrencia {concurrency}"
     )
 
     run, final, totals = await run_project(project, spec, cfg, concurrency=concurrency)
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
-        f"  run {run.run_id} · costo: ${totals['total_cost_usd']:.3f}"
-        f" · cache hits: {totals['cache_hits']}/{totals['attempts']}"
-        f" · manifiesto: {run.manifest_path}"
+        f"  run {run.run_id} - costo: ${totals['total_cost_usd']:.3f}"
+        f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
+        f" - manifiesto: {run.manifest_path}"
     )
     return final
 
@@ -143,7 +143,7 @@ def cast(
 
     proj, spec, cfg = _load_project(project, projects_dir, config_dir)
     designed = [n for n, c in spec.characters.items() if c.design]
-    console.print(f"[bold]{project}[/] · casting de {designed} × {n} candidatos…")
+    console.print(f"[bold]{project}[/] - casting de {designed} x {n} candidatos...")
     sheet = asyncio.run(cast_characters(proj, spec, cfg, n))
     console.print(
         f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
@@ -191,7 +191,7 @@ def keyframes(
     from .studio import gen_keyframes
 
     proj, spec, cfg = _load_project(project, projects_dir, config_dir)
-    console.print(f"[bold]{project}[/] · {len(spec.scenes)} escenas × {n} candidatos…")
+    console.print(f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos...")
     sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n))
     console.print(
         f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
@@ -232,14 +232,14 @@ def render(
     proj, spec, cfg = _load_project(project, projects_dir, config_dir)
     overrides = parse_overrides(keyframe) if keyframe else {}
     if overrides:
-        console.print(f"[bold]{project}[/] · render · keyframes directos: {list(overrides)}")
+        console.print(f"[bold]{project}[/] - render - keyframes directos: {list(overrides)}")
     else:
-        console.print(f"[bold]{project}[/] · render con keyframes elegidos…")
+        console.print(f"[bold]{project}[/] - render con keyframes elegidos...")
     run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides))
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
-        f"  run {run.run_id} · costo: ${totals['total_cost_usd']:.3f}"
-        f" · cache hits: {totals['cache_hits']}/{totals['attempts']}"
+        f"  run {run.run_id} - costo: ${totals['total_cost_usd']:.3f}"
+        f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
     )
 
 
@@ -284,7 +284,7 @@ def export(
     out = export_bundle(proj, spec)
     console.print(
         f"\n[bold green]Bundle listo[/] {out}\n"
-        f"  media/ (videos+voces+musica) · frames/ · rough_cut.mp4 · subtitulos.srt · guion.md"
+        f"  media/ (videos+voces+musica) - frames/ - rough_cut.mp4 - subtitulos.srt - guion.md"
     )
 
 
@@ -298,11 +298,11 @@ def describe(
     from .describe import describe_bundle
 
     proj, _spec, _cfg = _load_project(project, projects_dir, config_dir)
-    console.print(f"[bold]{project}[/] · describiendo planos con Haiku…")
+    console.print(f"[bold]{project}[/] - describiendo planos con Haiku...")
     path = describe_bundle(proj)
     console.print(
         f"\n[bold green]Listo[/] {path}\n"
-        f"  por plano: description · on_message · usable · issues"
+        f"  por plano: description - on_message - usable - issues"
     )
 
 
@@ -321,11 +321,11 @@ def graphics(
     from .graphics import render_graphics
 
     proj, spec, _cfg = _load_project(project, projects_dir, config_dir)
-    console.print(f"[bold]{project}[/] · generando motion graphics con movis…")
+    console.print(f"[bold]{project}[/] - generando motion graphics con movis...")
     out = render_graphics(proj, spec)
     console.print(
         f"\n[bold green]Graphics listos[/] {out}\n"
-        f"  lower-thirds por plano (lt_<base>.png, con alpha) · title.mp4 · end.mp4"
+        f"  lower-thirds por plano (lt_<base>.png, con alpha) - title.mp4 - end.mp4"
     )
 
 
