@@ -21,6 +21,17 @@
   async function load() {
     try {
       cand = await get(`/api/projects/${slug}/candidates`);
+      // Pre-poblar kfPicks desde las selecciones ya persistidas en disco.
+      // selections guarda rutas relativas; buscamos el indice por nombre de archivo.
+      const fromDisk = {};
+      for (const [sceneId, selPath] of Object.entries(cand.selections || {})) {
+        const urls = cand.keyframes?.[sceneId] || [];
+        const filename = String(selPath).split(/[/\\]/).pop();
+        const idx = urls.findIndex((url) => url.split("/").pop() === filename);
+        if (idx >= 0) fromDisk[sceneId] = idx;
+      }
+      // Picks de esta sesión ganan; el resto se rellena desde disco
+      kfPicks = { ...fromDisk, ...kfPicks };
     } catch (e) {
       err = humanError(e);
     }
@@ -115,7 +126,10 @@
   let hasCast = $derived(entries(cand.cast).length > 0);
   let hasKf   = $derived(entries(cand.keyframes).length > 0);
   let nothing = $derived(!hasCast && !hasKf);
-  let anyPick = $derived(Object.keys(kfPicks).length + Object.keys(castPicks).length > 0);
+  let anyPick    = $derived(Object.keys(kfPicks).length + Object.keys(castPicks).length > 0);
+  let allPicked  = $derived(
+    entries(cand.keyframes).every(([id]) => kfPicks[id] != null)
+  );
 </script>
 
 <header class="head">
@@ -251,9 +265,10 @@
       </div>
     {:else}
       <button class="primary" onclick={savePicks} disabled={!anyPick}>
-        Confirmar mi elección
+        {allPicked ? "Confirmar selección" : "Guardar lo elegido"}
       </button>
       {#if !anyPick}<span class="muted">Hacé clic en al menos una opción.</span>{/if}
+      {#if allPicked && anyPick}<span class="muted">Todas las escenas tienen encuadre. Cambiá lo que querés y confirmá.</span>{/if}
     {/if}
   </div>
 {/if}
