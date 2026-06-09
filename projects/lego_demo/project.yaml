@@ -1,12 +1,10 @@
-# Spec del proyecto: entrada unica que dispara el pipeline (SPEC §7.1).
-#   uv run pipeline run lego_demo
-# Re-correr sin cambios -> todo cache hit (costo $0). Subir el `seed` de una
-# escena = reroll (regenera solo esa). Cambiar su prompt = idem.
 project: lego_demo
+title: lego_demo
 style: lego
-format: "9:16"
+format: '9:16'
 scenes:
-  - id: s1
-    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacias"
-    duration_s: 5
-    seed: 0
+- id: s1
+  prompt: Plano general de una ciudad LEGO al amanecer, calles vacias
+  duration_s: 5
+  shots:
+  - duration_s: 5
