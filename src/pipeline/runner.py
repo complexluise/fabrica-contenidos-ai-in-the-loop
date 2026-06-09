@@ -239,8 +239,11 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch")
     telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
 
-    # Voz en off (Sprint 6): solo si alguna escena la pide y hay key. Best-effort.
-    any_vo = any(s.voiceover for s in spec.scenes)
+    # Voz en off (Sprint 6): chequea scene.voiceover Y shot.voiceover (ambos válidos).
+    any_vo = any(
+        s.voiceover or any(sh.voiceover for sh in effective_shots(s))
+        for s in spec.scenes
+    )
     tts = None
     if any_vo:
         vo_key_env = get_settings().elevenlabs_api_key

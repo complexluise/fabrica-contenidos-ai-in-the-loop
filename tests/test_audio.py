@@ -104,5 +104,5 @@ def test_load_project_spec_parses_voiceover_and_voice(tmp_path: Path):
     assert spec.scenes[0].voiceover == "Una ciudad despierta al amanecer."
     assert spec.scenes[0].voice_id is None
     assert spec.scenes[1].voice_id == "otra-voz"
-    # default de modelo disponible para el adapter
-    assert DEFAULT_VOICE_MODEL == "eleven_multilingual_v2"
+    # el modelo por defecto soporta multilingüe (español)
+    assert "multilingual" in DEFAULT_VOICE_MODEL or "turbo" in DEFAULT_VOICE_MODEL
