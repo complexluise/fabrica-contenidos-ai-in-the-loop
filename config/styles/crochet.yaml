@@ -9,7 +9,9 @@ keyframe:
   strength: 0.9
   ref_model: "fal-ai/nano-banana/edit"
 prompt_template: >
-  {scene_prompt}, amigurumi crochet style, yarn and wool texture, visible crochet
-  stitches, handcrafted stuffed toy characters, soft natural lighting, macro
-  photography, shallow depth of field, cozy aesthetic, highly detailed
-negative_prompt: "LEGO, plastic, minifigure, realistic skin, photorealism, smooth surface, blurry, deformed, cat, dynamite, explosion, confetti, flag"
+  {scene_prompt}, crochet craft style — yarn and wool textures, visible hand-knitted
+  stitches, cotton and acrylic fiber materials, educational craft diorama props,
+  warm mustard and cream color palette, macro photography, shallow depth of field,
+  soft natural side lighting, highly detailed fiber arts
+negative_prompt: "LEGO, plastic, minifigure, smooth rubber surface, blurry, deformed,
+  cat, dynamite, explosion, confetti, flag, 3D render, CGI, anime, cartoon flat style"

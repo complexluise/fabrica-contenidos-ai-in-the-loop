@@ -153,16 +153,39 @@ button.machine:disabled { box-shadow: none; }
 button.ghost { background: transparent; border-color: var(--line-2); }
 button.small { padding: 5px 11px; font-size: 13px; border-radius: var(--r-sm); }
 
-/* --- inputs --- */
-select, input[type="text"], input[type="number"], input[type="password"] {
+/* --- inputs ---
+   Foco = gesto humano = rojo (D-040).
+   Azul se reserva para acento de la máquina (D-021).
+   Textareas tienen los mismos tokens base; las vistas refinan sobre esto. */
+select, input[type="text"], input[type="number"], input[type="password"], textarea {
   font: inherit;
   background: var(--card);
   color: var(--ink);
   border: 1.5px solid var(--line-2);
   border-radius: var(--r);
   padding: 9px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-select:focus, input:focus { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
+select:focus, input:focus, textarea:focus {
+  outline: 2px solid var(--red);
+  outline-offset: 1px;
+  border-color: var(--red);
+}
+textarea { resize: vertical; line-height: 1.55; }
+
+/* campo con etiqueta — exportable como pieza base del design system */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.field > span.field-label, .field > .lbl {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
 
 /* --- piezas reutilizables --- */
 .pill {

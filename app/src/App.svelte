@@ -52,7 +52,6 @@
   // motor (status.stage); aca solo proyectamos a done/todo/info.
   function stageState(id) {
     if (id === "inicio") return "info";
-    if (id === "importar") return hasProject() ? "done" : "todo";
     if (!studio.status) return "todo";
     return stepDone(id, studio.status) ? "done" : "todo";
   }

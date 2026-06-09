@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from .project import Project, ProjectSpec
+from .project import Project, ProjectSpec, _resolve_under
 
 
 class Stage(str, Enum):
@@ -126,7 +126,11 @@ def derive_state(project: Project, spec: ProjectSpec, *, has_fal_key: bool) -> P
     selections = _load_yaml(project.selections_path)
     keyframes = KeyframesState(
         total=len(scene_ids),
-        chosen=sum(1 for sid in scene_ids if sid in selections),
+        # Cuenta elegido solo si el archivo EXISTE (resuelto project-relative): un
+        # proyecto importado con selections de otra máquina no debe figurar "listo"
+        # cuando los frames no están en disco (D-044).
+        chosen=sum(1 for sid in scene_ids
+                   if sid in selections and _resolve_under(project.dir, selections[sid]).exists()),
         has_candidates=project.candidates_path.exists(),
     )
 

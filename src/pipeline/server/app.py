@@ -24,7 +24,8 @@ _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
 
 # Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
 # requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
-_EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters", "shots"}
+_EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters",
+                   "shots", "dialogue", "ambience"}
 
 
 def _available_styles(config_dir: Path) -> list[str]:
@@ -225,9 +226,11 @@ def create_app(projects_dir: Path = Path("projects"),
         _project, spec, _cfg = load(slug)
         scenes = [{
             "id": s.id, "beat": s.beat, "class": s.class_, "prompt": s.prompt,
+            "dialogue": s.dialogue, "ambience": s.ambience,
             "characters": s.characters,
             "shots": [{"framing": sh.framing, "duration_s": sh.duration_s,
-                       "voiceover": sh.voiceover, "caption": sh.caption}
+                       "voiceover": sh.voiceover, "caption": sh.caption,
+                       "sfx": sh.sfx}
                       for sh in effective_shots(s)],
         } for s in spec.scenes]
         characters = [{
@@ -235,8 +238,9 @@ def create_app(projects_dir: Path = Path("projects"),
             "design": ch.design.prompt if ch.design else None,
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
+        music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
-                "style": spec.style, "format": spec.format,
+                "style": spec.style, "format": spec.format, "music": music_url,
                 "characters": characters, "scenes": scenes}
 
     @app.get("/api/projects/{slug}/candidates")
@@ -249,8 +253,15 @@ def create_app(projects_dir: Path = Path("projects"),
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             return {k: [file_url(p) for p in v] for k, v in data.items()}
 
+        def load_yaml(path: Path) -> dict:
+            if not path.exists():
+                return {}
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
         return {"keyframes": read(project.candidates_path),
-                "cast": read(project.dir / "cast_candidates.yaml")}
+                "cast": read(project.dir / "cast_candidates.yaml"),
+                "selections": load_yaml(project.selections_path),
+                "cast_selections": load_yaml(project.dir / "casting.yaml")}
 
     @app.get("/api/projects/{slug}/status")
     def project_status(slug: str):
@@ -274,16 +285,115 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- jobs de generación ----------------------------------------------
     @app.post("/api/projects/{slug}/keyframes")
-    async def gen_keyframes(slug: str, n: int = 4):
+    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.gen_keyframes(project, spec, cfg, n, open_sheet=False)
+            sheet = await studio.gen_keyframes(project, spec, cfg, n,
+                                               open_sheet=False, concurrency=concurrency)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("keyframes", slug, coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/keyframes/{scene_id}")
+    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2, body: dict = {}):
+        """Genera N keyframes para UNA escena con prompt_tweak opcional."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        tweak = (body.get("prompt_tweak") or "").strip()
+
+        async def coro():
+            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n, prompt_tweak=tweak)
+            return {"scene": scene_id, "n": n}
+
+        return jobs.spawn("keyframes", f"{slug}/{scene_id}", coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/candidates/{scene_id}/upload")
+    async def upload_candidate(slug: str, scene_id: str, body: dict):
+        """Sube una imagen como candidato manual (base64 en JSON).
+
+        Body: { "data": "<base64>", "filename": "foto.png" }
+        La imagen entra al pool de candidatos y se selecciona igual que un generado.
+        """
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        raw = (body.get("data") or "").strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 de la imagen).")
+        filename = body.get("filename") or "upload.png"
+        suffix = Path(filename).suffix.lower() or ".png"
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}. Usá PNG, JPG o WEBP.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = studio.add_candidate_upload(project, scene_id, data, suffix)
+        return {"url": file_url(dest), "scene": scene_id, "file": dest.name}
+
+    @app.post("/api/projects/{slug}/music/upload")
+    async def upload_music(slug: str, body: dict):
+        """Sube un archivo de audio como música de fondo (base64 en JSON).
+
+        Body: { "data": "<base64>", "filename": "pista.mp3" }
+        """
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        raw = (body.get("data") or "").strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 del audio).")
+        filename = body.get("filename") or "music.mp3"
+        suffix = Path(filename).suffix.lower() or ".mp3"
+        if suffix not in {".mp3", ".wav", ".ogg", ".m4a", ".aac"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = project.dir / "cache" / f"music{suffix}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        studio.set_project_music(project, spec, dest)
+        return {"url": file_url(dest), "file": dest.name}
+
+    @app.post("/api/projects/{slug}/music/generate")
+    async def generate_music(slug: str, body: dict):
+        """Genera música con stable-audio (fal.ai). Job/SSE.
+
+        Body: { "prompt": "...", "duration_s": 30 }
+        """
+        from .. import studio
+        from ..music import generate_music_fal
+
+        project, spec, _cfg = load(slug)
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(422, "Falta 'prompt' para generar la música.")
+        duration_s = float(body.get("duration_s") or 30.0)
+        s = get_settings()
+        if not s.fal_key:
+            raise HTTPException(503, "FAL_KEY no configurada.")
+        out_path = project.dir / "cache" / "music_generated.wav"
+
+        async def coro():
+            dest = await generate_music_fal(prompt, duration_s, out_path, s.fal_key)
+            studio.set_project_music(project, spec, dest)
+            return {"url": file_url(dest), "file": dest.name}
+
+        return jobs.spawn("music", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/cast")
     async def gen_cast(slug: str, n: int = 4):

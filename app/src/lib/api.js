@@ -25,6 +25,18 @@ export const put = (path, body) =>
 
 export const del = (path) => req(path, { method: "DELETE" });
 
+// Convierte un ArrayBuffer a base64 en chunks para evitar "too many function arguments"
+// con archivos grandes (el spread ...Uint8Array falla en >~65K bytes en todos los navegadores).
+export function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 // Traduce un error crudo (texto del backend o traceback) a algo legible por humanos.
 export function humanError(e) {
   const raw = (e && e.message ? e.message : String(e || "")).trim();

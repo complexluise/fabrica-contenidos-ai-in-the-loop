@@ -94,6 +94,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     # --- L3 keyframe (cacheado, con identidad de personaje) ---
     styled = build_styled_prompt(scene, cfg.style, shot.framing)
     kf_key = cache_key("keyframe", _keyframe_inputs(styled, cfg, ref_sig))
+    kf_cost = 0.0
     if idx == 0 and scene.id in keyframe_overrides:  # plano 1 = keyframe elegido/inyectado (D-022/D-025)
         keyframe = keyframe_overrides[scene.id]
         kf_key = f"picked:{keyframe.name}"
@@ -107,7 +108,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
             logger.info("[%s] %s | generando keyframe...", shot_id, scene.class_)
             tmp = await keyframer.generate(scene, ref_images=refs_io, framing=shot.framing)
             keyframe = project.cache_store("keyframes", kf_key, tmp, ".png")
-            logger.info("[%s] keyframe generado: %s", shot_id, keyframe.name)
+            kf_cost = cfg.style.keyframe.cost_per_image
+            logger.info("[%s] keyframe generado: %s ($%.4f)", shot_id, keyframe.name, kf_cost)
 
     # Escena efectiva del plano: prompt+framing, duración/seed/audio del plano.
     eff_prompt = scene.prompt if not shot.framing else f"{scene.prompt}, {shot.framing}"
@@ -185,6 +187,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     # --- L7 voz en off del plano (best-effort, cacheada) ---
     vo_applied = False
     vo_file = None  # path del .mp3 de la voz (para el export, D-029)
+    tts_cost = 0.0
     if plano.voiceover and tts is not None:
         try:
             voice_id = resolve_voice(plano, spec)
@@ -194,6 +197,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
                 scratch = run.dir / "_vo" / f"{shot_id}.mp3"
                 await tts.synthesize(plano.voiceover, voice_id, scratch)
                 vo_file = project.cache_store("voiceover", vo_key, scratch, ".mp3")
+                tts_cost = round(getattr(tts, "cost_per_char", 0.0) * len(plano.voiceover), 6)
             clip_path = mux_voiceover(clip_path, vo_file, run.dir / "voiced" / f"{shot_id}.mp4")
             vo_applied = True
         except Exception:
@@ -206,7 +210,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
         attempt=result.raw_meta.get("attempts", 1),
         passed=result.raw_meta.get("gate_passed", True),
         cached=cached, keyframe_key=kf_key, video_key=vid_key,
-        audio_provider=audio_provider, audio_cost_usd=audio_cost)
+        audio_provider=audio_provider, audio_cost_usd=audio_cost,
+        keyframe_cost_usd=kf_cost, tts_cost_usd=tts_cost)
     manifest_entry = {
         "id": shot_id, "scene": scene.id, "beat": scene.beat, "class": scene.class_,
         "strategy": rule.strategy, "provider": result.provider,
@@ -239,13 +244,22 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch")
     telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
 
-    # Voz en off (Sprint 6): solo si alguna escena la pide y hay key. Best-effort.
-    any_vo = any(s.voiceover for s in spec.scenes)
+    # Voz en off (Sprint 6): chequea scene.voiceover Y shot.voiceover (ambos válidos).
+    any_vo = any(
+        s.voiceover or any(sh.voiceover for sh in effective_shots(s))
+        for s in spec.scenes
+    )
     tts = None
     if any_vo:
-        vo_key_env = get_settings().elevenlabs_api_key
+        settings = get_settings()
+        vo_key_env = settings.elevenlabs_api_key
         if vo_key_env:
             tts = ElevenLabsTTS(vo_key_env, model=DEFAULT_VOICE_MODEL)
+            logger.info("TTS: ElevenLabs (%s)", DEFAULT_VOICE_MODEL)
+        elif settings.fal_key:
+            from .providers.fal_tts import FalTTS
+            tts = FalTTS(settings.fal_key)
+            logger.info("TTS: fal-ai/kokoro (fallback; sin ELEVENLABS_API_KEY)")
 
     # Audio diegético (Sprint 6.9, D-034): SFX + ambiente vía MMAudio (fal). Solo
     # si algún plano trae un cue y hay FAL_KEY. Best-effort.

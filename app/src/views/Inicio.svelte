@@ -13,8 +13,10 @@
   function station(id) {
     if (!st) return { done: false, detail: "—", actor: "tu" };
     const done = stepDone(id, st);
-    if (id === "importar")
-      return { done: true, detail: "proyecto creado", actor: "ia" };
+    if (id === "importar") {
+      const d = stepDone(id, st);
+      return { done: d, detail: d ? "plan firmado" : "proyecto creado, sin firmar", actor: "ia" };
+    }
     if (id === "storyboard")
       return {
         done: !!st.storyboard?.signed,

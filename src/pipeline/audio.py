@@ -20,7 +20,9 @@ from .contracts import Scene
 # Voz stock multilingüe de ElevenLabs ("Rachel"); se cambia en el project.yaml
 # (`voice_id:`) o por escena. El modelo multilingüe cubre el español.
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-DEFAULT_VOICE_MODEL = "eleven_multilingual_v2"
+# eleven_turbo_v2_5: multilingüe (español ok), ~40% mas barato que multilingual_v2.
+# Para maxima calidad cambiarlo a "eleven_multilingual_v2".
+DEFAULT_VOICE_MODEL = "eleven_turbo_v2_5"
 
 # Cuánto baja el audio diegético del clip (sfx/ambiente, D-034) cuando hay voz
 # en off encima. Jerarquía: voz 1.0 > diegético 0.6 > música 0.25 (en assemble).

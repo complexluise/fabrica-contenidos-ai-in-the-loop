@@ -10,6 +10,7 @@ Flujo por etapas con estado en el proyecto:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from .project import (
     cache_key,
     character_refs,
     effective_shots,
+    relativize,
     resolve_refs,
 )
 from .runner import _keyframe_inputs, run_project
@@ -156,10 +158,9 @@ def record_cast_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos de casting para '{name}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{name}' (0..{len(cands) - 1}).")
-        # Resuelve a absoluto: el manifest nuevo trae paths absolutos
-        # (post-fix de `Project.dir`); el viejo (pre-fix) trae CWD-relativos.
-        # `.resolve()` cubre ambos casos (idempotente en absolutos).
-        casting[name] = str(Path(cands[idx]).resolve())
+        # Persiste project-relative (portable, D-044): la cara vive en cache/
+        # del proyecto -> queda como `cache/cast/<hash>.png`.
+        casting[name] = relativize(project.dir, cands[idx])
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -181,7 +182,7 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
         resolved = _resolve_under(project.dir, path)
         if not resolved.exists():
             raise RuntimeError(f"La cara directa de '{name}' no existe: {resolved}")
-        casting[name] = str(resolved)
+        casting[name] = relativize(project.dir, resolved)  # portable (D-044)
     (project.dir / "casting.yaml").write_text(
         yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -189,50 +190,174 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
 
 
 async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int,
-                        open_sheet: bool = True) -> Path:
-    """Genera N candidatos de keyframe por escena y escribe la hoja de contactos."""
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
-    groups: dict[str, list[Path]] = {}
-    manifest: dict[str, list[str]] = {}
+                        open_sheet: bool = True, concurrency: int = 5) -> Path:
+    """Genera N candidatos de keyframe por escena en paralelo (semaforo=concurrency).
 
+    Todas las (escena x candidato) se lanzan a la vez limitadas por el semaforo.
+    fal.ai flux-lora soporta ~10 requests simultaneos en plan Pro; 5 es seguro.
+    """
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    sem = asyncio.Semaphore(concurrency)
+
+    # Pre-computa metadatos por escena (sincrono, sin I/O)
+    scene_meta = []
     for scene in spec.scenes:
         refs = character_refs(scene, spec.characters)
         scene.character_refs = refs
-        refs_resolved = resolve_refs(project.dir, refs)  # project-relative -> abs
+        refs_resolved = resolve_refs(project.dir, refs)
         ref_sig = sorted(str(r) for r in refs)
-        anchor = effective_shots(scene)[0]  # el keyframe elegido = plano 1 (D-028)
+        anchor = effective_shots(scene)[0]
         styled = build_styled_prompt(scene, cfg.style, anchor.framing)
-        slug = semantic_slug(f"{scene.prompt} {anchor.framing}".strip())  # nombre legible (D-026)
-        paths: list[Path] = []        # hash (verdad del caché, estable para pick/render)
-        display: list[Path] = []      # alias legibles (lo que ve el humano en la hoja)
-        for i in range(n):
-            try:  # robustez: un candidato que falla no tira los demás
-                inputs = _keyframe_inputs(styled, cfg, ref_sig)
-                inputs["seed"] = i  # candidato i: seed distinto -> imagen distinta
-                key = cache_key("keyframe", inputs)
-                hit = project.cache_lookup("keyframes", key, ".png")
-                if hit is not None:
-                    stored = hit
-                    logger.info("[%s] keyframe %d/%d (cache hit)", scene.id, i + 1, n)
-                else:
-                    logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
-                    tmp = await keyframer.generate(scene, ref_images=refs_resolved, seed=i, framing=anchor.framing)
-                    stored = project.cache_store("keyframes", key, tmp, ".png")
-                alias = _alias(project, "keyframes", scene.id, slug, i, stored)
-                paths.append(stored)
-                display.append(alias)
-                logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("[%s] keyframe %d/%d FALLO: %s", scene.id, i + 1, n, exc)
-                logger.debug("[%s] traceback", scene.id, exc_info=True)
-        groups[scene.id] = display
-        manifest[scene.id] = [str(p) for p in paths]
+        slug = semantic_slug(f"{scene.prompt} {anchor.framing}".strip())
+        scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
+
+    async def _one(scene, refs_resolved, ref_sig, anchor, styled, slug, i):
+        """Genera un solo candidato bajo el semaforo."""
+        async with sem:
+            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            inputs["seed"] = i
+            key = cache_key("keyframe", inputs)
+            hit = project.cache_lookup("keyframes", key, ".png")
+            if hit is not None:
+                logger.info("[%s] keyframe %d/%d (cache hit)", scene.id, i + 1, n)
+                stored = hit
+            else:
+                logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
+                tmp = await keyframer.generate(scene, ref_images=refs_resolved,
+                                               seed=i, framing=anchor.framing)
+                stored = project.cache_store("keyframes", key, tmp, ".png")
+            alias = _alias(project, "keyframes", scene.id, slug, i, stored)
+            logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
+            return stored, alias
+
+    # Lanza todas las tareas en paralelo, preserva (scene_idx, candidate_idx) para reensamblar
+    tasks = [
+        (s_idx, i, asyncio.ensure_future(_one(*meta, i)))
+        for s_idx, meta in enumerate(scene_meta)
+        for i in range(n)
+    ]
+
+    results: dict[int, list[tuple[int, Path, Path]]] = {i: [] for i in range(len(spec.scenes))}
+    raw = await asyncio.gather(*(t for _, _, t in tasks), return_exceptions=True)
+
+    for (s_idx, i, _), outcome in zip(tasks, raw):
+        scene = spec.scenes[s_idx]
+        if isinstance(outcome, Exception):
+            logger.error("[%s] keyframe %d/%d FALLO: %s", scene.id, i + 1, n, outcome)
+            logger.debug("[%s] traceback", scene.id, exc_info=outcome)
+        else:
+            stored, alias = outcome
+            results[s_idx].append((i, stored, alias))
+
+    # Reensambla en orden de candidato (gather no garantiza orden interno por escena)
+    groups: dict[str, list[Path]] = {}
+    manifest: dict[str, list[str]] = {}
+    for s_idx, meta in enumerate(scene_meta):
+        scene = spec.scenes[s_idx]
+        ordered = sorted(results[s_idx], key=lambda x: x[0])
+        groups[scene.id] = [alias for _, _, alias in ordered]
+        manifest[scene.id] = [str(stored) for _, stored, _ in ordered]
 
     project.candidates_path.write_text(
         yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
     html = build_contact_sheet(f"Keyframes · {spec.slug} (elige con: pipeline pick)", groups)
     return write_and_open(html, project.dir / "keyframes_review.html", open_browser=open_sheet)
+
+
+async def gen_keyframes_scene(
+    project: Project, spec: ProjectSpec, cfg: Config,
+    scene_id: str, n: int,
+    prompt_tweak: str = "",
+) -> None:
+    """Genera N keyframes para UNA escena y hace MERGE en candidates.yaml existente.
+
+    `prompt_tweak` se concatena al framing del plano 1 antes de pasar por el
+    style template — cambia el cache key sin tocar el prompt base de la escena.
+    Usa seed offset = len(candidatos actuales) para nunca pisar entradas previas.
+    """
+    scene = next((s for s in spec.scenes if s.id == scene_id), None)
+    if scene is None:
+        raise ValueError(f"Escena '{scene_id}' no encontrada en el proyecto.")
+
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    refs = character_refs(scene, spec.characters)
+    scene.character_refs = refs
+    refs_resolved = resolve_refs(project.dir, refs)
+    ref_sig = sorted(str(r) for r in refs)
+    anchor = effective_shots(scene)[0]
+
+    framing = f"{anchor.framing}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor.framing
+    styled = build_styled_prompt(scene, cfg.style, framing)
+    slug = semantic_slug(f"{scene.prompt} {framing}".strip())
+
+    manifest: dict[str, list[str]] = {}
+    if project.candidates_path.exists():
+        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    existing = manifest.get(scene_id, [])
+    seed_offset = len(existing)  # seeds distintos = cache keys distintos
+
+    new_paths: list[str] = []
+    for i in range(n):
+        seed = seed_offset + i
+        try:
+            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            inputs["seed"] = seed
+            key = cache_key("keyframe", inputs)
+            hit = project.cache_lookup("keyframes", key, ".png")
+            if hit is not None:
+                stored = hit
+                logger.info("[%s] keyframe seed=%d (cache hit)", scene_id, seed)
+            else:
+                logger.info("[%s] keyframe seed=%d | generando...", scene_id, seed)
+                tmp = await keyframer.generate(scene, ref_images=refs_resolved,
+                                               seed=seed, framing=framing)
+                stored = project.cache_store("keyframes", key, tmp, ".png")
+            _alias(project, "keyframes", scene_id, slug, seed, stored)
+            new_paths.append(str(stored))
+            logger.info("[%s] keyframe seed=%d listo", scene_id, seed)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[%s] keyframe seed=%d FALLO: %s", scene_id, seed, exc)
+            logger.debug("[%s] traceback", scene_id, exc_info=True)
+
+    manifest[scene_id] = existing + new_paths
+    project.candidates_path.write_text(
+        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+
+
+def add_candidate_upload(project: Project, scene_id: str, data: bytes, suffix: str) -> Path:
+    """Guarda una imagen subida manualmente como candidato de keyframe.
+
+    La imagen entra al pool de candidatos igual que un generado — el humano
+    la selecciona normalmente. Usa hash del contenido para evitar duplicados.
+    """
+    import hashlib
+
+    if not suffix.startswith("."):
+        suffix = f".{suffix}"
+    key = hashlib.sha256(data).hexdigest()[:16]
+    dest = project.cache_dir / "keyframes" / f"upload_{key}{suffix}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+
+    manifest: dict[str, list[str]] = {}
+    if project.candidates_path.exists():
+        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    existing = manifest.get(scene_id, [])
+    if str(dest) not in existing:
+        manifest[scene_id] = existing + [str(dest)]
+        project.candidates_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return dest
+
+
+def set_project_music(project: Project, spec: ProjectSpec, src: Path) -> None:
+    """Fija la musica de fondo del proyecto y persiste en project.yaml."""
+    from .project import write_spec
+    spec.music = src.resolve()
+    write_spec(spec, project.spec_path)
 
 
 def record_picks(project: Project, picks: dict[str, int]) -> Path:
@@ -250,9 +375,9 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
             raise ValueError(f"No hay candidatos para '{sid}'.")
         if not 0 <= idx < len(cands):
             raise ValueError(f"Índice {idx} fuera de rango para '{sid}' (0..{len(cands) - 1}).")
-        # Resuelve a absoluto: idem `record_cast_picks` (manifests viejos con
-        # CWD-relativos + nuevos absolutos).
-        selections[sid] = str(Path(cands[idx]).resolve())
+        # Persiste project-relative (portable, D-044): el candidato vive en
+        # cache/ del proyecto -> queda como `cache/keyframes/<hash>.png`.
+        selections[sid] = relativize(project.dir, cands[idx])
 
     project.selections_path.write_text(
         yaml.safe_dump(selections, sort_keys=False, allow_unicode=True), encoding="utf-8"
@@ -288,16 +413,20 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
     selección persistida (`selections.yaml`, el ciclo de candidatos). Una escena
     queda satisfecha por cualquiera de las dos.
     """
-    flag = keyframe_overrides or {}
-    for sid, p in flag.items():  # error temprano y claro si la ruta no existe
-        if not Path(p).exists():
-            raise RuntimeError(f"El keyframe directo de '{sid}' no existe: {p}")
+    # Rutas resueltas para I/O contra el proyecto (project-relative -> abs, D-044):
+    # selections.yaml y --keyframe son portables (relativos al proyecto).
+    flag: dict[str, Path] = {}
+    for sid, p in (keyframe_overrides or {}).items():  # error temprano si no existe
+        resolved = _resolve_under(project.dir, p)
+        if not resolved.exists():
+            raise RuntimeError(f"El keyframe directo de '{sid}' no existe: {resolved}")
+        flag[sid] = resolved
 
     selections = {}
     if project.selections_path.exists():
         selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
 
-    merged: dict[str, Path] = {sid: Path(p) for sid, p in selections.items()}
+    merged: dict[str, Path] = {sid: _resolve_under(project.dir, p) for sid, p in selections.items()}
     merged.update(flag)  # el flag tiene precedencia (D-025)
 
     missing = [s.id for s in spec.scenes if s.id not in merged]

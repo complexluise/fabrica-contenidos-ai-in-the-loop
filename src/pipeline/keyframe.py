@@ -56,6 +56,7 @@ class KeyframeGenerator:
 
     async def _submit_ref(self, prompt: str, ref_images: list[Path], seed: int | None = None) -> str:
         """Genera el keyframe condicionado a imágenes de referencia (consistencia)."""
+        import asyncio
         import fal_client
 
         key = get_settings().require("fal_key", "keyframe con referencia de personaje")
@@ -64,13 +65,17 @@ class KeyframeGenerator:
         arguments = {"prompt": prompt, "image_urls": urls}
         if seed is not None:
             arguments["seed"] = seed
-        result = await client.subscribe(self.style.keyframe.ref_model, arguments=arguments)
+        result = await asyncio.wait_for(
+            client.subscribe(self.style.keyframe.ref_model, arguments=arguments),
+            timeout=120,
+        )
         images = result.get("images") or []
         if not images:
             raise RuntimeError(f"Respuesta de fal (ref) sin imagen: {result}")
         return images[0]["url"]
 
     async def _submit_fal(self, prompt: str, seed: int | None = None) -> str:
+        import asyncio
         import fal_client
 
         key = get_settings().require("fal_key", "generacion de keyframes / capa de estilo")
@@ -82,11 +87,13 @@ class KeyframeGenerator:
             arguments["seed"] = seed
         if self.style.negative_prompt:
             arguments["negative_prompt"] = self.style.negative_prompt
-        # Aplica el LoRA solo si esta configurado (no el placeholder <...>).
         if kf.lora and not kf.lora.startswith("<"):
             arguments["loras"] = [{"path": kf.lora, "scale": kf.strength}]
 
-        result = await client.subscribe(kf.model, arguments=arguments)
+        result = await asyncio.wait_for(
+            client.subscribe(kf.model, arguments=arguments),
+            timeout=120,
+        )
         images = result.get("images") or []
         if not images:
             raise RuntimeError(f"Respuesta de fal sin imagen: {result}")

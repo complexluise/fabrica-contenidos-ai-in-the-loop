@@ -106,11 +106,26 @@ def test_derive_proyecto_firmado_pide_encuadres(tmp_path):
 def test_derive_cuenta_selecciones(tmp_path):
     proj = _project(tmp_path)
     _sign(proj)
-    proj.selections_path.write_text(yaml.safe_dump({"s1": "x.png"}), encoding="utf-8")
+    # La selección apunta a un archivo project-relative que EXISTE en disco (D-044).
+    kf = proj.dir / "k.png"
+    kf.write_bytes(b"img")
+    proj.selections_path.write_text(yaml.safe_dump({"s1": "k.png"}), encoding="utf-8")
     spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
     st = derive_state(proj, spec, has_fal_key=True)
     assert st.keyframes.chosen == 1
     assert st.stage is Stage.RENDER  # elegido, pero sin run todavia
+
+
+def test_derive_no_cuenta_seleccion_con_archivo_ausente(tmp_path):
+    # Proyecto importado de otra máquina: la clave está pero el frame no existe ->
+    # NO cuenta como elegido (D-044). Evita el "el estado cree que está y no está".
+    proj = _project(tmp_path)
+    _sign(proj)
+    proj.selections_path.write_text(yaml.safe_dump({"s1": "no/existe.png"}), encoding="utf-8")
+    spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
+    st = derive_state(proj, spec, has_fal_key=True)
+    assert st.keyframes.chosen == 0
+    assert st.stage is Stage.ENCUADRES
 
 
 def test_derive_casting_pendiente(tmp_path):

@@ -12,7 +12,30 @@ from pathlib import Path
 import pytest
 
 from pipeline.contracts import Scene
-from pipeline.project import Character, Project, cache_key, character_refs, load_project_spec
+from pipeline.project import (
+    Character,
+    Project,
+    cache_key,
+    character_refs,
+    load_project_spec,
+    relativize,
+)
+
+
+# --- D-044: rutas portables (project-relative) -----------------------------
+
+def test_relativize_devuelve_relativo_si_cae_bajo_base(tmp_path):
+    base = tmp_path / "proj"
+    (base / "cache" / "keyframes").mkdir(parents=True)
+    p = base / "cache" / "keyframes" / "abc.png"
+    assert relativize(base, p) == "cache/keyframes/abc.png"  # forward-slash, portable
+
+
+def test_relativize_deja_absoluto_si_esta_afuera(tmp_path):
+    base = tmp_path / "proj"
+    base.mkdir()
+    outside = tmp_path / "otro" / "x.png"
+    assert relativize(base, outside) == str(outside.resolve())
 
 
 # --- T1.5.1: hashing content-addressed -------------------------------------

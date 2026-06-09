@@ -13,6 +13,7 @@ interno y refactorizable.
 | [`author-project`](author-project/SKILL.md) | brief → `project.yaml` | #1+#2 guion/shot list |
 | [`bank-casting`](bank-casting/SKILL.md) | diseñar + fijar cara de personaje | #3 casting/look-dev |
 | [`keyframe-best-of-n`](keyframe-best-of-n/SKILL.md) | N keyframes/escena → elegir → render | #4 keyframe |
+| [`narrative-cut`](narrative-cut/SKILL.md) | export → describe (Haiku) → graphics (movis) → montar (mcp-video) | corte final (sin editora) |
 
 Más skills se agregan por sprint cuando aparece la necesidad (p.ej.
 `reordenar-cortes`, `brief-a-video`).

@@ -242,6 +242,21 @@ def resolve_refs(base: Path, refs: list[Path]) -> list[Path]:
     return [_resolve_under(base, Path(r)) for r in refs]
 
 
+def relativize(base: Path, p: Path) -> str:
+    """Inversa de `_resolve_under`: ruta **portable para PERSISTIR** (D-044).
+
+    Si `p` cae bajo `base` devuelve la ruta **relativa** (forward-slash, estable
+    entre Windows/WSL y entre máquinas); si no, la absoluta. Lo usan
+    `selections.yaml`/`casting.yaml` para no clavar rutas absolutas de una máquina
+    (el bug que dejó a un proyecto importado sin frames)."""
+    p = Path(p).resolve()
+    base = Path(base).resolve()
+    try:
+        return p.relative_to(base).as_posix()
+    except ValueError:
+        return str(p)
+
+
 def character_refs(scene: Scene, characters: dict[str, Character]) -> list[Path]:
     """Reúne las referencias de los personajes de la escena (orden, sin duplicados)."""
     out: list[Path] = []
