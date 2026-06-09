@@ -351,6 +351,8 @@
                   <span class="chip-n">P{j + 1}</span>
                   <span class="chip-fr">{sh.framing || "—"}</span>
                   <span class="chip-dur">{sh.duration_s}s</span>
+                  {#if sh.sfx}<span class="chip-sfx" title={sh.sfx}>♪</span>{/if}
+                  {#if sh.voiceover}<span class="chip-vo" title={sh.voiceover}>vo</span>{/if}
                 </span>
               {/each}
             </div>
@@ -497,6 +499,8 @@
   .chip-n { font-family: var(--font-mono); font-weight: 700; color: var(--blue-deep); font-size: 11px; }
   .chip-fr { color: var(--ink-2); }
   .chip-dur { font-family: var(--font-mono); color: var(--ink-soft); font-size: 11px; }
+  .chip-sfx { color: var(--blue-deep); font-size: 11px; }
+  .chip-vo { color: var(--ink-soft); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
 
   /* Columna del keyframe */
   .kf-col {
