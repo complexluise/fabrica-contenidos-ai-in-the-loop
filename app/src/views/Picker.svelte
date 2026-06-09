@@ -10,7 +10,7 @@
   let progress = $state(""); // ultima linea del job en vivo
   let err = $state("");
   let saved = $state(false);
-  let n = $state(4);
+  let n = $state(2);
 
   let hasFal = $derived(!!studio.status?.keys?.fal_key);
 
