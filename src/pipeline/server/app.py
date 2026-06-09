@@ -260,7 +260,8 @@ def create_app(projects_dir: Path = Path("projects"),
 
         return {"keyframes": read(project.candidates_path),
                 "cast": read(project.dir / "cast_candidates.yaml"),
-                "selections": load_yaml(project.selections_path)}
+                "selections": load_yaml(project.selections_path),
+                "cast_selections": load_yaml(project.dir / "casting.yaml")}
 
     @app.get("/api/projects/{slug}/status")
     def project_status(slug: str):

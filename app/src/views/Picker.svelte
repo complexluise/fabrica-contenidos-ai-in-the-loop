@@ -21,17 +21,26 @@
   async function load() {
     try {
       cand = await get(`/api/projects/${slug}/candidates`);
-      // Pre-poblar kfPicks desde las selecciones ya persistidas en disco.
-      // selections guarda rutas relativas; buscamos el indice por nombre de archivo.
-      const fromDisk = {};
+      // Pre-poblar kfPicks y castPicks desde las selecciones ya persistidas.
+      // Tanto selections como cast_selections guardan rutas relativas;
+      // buscamos el indice por nombre de archivo en el array de URLs.
+      const kfFromDisk = {};
       for (const [sceneId, selPath] of Object.entries(cand.selections || {})) {
         const urls = cand.keyframes?.[sceneId] || [];
         const filename = String(selPath).split(/[/\\]/).pop();
         const idx = urls.findIndex((url) => url.split("/").pop() === filename);
-        if (idx >= 0) fromDisk[sceneId] = idx;
+        if (idx >= 0) kfFromDisk[sceneId] = idx;
       }
-      // Picks de esta sesión ganan; el resto se rellena desde disco
-      kfPicks = { ...fromDisk, ...kfPicks };
+      const castFromDisk = {};
+      for (const [name, selPath] of Object.entries(cand.cast_selections || {})) {
+        const urls = cand.cast?.[name] || [];
+        const filename = String(selPath).split(/[/\\]/).pop();
+        const idx = urls.findIndex((url) => url.split("/").pop() === filename);
+        if (idx >= 0) castFromDisk[name] = idx;
+      }
+      // Picks de esta sesión ganan sobre los del disco
+      kfPicks   = { ...kfFromDisk,   ...kfPicks };
+      castPicks = { ...castFromDisk, ...castPicks };
     } catch (e) {
       err = humanError(e);
     }
