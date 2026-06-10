@@ -31,7 +31,7 @@ from .contracts import GenResult
 from .deliver import reframe
 from .gate import FusedGate
 from .keyframe import KeyframeGenerator, build_styled_prompt
-from .prompt_compile import compose_shot_visual
+from .prompt_compile import compose_keyframe_prompt, compose_video_prompt
 from .post import burn_lower_third, default_font
 from .project import (
     Project,
@@ -81,41 +81,56 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
 
 async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
                        scene, shot, shot_id, idx, refs, ref_sig,
-                       rule, subset, strategy, provider_sig, keyframe_overrides):
+                       rule, subset, strategy, provider_sig, keyframe_overrides,
+                       prev_keyframe=None, prev_kf_key=None):
     """Renderiza UN plano (D-028): keyframe -> video -> recorte -> sfx -> caption -> vo.
 
-    Plano 1 (idx 0) puede traer el keyframe **elegido** por el humano
-    (scene-addressed); los planos 2+ autogeneran su keyframe (cacheado, sin pick).
-    Devuelve (clip_path, SceneRecord, manifest_entry, audio_applied).
+    Plano 1 (idx 0) puede traer el keyframe **elegido** por el humano (el ancla de
+    la escena). Los planos 2+ se **encadenan** desde el keyframe del plano previo
+    (i2i) para coherencia visual (D-048/A2). Keyframe = imagen FIJA (sin
+    movimiento); el movimiento va al prompt de VIDEO (D-048/A1).
+    Devuelve (clip_path, SceneRecord, manifest_entry, audio_applied, keyframe, kf_key).
     """
     # Refs project-relative -> absolutas SOLO para I/O (keyframer + gate). El cache
     # key sigue con `ref_sig` (relativo, estable). Mismo criterio que studio (D-034).
     refs_io = resolve_refs(project.dir, refs)
 
     # --- L3 keyframe (cacheado, con identidad de personaje) ---
-    # D-047: el plano aporta su artefacto (action + camara + visual), no solo `framing`.
-    shot_ext = compose_shot_visual(shot)
-    styled = build_styled_prompt(scene, cfg.style, shot_ext)
-    kf_key = cache_key("keyframe", _keyframe_inputs(styled, cfg, ref_sig))
+    # D-048/A1: el keyframe usa el prompt FIJO (action + camara fija + visual); el
+    # movimiento (camera.move) va al video, no a la imagen.
+    kf_ext = compose_keyframe_prompt(shot)
+    styled = build_styled_prompt(scene, cfg.style, kf_ext)
+    # D-048/A2: planos 2+ encadenan desde el keyframe previo (i2i). El plano previo
+    # entra como ref extra al modelo de edicion; su key encadena el cache.
+    chain_refs: list = []
+    kf_inputs = _keyframe_inputs(styled, cfg, ref_sig)
+    if idx > 0 and prev_keyframe is not None and cfg.style.keyframe.ref_model:
+        chain_refs = [prev_keyframe]
+        kf_inputs["chain_from"] = prev_kf_key  # cambiar el plano previo invalida este
+    kf_key = cache_key("keyframe", kf_inputs)
     kf_cost = 0.0
-    if idx == 0 and scene.id in keyframe_overrides:  # plano 1 = keyframe elegido/inyectado (D-022/D-025)
+    if idx == 0 and scene.id in keyframe_overrides:  # plano 1 = ancla elegida/inyectada (D-022/D-025)
         keyframe = keyframe_overrides[scene.id]
         kf_key = f"picked:{keyframe.name}"
-        logger.info("[%s] %s | keyframe directo: %s", shot_id, scene.class_, keyframe.name)
+        logger.info("[%s] %s | keyframe directo (ancla): %s", shot_id, scene.class_, keyframe.name)
     else:
         kf_hit = project.cache_lookup("keyframes", kf_key, ".png")
         if kf_hit is not None:
             keyframe = kf_hit
             logger.info("[%s] keyframe (cache hit): %s", shot_id, kf_hit.name)
         else:
-            logger.info("[%s] %s | generando keyframe...", shot_id, scene.class_)
-            tmp = await keyframer.generate(scene, ref_images=refs_io, framing=shot_ext)
+            chained = " (encadenado)" if chain_refs else ""
+            logger.info("[%s] %s | generando keyframe%s...", shot_id, scene.class_, chained)
+            tmp = await keyframer.generate(
+                scene, ref_images=(chain_refs + refs_io) if chain_refs else refs_io,
+                framing=kf_ext)
             keyframe = project.cache_store("keyframes", kf_key, tmp, ".png")
             kf_cost = cfg.style.keyframe.cost_per_image
             logger.info("[%s] keyframe generado: %s ($%.4f)", shot_id, keyframe.name, kf_cost)
 
-    # Escena efectiva del plano: prompt + artefacto del plano, duración/seed/audio del plano.
-    eff_prompt = scene.prompt if not shot_ext else f"{scene.prompt}, {shot_ext}"
+    # Escena efectiva del plano: prompt + MOVIMIENTO del plano (D-048/A1), audio/seed del plano.
+    video_ext = compose_video_prompt(shot)
+    eff_prompt = scene.prompt if not video_ext else f"{scene.prompt}, {video_ext}"
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed,
@@ -220,12 +235,13 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
         "strategy": rule.strategy, "provider": result.provider,
         "keyframe_key": kf_key, "keyframe_path": str(keyframe),
         "video_key": vid_key, "cached": cached, "duration_s": shot.duration_s,
-        "seed": shot.seed, "framing": shot_ext or shot.framing, "caption": cap,
+        "seed": shot.seed, "framing": kf_ext or shot.framing, "caption": cap,
         "intention": shot.intention or "",  # D-047: funcion dramatica al guion
+        "motion": video_ext or "",  # D-048/A1: el movimiento que se le pidio al video
         "voiceover": plano.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
         "sfx": shot.sfx or "", "ambience": scene.ambience or "", "sfx_key": sfx_key,
         "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {})}
-    return clip_path, record, manifest_entry, (vo_applied or diegetic_applied)
+    return clip_path, record, manifest_entry, (vo_applied or diegetic_applied), keyframe, kf_key
 
 
 async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
@@ -295,19 +311,23 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
                 logger.info("[%s] %s | %d planos", scene.id, scene.class_, len(shots))
 
             s_clips, s_records, s_manifests, s_audio = [], [], [], False
+            prev_keyframe = None  # D-048/A2: encadena los planos de ESTA escena
+            prev_kf_key = None
             for idx, shot in enumerate(shots):
                 shot_id = scene.id if idx == 0 else f"{scene.id}.{idx + 1}"
                 try:  # robustez: un plano que falla no aborta el run
-                    clip_path, record, mentry, audio = await _render_shot(
+                    clip_path, record, mentry, audio, kf_path, kf_key = await _render_shot(
                         project=project, spec=spec, cfg=cfg, run=run, keyframer=keyframer,
                         gate=gate, tts=tts, mm=mm, scene=scene, shot=shot, shot_id=shot_id,
                         idx=idx, refs=refs, ref_sig=ref_sig, rule=rule, subset=subset,
                         strategy=strategy, provider_sig=provider_sig,
-                        keyframe_overrides=keyframe_overrides)
+                        keyframe_overrides=keyframe_overrides,
+                        prev_keyframe=prev_keyframe, prev_kf_key=prev_kf_key)
                     s_clips.append(clip_path)
                     s_records.append(record)
                     s_manifests.append(mentry)
                     s_audio = s_audio or audio
+                    prev_keyframe, prev_kf_key = kf_path, kf_key  # encadena al siguiente plano
                 except Exception as exc:  # noqa: BLE001 — robustez: registra y sigue
                     telemetry.record_failure(shot_id, str(exc))
                     logger.error("[%s] FALLO: %s", shot_id, exc)

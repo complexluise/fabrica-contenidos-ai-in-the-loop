@@ -218,3 +218,37 @@ def test_write_spec_round_trips_characters(tmp_path):
     out = write_spec(spec, tmp_path / "p.yaml")
     reloaded = load_project_spec(out)
     assert reloaded.characters["juan"].design.prompt == "obrero con casco amarillo"
+
+
+# --- D-049/B2: artefacto de personaje --------------------------------------
+
+_CHAR_ARTIFACT = ('{"title": "X", "characters": {"ana": {"design": {'
+                  '"prompt": "ingeniera", "physical": "pelo corto rojo", '
+                  '"wardrobe": "casco amarillo", "palette": ["rojo", "amarillo"], '
+                  '"expression": "mirada firme"}}}, '
+                  '"scenes": [{"id": "s1", "prompt": "a", "duration_s": 3}]}')
+
+
+def test_parse_draft_character_artifact_fields():
+    d = parse_draft(_CHAR_ARTIFACT).characters["ana"].design
+    assert d.prompt == "ingeniera"
+    assert d.physical == "pelo corto rojo"
+    assert d.wardrobe == "casco amarillo"
+    assert d.palette == ["rojo", "amarillo"]
+    assert d.expression == "mirada firme"
+
+
+def test_compose_character_prompt_ensambla():
+    from pipeline.prompt_compile import compose_character_prompt
+    d = parse_draft(_CHAR_ARTIFACT).characters["ana"].design
+    out = compose_character_prompt(d)
+    assert "ingeniera" in out and "pelo corto rojo" in out
+    assert "casco amarillo" in out and "color palette: rojo, amarillo" in out
+    assert "mirada firme" in out
+
+
+def test_round_trip_character_artifact(tmp_path):
+    spec = parse_draft(_CHAR_ARTIFACT).to_spec("x")
+    reloaded = load_project_spec(write_spec(spec, tmp_path / "p.yaml"))
+    d = reloaded.characters["ana"].design
+    assert d.physical == "pelo corto rojo" and d.palette == ["rojo", "amarillo"]

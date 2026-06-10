@@ -657,6 +657,27 @@ prompt. Aditivo y retrocompatible. Ver [D-047].
 
 ---
 
+## Sprint 6.17 — Coherencia de planos + flujo guiado + casting artefacto (D-048, D-049)
+
+**Objetivo:** que el video sea coherente plano a plano y que el flujo guíe al humano con un solo
+foco por pantalla. Ver [D-048], [D-049].
+
+### Acceptance Criteria
+- [x] AC1 — Keyframe (imagen fija) ≠ video (movimiento): `compose_keyframe_prompt` sin `move`; `compose_video_prompt` con el movimiento.
+- [x] AC2 — Planos 2+ encadenan (i2i) desde el ancla de la escena; el cache encadena por `kf_key` del plano previo.
+- [x] AC3 — Previsualización de planos por escena (`/shots`, `shot_previews.yaml`) con reroll en Elegir.
+- [x] AC4 — Foco guiado (`.cta`): Storyboard firmar→siguiente; Elegir casting→encuadres (gated); PUT mergea shots por índice.
+- [x] AC5 — Storyboard colapsado muestra la descripción visual (B1); `CharacterDesign` enriquecido (physical/wardrobe/palette/expression) y compuesto en casting (D-049).
+
+### Tasks
+- [x] T6.17.1 — A1 separar keyframe/video; A2/A3 encadenado en runner/studio; tests.
+- [x] T6.17.2 — A4 `preview_shot_keyframes` + endpoint + tira en Elegir.
+- [x] T6.17.3 — C1 `.cta`; C2 foco Storyboard; C3 reorden Elegir + gating casting→encuadres; C4 (plegado).
+- [x] T6.17.4 — B1 descripción visual colapsada; B2 `CharacterDesign` artefacto + `compose_character_prompt`.
+- [x] T6.17.5 — ADRs D-048/D-049; build limpio; suite verde (1 fallo pre-existente ajeno: veo).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

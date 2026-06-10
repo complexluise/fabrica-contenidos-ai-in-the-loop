@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 
 from .contracts import Camera, Scene, Shot, Visual
-from .project import Character
+from .project import Character, CharacterDesign
 from .settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -29,15 +29,16 @@ logger = logging.getLogger(__name__)
 MODEL = "claude-haiku-4-5"  # traduccion narrativa->visual: alto volumen, bajo criterio (D-041)
 
 _SYSTEM = """\
-Sos director de fotografia. Traducis un beat narrativo a una descripcion VISUAL
-concreta de lo que la camara VE: setting, personajes, accion fisica, luz,
+Sos director de fotografia. Traducis un beat narrativo (en español) a una descripcion
+VISUAL concreta de lo que la camara VE: setting, personajes, accion fisica, luz,
 atmosfera, composicion del cuadro. No repetis el dialogo. No describis emociones
-abstractas; describis lo que las expresa en imagen. Respondes UNA sola frase
-densa, sin comillas ni preambulos."""
+abstractas; describis lo que las expresa en imagen.
+IMPORTANTE: respondé EN INGLÉS (este prompt alimenta el modelo de imagen, D-050),
+UNA sola frase densa, sin comillas ni preámbulo."""
 
 _PROMPT = """\
-Convertí esta escena en una descripción visual para un modelo de imagen.
-Devolvé SOLO la descripción, sin comillas ni explicación.
+Traducí esta escena a una descripción visual EN INGLÉS para un modelo de imagen.
+Devolvé SOLO la descripción en inglés, sin comillas ni explicación.
 
 {brief}
 """
@@ -71,15 +72,23 @@ _TONE = {
 
 
 def camera_phrase(cam: Camera) -> str:
-    """La gramatica de camara como frase. Pura. Vacia si es la camara por defecto."""
-    if cam.is_default():
-        return ""
-    bits = [_SIZE.get(cam.size, ""), _ANGLE.get(cam.angle, ""), _MOVE.get(cam.move, "")]
+    """Gramatica de camara para el KEYFRAME (imagen FIJA): tamano/angulo/foco/lente.
+
+    NO incluye el movimiento: una imagen fija no tiene 'push-in' (D-048/A1). El
+    movimiento vive en `motion_phrase` y alimenta el prompt de VIDEO. Pura."""
+    if cam.size == "MS" and cam.angle == "eye" and cam.focus == "deep" and not cam.lens_mm:
+        return ""  # camara fija neutra -> no aporta al prompt
+    bits = [_SIZE.get(cam.size, ""), _ANGLE.get(cam.angle, "")]
     if cam.focus != "deep":
         bits.append(_FOCUS.get(cam.focus, ""))
     if cam.lens_mm:
         bits.append(f"{cam.lens_mm}mm lens")
     return ", ".join(b for b in bits if b)
+
+
+def motion_phrase(cam: Camera) -> str:
+    """Movimiento de camara para el VIDEO (D-048/A1). Vacio si la camara es estatica."""
+    return "" if cam.move == "static" else _MOVE.get(cam.move, "")
 
 
 def visual_phrase(vis: Visual) -> str:
@@ -105,13 +114,43 @@ def visual_phrase(vis: Visual) -> str:
     return ", ".join(b for b in bits if b)
 
 
-def compose_shot_visual(shot: Shot) -> str:
-    """Ensambla el artefacto del plano (action + camera + visual) en un texto de
-    encuadre apto para generacion (D-047). Reemplaza al viejo `framing` como
-    fuente; si el plano no tiene `action`, cae al `framing` legacy. Pura."""
-    base = (shot.action or "").strip() or (shot.framing or "").strip()
-    parts = [base, camera_phrase(shot.camera), visual_phrase(shot.visual)]
+def _shot_base(shot: Shot) -> str:
+    """La descripcion primaria del plano: `action`, o el `framing` legacy. Pura."""
+    return (shot.action or "").strip() or (shot.framing or "").strip()
+
+
+def compose_keyframe_prompt(shot: Shot) -> str:
+    """Texto para el KEYFRAME (imagen fija): que se ve + camara fija + estructura
+    visual de Block. SIN movimiento (D-048/A1). Reemplaza a compose_shot_visual."""
+    parts = [_shot_base(shot), camera_phrase(shot.camera), visual_phrase(shot.visual)]
     return ". ".join(p for p in parts if p)
+
+
+def compose_video_prompt(shot: Shot) -> str:
+    """Texto para el VIDEO (movimiento/accion). El keyframe entra como `init_image`,
+    asi que aca importa el MOVIMIENTO y la accion, no re-describir la composicion
+    fija (D-048/A1). Pura."""
+    parts = [_shot_base(shot), motion_phrase(shot.camera)]
+    return ", ".join(p for p in parts if p)
+
+
+# Alias retrocompatible: el "visual del plano" es el del keyframe (la imagen fija).
+compose_shot_visual = compose_keyframe_prompt
+
+
+def compose_character_prompt(design: CharacterDesign) -> str:
+    """Ensambla el artefacto de personaje (D-049/B2) en el prompt de casting:
+    prompt base + rasgos fisicos + vestuario + paleta + expresion. Pura."""
+    parts = [(design.prompt or "").strip()]
+    if design.physical:
+        parts.append(design.physical.strip())
+    if design.wardrobe:
+        parts.append(design.wardrobe.strip())
+    if design.palette:
+        parts.append("color palette: " + ", ".join(design.palette))
+    if design.expression:
+        parts.append(design.expression.strip())
+    return ", ".join(p for p in parts if p)
 
 
 def narrative_brief(scene: Scene, characters: dict[str, Character] | None = None) -> str:

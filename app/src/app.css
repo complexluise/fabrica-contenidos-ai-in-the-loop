@@ -153,6 +153,27 @@ button.machine:disabled { box-shadow: none; }
 button.ghost { background: transparent; border-color: var(--line-2); }
 button.small { padding: 5px 11px; font-size: 13px; border-radius: var(--r-sm); }
 
+/* CTA del bucle: el UNICO boton "exagerado" que guia el foco (D-048, frente C).
+   Un paso a la vez: cada pantalla resalta SOLO el siguiente gesto y degrada el
+   resto a secundario. `.go` = avanzar a la siguiente etapa (verde/ok). */
+button.cta {
+  font-size: 15px;
+  padding: 12px 22px;
+  letter-spacing: 0.01em;
+  /* sombra NEUTRA: hereda el color de .primary (rojo) / .machine (azul) / .go (verde) */
+  box-shadow: 0 4px 16px -5px rgba(0, 0, 0, 0.5);
+  animation: cta-rise 0.22s ease;
+}
+button.cta:hover:not(:disabled) { transform: translateY(-1px); }
+button.cta:active:not(:disabled) { transform: translateY(1px); }
+button.cta.go {
+  background: var(--ok);
+  border-color: #1f5a34;
+  color: #fff;
+}
+button.cta.go:hover:not(:disabled) { filter: brightness(1.06); }
+@keyframes cta-rise { from { transform: translateY(3px); opacity: 0.5; } to { transform: none; opacity: 1; } }
+
 /* --- inputs ---
    Foco = gesto humano = rojo (D-040).
    Azul se reserva para acento de la máquina (D-021).

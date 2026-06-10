@@ -455,14 +455,19 @@
           <!-- COLAPSADO: resumen compacto, click para expandir -->
           <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0">
             <div class="read-compact-text">
+              <!-- B1: QUÉ SE VE primero (la escena, no solo lo que se dice) -->
+              {#if shotDesc(s.shots[0])}
+                {@const d = shotDesc(s.shots[0])}
+                <p class="scene-visual"><span class="cue-tag">visual</span>{d.length > 110 ? d.slice(0, 110) + "…" : d}</p>
+              {:else}
+                <p class="scene-visual muted-text"><span class="cue-tag">visual</span>Sin descripción — editá para agregar qué se ve</p>
+              {/if}
               {#if s.dialogue}
                 <p class="scene-preview italic">{s.dialogue.length > 95 ? s.dialogue.slice(0, 95) + "…" : s.dialogue}</p>
               {:else if s.shots[0]?.voiceover}
                 <p class="scene-preview">{s.shots[0].voiceover.length > 95 ? s.shots[0].voiceover.slice(0, 95) + "…" : s.shots[0].voiceover}</p>
               {:else if s.ambience}
                 <p class="scene-preview muted-text">{s.ambience.length > 95 ? s.ambience.slice(0, 95) + "…" : s.ambience}</p>
-              {:else}
-                <p class="scene-preview muted-text">Sin dialogo ni voz — editá para agregar</p>
               {/if}
               <div class="shots-chips">
                 {#each s.shots as sh, j}
@@ -575,19 +580,26 @@
     </section>
   {/each}
 
+  <!-- Foco único guiado por estado (C2): firmar -> avanzar -> (volver a firmar secundario) -->
   <div class="savebar" class:dirty class:signed={signed && !dirty}>
-    <button class="primary sign" onclick={() => save(true)} disabled={saving}>
-      {saving ? "Firmando…" : signed && !dirty ? "Plan firmado ✓ — volver a firmar" : "Firmar el plan"}
-    </button>
-    <button class="ghost small" onclick={() => save(false)} disabled={saving || !dirty}>
-      Guardar borrador
-    </button>
+    {#if signed && !dirty}
+      <!-- Firmado: el foco YA NO es firmar, es avanzar al siguiente paso -->
+      <span class="signed-seal">✓ Plan firmado</span>
+      <button class="primary cta go" onclick={() => goTo("elegir")}>Siguiente: Elegir →</button>
+      <button class="ghost small" onclick={() => save(true)} disabled={saving}>
+        {saving ? "Firmando…" : "Volver a firmar"}
+      </button>
+    {:else}
+      <!-- Sin firmar (o con cambios): el foco es firmar el plan -->
+      <button class="primary cta sign" onclick={() => save(true)} disabled={saving}>
+        {saving ? "Firmando…" : "Firmar el plan"}
+      </button>
+      <button class="ghost small" onclick={() => save(false)} disabled={saving || !dirty}>
+        Guardar borrador
+      </button>
+    {/if}
     {#if msg}<span class="ok-msg">✓ {msg}</span>{/if}
     {#if error}<span class="error inline">{error}</span>{/if}
-    <span class="spacer"></span>
-    {#if signed && !dirty}
-      <button class="ghost" onclick={() => goTo("elegir")}>Siguiente: Elegir →</button>
-    {/if}
   </div>
 {:else}
   <p class="muted">Cargando…</p>
@@ -814,8 +826,11 @@
   }
   .savebar.dirty { border-top-color: var(--red); }
   .savebar.signed { border-top-color: var(--ok); }
-  .savebar .sign { background: var(--red); }
-  .savebar.signed .sign { background: var(--ok); }
+  /* Sello calmo: estado, no accion (ya no compite por el foco) */
+  .signed-seal {
+    font-size: 13px; font-weight: 700; color: var(--ok);
+    background: var(--ok-wash); border-radius: 999px; padding: 5px 13px;
+  }
   .pill.ok { background: var(--ok); color: #fff; }
   .pill.warn { background: var(--warn, #e0a800); color: #fff; }
   .ok-msg { color: var(--ok); font-weight: 600; font-size: 13px; }
@@ -829,6 +844,15 @@
   }
   .scene-preview.italic { font-style: italic; border-left: 2px solid var(--line-2); padding-left: 8px; }
   .scene-preview.muted-text { color: var(--ink-soft); }
+  /* B1: descripcion visual de la escena en la vista colapsada */
+  .scene-visual {
+    font-size: 13.5px; line-height: 1.5; color: var(--ink); margin: 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .scene-visual .cue-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-soft); margin-right: 7px;
+  }
   .rf-noaudio { font-size: 12px; margin: 0; }
 
   /* --- Panel "Para la IA" (colapsable en modo edicion) --- */

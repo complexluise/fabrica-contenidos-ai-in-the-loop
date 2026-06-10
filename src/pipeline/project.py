@@ -35,10 +35,19 @@ def cache_key(step: str, inputs: dict) -> str:
 
 
 class CharacterDesign(BaseModel):
-    """Inputs para diseñar la cara canónica del personaje (casting, Sprint 4.6)."""
+    """Inputs para diseñar la cara canónica del personaje (casting, Sprint 4.6).
+
+    D-049/B2: ademas del `prompt` libre, dimensiones del artefacto de personaje
+    (pensar como director de casting): rasgos fisicos, vestuario, paleta, expresion
+    caracteristica. `prompt_compile.compose_character_prompt` las ensambla.
+    """
 
     prompt: str
     refs: list[Path] = Field(default_factory=list)  # p.ej. [persona, referencia LEGO]
+    physical: str | None = None  # rasgos fisicos distintivos
+    wardrobe: str | None = None  # vestuario
+    palette: list[str] = Field(default_factory=list)  # paleta de color del personaje
+    expression: str | None = None  # expresion/gesto caracteristico
 
 
 class Character(BaseModel):
@@ -83,6 +92,10 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
                 CharacterDesign(
                     prompt=cspec["design"]["prompt"],
                     refs=[Path(r) for r in (cspec["design"].get("refs") or [])],
+                    physical=cspec["design"].get("physical"),
+                    wardrobe=cspec["design"].get("wardrobe"),
+                    palette=list(cspec["design"].get("palette") or []),
+                    expression=cspec["design"].get("expression"),
                 )
                 if cspec.get("design")
                 else None
@@ -221,6 +234,14 @@ def _char_to_dict(ch: Character) -> dict:
         design: dict = {"prompt": ch.design.prompt}
         if ch.design.refs:
             design["refs"] = [str(r) for r in ch.design.refs]
+        if ch.design.physical:  # D-049/B2: artefacto de personaje
+            design["physical"] = ch.design.physical
+        if ch.design.wardrobe:
+            design["wardrobe"] = ch.design.wardrobe
+        if ch.design.palette:
+            design["palette"] = list(ch.design.palette)
+        if ch.design.expression:
+            design["expression"] = ch.design.expression
         d["design"] = design
     return d
 

@@ -11,23 +11,29 @@ from pipeline.project import (
     load_project_spec,
     write_spec,
 )
-from pipeline.prompt_compile import camera_phrase, compose_shot_visual, visual_phrase
+from pipeline.prompt_compile import (
+    camera_phrase,
+    compose_keyframe_prompt,
+    compose_video_prompt,
+    motion_phrase,
+    visual_phrase,
+)
 
 
-# --- camera_phrase ----------------------------------------------------------
+# --- camera_phrase (keyframe: SIN movimiento, D-048/A1) ---------------------
 
 def test_camera_default_no_aporta_frase():
     assert camera_phrase(Camera()) == ""
     assert Camera().is_default() is True
 
 
-def test_camera_phrase_traduce_vocabulario():
+def test_camera_phrase_traduce_vocabulario_sin_movimiento():
     cam = Camera(size="ECU", angle="overhead", move="push_in", focus="shallow")
     p = camera_phrase(cam)
     assert "extreme close-up" in p
     assert "overhead bird's-eye angle" in p
-    assert "slow push-in" in p
     assert "shallow depth of field" in p
+    assert "push-in" not in p  # el movimiento NO va en el keyframe (imagen fija)
 
 
 def test_camera_phrase_omite_foco_profundo_por_defecto():
@@ -35,6 +41,29 @@ def test_camera_phrase_omite_foco_profundo_por_defecto():
     p = camera_phrase(Camera(size="CU", lens_mm=85))
     assert "deep focus" not in p
     assert "85mm lens" in p
+
+
+# --- motion_phrase / compose_video_prompt (video: el movimiento) -----------
+
+def test_motion_phrase_solo_movimiento():
+    assert motion_phrase(Camera(move="static")) == ""
+    assert "push-in" in motion_phrase(Camera(move="push_in"))
+    assert "tracking" in motion_phrase(Camera(move="track"))
+
+
+def test_compose_video_prompt_lleva_accion_y_movimiento():
+    sh = Shot(action="manos deslizan los tubos", duration_s=3,
+              camera=Camera(size="LS", angle="overhead", move="push_in"))
+    out = compose_video_prompt(sh)
+    assert "manos deslizan los tubos" in out
+    assert "push-in" in out
+    # el video NO re-describe la composicion fija (size/angle van al keyframe)
+    assert "long shot" not in out
+
+
+def test_compose_video_prompt_estatico_es_solo_accion():
+    sh = Shot(action="la fibra se rompe", duration_s=2, camera=Camera(move="static"))
+    assert compose_video_prompt(sh) == "la fibra se rompe"
 
 
 # --- visual_phrase (Bruce Block) -------------------------------------------
@@ -56,13 +85,13 @@ def test_visual_phrase_arma_dimensiones():
     assert 'on-screen graphics: "ACERO + CEMENTO = el sello"' in p
 
 
-# --- compose_shot_visual ----------------------------------------------------
+# --- compose_keyframe_prompt ----------------------------------------------------
 
 def test_compose_usa_action_y_ensambla():
     sh = Shot(action="manos deslizan tres tubos concentricos", duration_s=3,
               camera=Camera(size="LS", angle="overhead"),
               visual=Visual(focal_point="el centro del telescopio"))
-    out = compose_shot_visual(sh)
+    out = compose_keyframe_prompt(sh)
     assert out.startswith("manos deslizan tres tubos concentricos")
     assert "long shot" in out
     assert "overhead bird's-eye angle" in out
@@ -71,12 +100,12 @@ def test_compose_usa_action_y_ensambla():
 
 def test_compose_cae_a_framing_legacy_si_no_hay_action():
     sh = Shot(framing="overhead wide shot of the prop", duration_s=3)
-    assert compose_shot_visual(sh) == "overhead wide shot of the prop"
+    assert compose_keyframe_prompt(sh) == "overhead wide shot of the prop"
 
 
 def test_compose_solo_action_sin_gramatica():
     sh = Shot(action="primer plano de la fibra rompiendose", duration_s=2)
-    assert compose_shot_visual(sh) == "primer plano de la fibra rompiendose"
+    assert compose_keyframe_prompt(sh) == "primer plano de la fibra rompiendose"
 
 
 # --- persistencia (round-trip del artefacto) --------------------------------

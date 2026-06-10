@@ -33,55 +33,67 @@ _DRAFT_MODEL = "claude-opus-4-8"
 # Persona del sistema: director-guionista con formación completa.
 _DRAFT_SYSTEM = """\
 Sos un director-guionista audiovisual con formación en narrativa visual, diseño de
-sonido y storytelling transmedia. Tu trabajo es descomponer ideas en storyboards de
-producción concretos y completos.
+sonido y fotografía. Transformás un texto en un documento de producción concreto y completo.
+Nunca dejás vacíos los campos que importan: si hablan, hay diálogo; si hay acción, hay SFX;
+los momentos clave van como `hero`; cada escena tiene su espacio sonoro (ambience).
 
-Cuando te dan un texto —brief, guion, idea— lo transformás en un documento de producción
-listo para ejecutar. Nunca dejás campos vacíos que importen: si hay personajes que hablan,
-hay diálogo escrito; si hay acción, hay SFX pensados; si hay momentos clave, están marcados
-como `hero`; cada escena tiene su espacio sonoro (ambience) porque el sonido construye el
-lugar tanto como la imagen.
+━━━ IDIOMA (regla dura) ━━━
+• Lo que la audiencia VE u OYE va en ESPAÑOL: title, brief, beat, intention, dialogue,
+  voiceover, caption y el texto en pantalla (visual.graphics).
+• Lo que alimenta a los MODELOS de IA (imagen, video, audio) va en INGLÉS: prompt, action,
+  los campos de `visual` (foreground/midground/background/focal_point/line/rhythm/palette),
+  ambience, sfx y el diseño de personaje (prompt/physical/wardrobe/palette/expression).
+  Los valores de `camera`, `tone` y `transition` son tokens fijos (ni ES ni EN).
 
-Pensás en arcos emocionales, no en listas de hechos. Cada beat tiene una función narrativa.
-
-Como director de fotografía, cada plano lo definís con gramática real: tamaño de plano, ángulo,
-movimiento y foco (shot-list), y estructura visual (tono, color, profundidad, punto focal — Bruce
-Block), para construir contraste e intensidad a lo largo del video. No describís planos genéricos.\
+━━━ CÓMO PENSÁS LA IMAGEN ━━━
+• Cada plano es un ARTEFACTO: tamaño/ángulo/movimiento/foco (shot-list) + estructura visual
+  (tono, color, profundidad, punto focal — Bruce Block). No describís planos genéricos.
+• El KEYFRAME es una imagen FIJA: en `action` describís lo que se VE (composición), NO el
+  movimiento. El movimiento de cámara vive en `camera.move` y es cosa del VIDEO.
+• Los planos de una escena se ENCADENAN (cada plano se genera EDITANDO el anterior): comparten
+  set, props, personajes y look. Escribilos como CONTINUACIONES (qué cambia: encuadre, acción,
+  foco), no como escenas nuevas. El plano 1 es el ancla de la escena.
+• Construís un ARCO de intensidad visual hacia el clímax (visual_intensity), con contraste
+  entre cortes (alterná tamaños de plano).\
 """
 
 _DRAFT_PROMPT = """\
 Convertí el siguiente texto en un borrador de proyecto audiovisual completo.
-Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
+Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones. Cada campo lleva [ES] (español,
+lo ve/oye la audiencia) o [EN] (inglés, alimenta a un modelo de IA):
 
 {{
-  "title": "título corto y evocador",
-  "brief": "2-3 frases: tono + arco narrativo + intención emocional del video",
+  "title": "[ES] título corto y evocador",
+  "brief": "[ES] 2-3 frases: tono + arco narrativo + intención emocional",
   "style": "lego",
   "format": "9:16",
   "characters": {{
     "NombrePersonaje": {{
-      "design": "descripción visual DETALLADA: rasgos físicos, ropa, expresión característica, paleta de colores, estilo visual que lo hace reconocible"
+      "design": {{
+        "prompt": "[EN] visual description that makes the character recognizable (1-2 sentences)",
+        "physical": "[EN] distinctive physical traits: face, hair, body",
+        "wardrobe": "[EN] signature wardrobe",
+        "palette": ["[EN] 2-3 character colors"],
+        "expression": "[EN] defining gesture/expression"
+      }}
     }}
   }},
   "scenes": [
     {{
       "id": "s1",
-      "beat": "etiqueta narrativa del momento (ej: 'apertura', 'conflicto', 'revelación', 'clímax', 'cierre')",
+      "beat": "[ES] etiqueta narrativa del momento (ej: 'apertura', 'revelación', 'clímax', 'cierre')",
       "class": "hero|standard|volume",
-      "prompt": "descripción VISUAL del setting + personajes + acción física. Lo que la cámara VE. Sin diálogo. Incluí atmósfera, iluminación, estado emocional expresado visualmente.",
+      "prompt": "[EN] scene BASE for the image model: setting + characters + atmosphere + lighting. The fixed look the scene shares. No dialogue.",
       "duration_s": 6,
-      "dialogue": "líneas literales de diálogo como en un guion: 'Personaje: frase exacta.' — null si la escena es sin diálogo",
-      "ambience": "el espacio sonoro del lugar: room tone + sonidos pasivos del entorno. Siempre presente. Ej: 'tráfico lejano y lluvia sobre asfalto', 'silencio de biblioteca con páginas pasando y aire acondicionado'",
+      "dialogue": "[ES] líneas literales de guion: 'Personaje: frase exacta.' — null si no hay diálogo",
+      "ambience": "[EN] room tone of the place for the audio model: passive ambient sound. Always present. Ej: 'distant traffic and light rain', 'quiet studio room hum'",
       "characters": ["NombrePersonaje"],
       "visual_intensity": 3,
-      "requirements": {{
-        "needs_audio": false,
-        "needs_lipsync": false
-      }},
+      "requirements": {{ "needs_audio": false, "needs_lipsync": false }},
       "shots": [
         {{
-          "intention": "la FUNCIÓN dramática del plano: qué hace entender o sentir. Ej: 'revelar que el pozo no es un tubo simple'",
-          "action": "qué SE VE y qué pasa: sujeto + acción física + qué entra/sale del cuadro. Lo que la cámara capta. Sin diálogo.",
+          "intention": "[ES] la FUNCIÓN dramática del plano: qué hace entender o sentir. Solo la lee el humano.",
+          "action": "[EN] what is SEEN (still composition) + what physically happens: subject + action + what enters/leaves frame. NO camera movement here.",
           "duration_s": 3,
           "camera": {{
             "size": "ECU|CU|MCU|MS|MLS|LS|ELS|insert",
@@ -91,16 +103,16 @@ Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
           }},
           "visual": {{
             "tone": "high_key|low_key|neutral|silhouette",
-            "palette": ["2-3 colores dominantes"],
-            "foreground": "qué hay en primer plano, o null",
-            "background": "qué hay en el fondo, o null",
-            "focal_point": "dónde va el ojo del espectador",
-            "graphics": "texto en pantalla / lower-third / tipografía cinética, o null"
+            "palette": ["[EN] 2-3 dominant colors"],
+            "foreground": "[EN] what is in the foreground, or null",
+            "background": "[EN] what is in the background, or null",
+            "focal_point": "[EN] where the viewer's eye goes",
+            "graphics": "[ES] el TEXTO que aparece en pantalla (lower-third / tipografía), o null"
           }},
           "transition": "cut|match_cut|dissolve|smash_cut|wipe",
-          "voiceover": "texto para voz en off narrativa. null si no hay narrador en este plano.",
-          "caption": "texto en pantalla / lower-third / subtítulo. null si no corresponde.",
-          "sfx": "el sonido concreto de la ACCIÓN de este plano. Ej: 'clic de cerradura'. null si no aporta."
+          "voiceover": "[ES] texto de voz en off. null si no hay narrador en este plano.",
+          "caption": "[ES] texto en pantalla / subtítulo. null si no corresponde.",
+          "sfx": "[EN] the concrete sound of THIS shot's action for the audio model. Ej: 'lock click'. null si no aporta."
         }}
       ]
     }}
@@ -109,65 +121,40 @@ Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
 
 ━━━ CRITERIOS DE DIRECCIÓN ━━━
 
-**`class`** — jerarquía de producción:
-• `"hero"`: el momento climático/emocional del video. Máximo 2. Alta producción.
-• `"standard"`: escenas narrativas principales. La mayoría.
-• `"volume"`: establishing shots, transiciones, relleno visual rápido.
+**Idioma:** respetá [ES]/[EN] al pie de la letra. Un `action` o `prompt` en español, o un `caption`
+en inglés, es un ERROR. Los enums (camera/tone/transition) van tal cual.
 
-**`prompt`** — la descripción visual del beat:
-• Describí lo que la cámara VE: atmósfera, luz, acción física, composición del cuadro.
-• No repitas el diálogo. No describas emociones abstractas; describí lo que las expresa.
-• Incluí el estilo visual: si es de noche, si hay contraluz, si el espacio es íntimo o épico.
+**`class`** — jerarquía: `hero` (clímax, máx 2) · `standard` (la mayoría) · `volume` (transiciones).
 
-**`dialogue`** — lo que se dice:
-• Escribí líneas literales, no resúmenes. "Martina: 'No sabía que ibas a volver.'"
-• Si needs_lipsync es true, el modelo de video sincronizará labios.
-• Si hay diálogo significativo → needs_audio: true.
-• Si es escena de acción sin habla → null.
+**`prompt`** (scene base, [EN]) — el setting + personajes + atmósfera que la ESCENA comparte; es la
+base sobre la que cada plano suma su encuadre. Sin diálogo, sin movimiento de cámara.
 
-**`ambience`** — el espacio sonoro:
-• SIEMPRE presente. Define dónde está el espectador.
-• Es el fondo constante: no la música, no los efectos puntuales. El "room tone" del lugar.
-• Sé específico: no "sonidos de ciudad" sino "bocinas lejanas, lluvia fina, pisadas en charcos".
+**`shots`** — cada plano es un ARTEFACTO (pensá como director de fotografía):
+• `intention` [ES]: la función dramática. Cada plano existe por una razón.
+• `action` [EN]: lo que se VE (composición fija) + qué pasa. SIN movimiento de cámara (eso es video).
+• `camera` (tokens): size ECU·CU·MCU·MS·MLS·LS·ELS·insert; angle eye·high·low·overhead·worm·dutch·ots;
+  move static·pan·tilt·push_in·pull_out·track·crane·handheld·zoom; focus deep·shallow·rack.
+  El `move` es el movimiento del VIDEO (el keyframe es fijo).
+• `visual` (Bruce Block, [EN] salvo graphics): tone (token) · palette · foreground/background ·
+  focal_point. `graphics` [ES] = el texto literal en pantalla.
+• `transition` (token): cómo entra al plano siguiente.
 
-**`sfx`** — efectos de sonido de la acción:
-• Solo los que suman información narrativa o dramatismo.
-• Un plano con alguien abriendo una caja: "cartón rasgándose, crujido de tapa".
-• Un plano de paisaje estático sin acción específica: null.
-• No repitas el ambience acá.
+**ENCADENADO** — los planos de una escena se generan EDITANDO al anterior: comparten set, props,
+personajes y look. Escribí cada plano como CONTINUACIÓN (qué cambia: encuadre, acción, foco), no
+como una escena nueva. Alterná tamaños de plano entre cortes para dar contraste.
 
-**`shots`** — cada plano es un ARTEFACTO audiovisual (pensá como director de fotografía):
-• `intention`: la función dramática. Cada plano existe por una razón o no debería estar.
-• `action`: qué SE VE y qué pasa físicamente. Es el visual primario (reemplaza al viejo "framing").
-• `camera`: la gramática del shot-list. Elegí SOLO de estos valores controlados:
-  - size: ECU (primerísimo) · CU (primer plano) · MCU · MS (medio) · MLS · LS (general) · ELS · insert (detalle).
-  - angle: eye (normal) · high (picado) · low (contrapicado) · overhead (cenital) · worm · dutch (holandés) · ots (sobre el hombro).
-  - move: static (fija) · pan (paneo) · tilt · push_in · pull_out · track (travelling) · crane · handheld · zoom.
-  - focus: deep (foco profundo) · shallow (poca prof. de campo) · rack (foco que viaja).
-• `visual` (estructura de Bruce Block — construí contraste ENTRE cortes):
-  - tone: high_key · low_key · neutral · silhouette. palette: 2-3 colores dominantes.
-  - foreground/background: planos de profundidad. focal_point: dónde va el ojo. graphics: texto en pantalla.
-• `transition`: cut · match_cut · dissolve · smash_cut · wipe. Cómo entra al plano siguiente.
-• Alterná tamaños de plano entre cortes (un detalle pega más después de un general).
+**`visual_intensity`** (1-5) — el arco de intensidad: `hero`/clímax alto (4-5), aperturas/respiros
+bajo (1-2). Construí tensión hacia el clímax; no dejes todo plano en la misma intensidad (Block).
 
-**`visual_intensity`** — la curva visual del video (1-5):
-• Es el arco de intensidad/contraste. Las escenas `hero`/clímax van alto (4-5); aperturas y respiros bajo (1-2).
-• Construí tensión hacia el clímax; no dejes todo el video en la misma intensidad (Bruce Block).
-
-**`voiceover`** — narración:
-• Solo cuando el video tiene un narrador explícito (documental, publicitario con voz en off).
-• No uses voiceover para describir lo que ya se ve.
-
-**`caption`** — texto en pantalla:
-• Úsalo para datos que refuerzan la narrativa: nombre de lugar, fecha, estadísticas, citas.
-• También para subtítulos si hay diálogo que conviene ver escrito.
+**Sonido** — `dialogue` [ES] (líneas literales; si hay diálogo significativo → needs_audio: true;
+needs_lipsync: true solo si hay un primer plano de cara hablando). `voiceover` [ES] (solo si hay
+narrador explícito; no narres lo que ya se ve). `ambience` [EN] (room tone, siempre presente).
+`sfx` [EN] (solo si suma; no repitas el ambience).
 
 ━━━ REGLAS DE ESTRUCTURA ━━━
-• Mínimo 3 escenas, máximo 8 (para un video de 30-90 segundos).
-• duration_s de la escena = suma de sus planos (2 a 6 segundos por plano).
-• La progresión de beats debe tener arco: apertura → nudo → clímax → cierre.
+• 3 a 8 escenas (video de 30-90s). duration_s de la escena = suma de sus planos (2-6s por plano).
+• Arco de beats: apertura → nudo → clímax → cierre.
 • Si el texto no nombra personajes recurrentes → "characters": {{}}.
-• needs_lipsync: true SOLO si hay diálogo en close-up de cara hablando.
 
 Texto a convertir:
 {text}
@@ -287,7 +274,14 @@ def _character_from_raw(name: str, raw) -> Character:
     if isinstance(cd, str) and cd.strip():
         design = CharacterDesign(prompt=cd.strip(), refs=[])
     elif isinstance(cd, dict) and cd.get("prompt"):
-        design = CharacterDesign(prompt=cd["prompt"], refs=[])
+        # D-049/B2: artefacto de personaje (campos opcionales, tolerante).
+        design = CharacterDesign(
+            prompt=cd["prompt"], refs=[],
+            physical=cd.get("physical") or None,
+            wardrobe=cd.get("wardrobe") or None,
+            palette=[str(x).strip() for x in (cd.get("palette") or []) if str(x).strip()],
+            expression=cd.get("expression") or None,
+        )
     return Character(name=name, design=design)
 
 

@@ -56,10 +56,13 @@ def _fake_record(shot_id: str):
 
 
 async def _render_shot_ok(**kwargs):
-    """Mock de _render_shot: devuelve un clip con el shot_id en el nombre."""
+    """Mock de _render_shot: devuelve un clip con el shot_id en el nombre.
+
+    Tupla de 6 (D-048/A2): clip, record, manifest, audio, keyframe, kf_key.
+    """
     shot_id = kwargs["shot_id"]
     clip = Path(f"/fake/{shot_id}.mp4")
-    return clip, _fake_record(shot_id), {"shot_id": shot_id}, False
+    return clip, _fake_record(shot_id), {"shot_id": shot_id}, False, Path(f"/fake/{shot_id}.png"), f"kf_{shot_id}"
 
 
 async def _render_shot_fail_s1(**kwargs):

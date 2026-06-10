@@ -19,7 +19,7 @@ import yaml
 from .config import Config
 from .contact_sheet import build_contact_sheet, write_and_open
 from .keyframe import KeyframeGenerator, build_styled_prompt
-from .prompt_compile import compose_shot_visual
+from .prompt_compile import compose_character_prompt, compose_keyframe_prompt
 from .naming import readable_name, semantic_slug
 from .project import (
     Character,
@@ -113,12 +113,13 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
     for name, ch in designed.items():
         ref_sig = sorted(str(r) for r in ch.design.refs)
         refs_resolved = resolve_refs(project.dir, ch.design.refs)  # project-relative -> abs
+        cast_prompt = compose_character_prompt(ch.design)  # D-049/B2: artefacto de personaje
         paths: list[Path] = []        # hash (verdad del caché, estable para pick-cast)
         display: list[Path] = []      # alias legibles (<personaje>_cara_<idx>.png)
         for i in range(n):
             try:  # robustez: un candidato que falla no tira los demás
                 key = cache_key("cast", {
-                    "character": name, "prompt": ch.design.prompt,
+                    "character": name, "prompt": cast_prompt,
                     "refs": ref_sig, "ref_model": cfg.style.keyframe.ref_model, "seed": i,
                 })
                 hit = project.cache_lookup("cast", key, ".png")
@@ -127,7 +128,7 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
                     logger.info("[%s] cara %d/%d (cache hit)", name, i + 1, n)
                 else:
                     logger.info("[%s] cara %d/%d | generando...", name, i + 1, n)
-                    tmp = await keyframer.generate_design(ch.design.prompt, refs_resolved, seed=i)
+                    tmp = await keyframer.generate_design(cast_prompt, refs_resolved, seed=i)
                     stored = project.cache_store("cast", key, tmp, ".png")
                 alias = _alias(project, "faces", name, "cara", i, stored)
                 paths.append(stored)
@@ -208,7 +209,7 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
         refs_resolved = resolve_refs(project.dir, refs)
         ref_sig = sorted(str(r) for r in refs)
         anchor = effective_shots(scene)[0]
-        anchor_ext = compose_shot_visual(anchor)  # D-047: artefacto del plano 1
+        anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
         styled = build_styled_prompt(scene, cfg.style, anchor_ext)
         slug = semantic_slug(f"{scene.prompt} {anchor_ext}".strip())
         scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
@@ -226,7 +227,7 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
             else:
                 logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=i, framing=compose_shot_visual(anchor))
+                                               seed=i, framing=compose_keyframe_prompt(anchor))
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene.id, slug, i, stored)
             logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
@@ -289,7 +290,7 @@ async def gen_keyframes_scene(
     ref_sig = sorted(str(r) for r in refs)
     anchor = effective_shots(scene)[0]
 
-    anchor_ext = compose_shot_visual(anchor)  # D-047: artefacto del plano 1
+    anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
     framing = f"{anchor_ext}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor_ext
     styled = build_styled_prompt(scene, cfg.style, framing)
     slug = semantic_slug(f"{scene.prompt} {framing}".strip())
@@ -327,6 +328,70 @@ async def gen_keyframes_scene(
     project.candidates_path.write_text(
         yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+
+
+async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Config,
+                                 scene_id: str, force: bool = False) -> list[str]:
+    """D-048/A4: genera (ENCADENADOS) los keyframes de los planos 2+ de una escena,
+    partiendo del ANCLA ya elegida, para que el humano VEA la coherencia antes de
+    renderizar. No se eligen (el ancla manda); es una previsualizacion read-only.
+    Guarda `shot_previews.yaml` (scene_id -> [ancla, plano2, plano3, ...]) en rutas
+    project-relative. Cada plano se condiciona al keyframe del plano previo (i2i)."""
+    scene = next((s for s in spec.scenes if s.id == scene_id), None)
+    if scene is None:
+        raise ValueError(f"Escena '{scene_id}' no existe.")
+    shots = effective_shots(scene)
+    sel = {}
+    if project.selections_path.exists():
+        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    anchor_rel = sel.get(scene_id)
+    if not anchor_rel:
+        raise RuntimeError(f"Primero elegí el encuadre ancla de '{scene_id}'.")
+    anchor = _resolve_under(project.dir, anchor_rel)
+
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    refs = character_refs(scene, spec.characters)
+    scene.character_refs = refs
+    refs_resolved = resolve_refs(project.dir, refs)
+
+    # Rutas ABSOLUTAS (como candidates.yaml; es una previsualizacion efimera, no la
+    # eleccion durable que va en selections.yaml -> esa si project-relative, D-044).
+    out_paths = [str(anchor)]  # el ancla es el plano 1
+    prev = anchor
+    for idx, shot in enumerate(shots):
+        if idx == 0:
+            continue  # el plano 1 ES el ancla elegida
+        try:
+            kf_ext = compose_keyframe_prompt(shot)
+            chain_refs = ([prev] + refs_resolved) if cfg.style.keyframe.ref_model else refs_resolved
+            key = cache_key("shotpreview", {
+                "scene": scene_id, "idx": idx, "prompt": kf_ext,
+                "anchor": relativize(project.dir, anchor), "seed": shot.seed,
+                "ref_model": cfg.style.keyframe.ref_model,
+            })
+            hit = project.cache_lookup("keyframes", key, ".png")
+            if hit is not None and not force:
+                stored = hit
+                logger.info("[%s] plano %d (cache hit)", scene_id, idx + 1)
+            else:
+                logger.info("[%s] plano %d | encadenando keyframe...", scene_id, idx + 1)
+                tmp = await keyframer.generate(scene, ref_images=chain_refs,
+                                               seed=shot.seed, framing=kf_ext)
+                stored = project.cache_store("keyframes", key, tmp, ".png")
+            alias = _alias(project, "keyframes", scene_id, f"plano{idx + 1}", idx, stored)
+            out_paths.append(str(alias))
+            prev = stored
+        except Exception as exc:  # noqa: BLE001 — un plano que falla no tira la cadena
+            logger.error("[%s] plano %d FALLO: %s", scene_id, idx + 1, exc)
+
+    previews: dict = {}
+    pv_path = project.dir / "shot_previews.yaml"
+    if pv_path.exists():
+        previews = yaml.safe_load(pv_path.read_text(encoding="utf-8")) or {}
+    previews[scene_id] = out_paths
+    pv_path.write_text(yaml.safe_dump(previews, sort_keys=False, allow_unicode=True),
+                       encoding="utf-8")
+    return out_paths
 
 
 def add_candidate_upload(project: Project, scene_id: str, data: bytes, suffix: str) -> Path:

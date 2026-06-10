@@ -262,6 +262,7 @@ def create_app(projects_dir: Path = Path("projects"),
     @app.get("/api/projects/{slug}")
     def project_detail(slug: str):
         from ..project import effective_shots
+        from ..prompt_compile import compose_character_prompt
 
         _project, spec, _cfg = load(slug)
         scenes = [{
@@ -280,7 +281,7 @@ def create_app(projects_dir: Path = Path("projects"),
         } for s in spec.scenes]
         characters = [{
             "name": name,
-            "design": ch.design.prompt if ch.design else None,
+            "design": compose_character_prompt(ch.design) if ch.design else None,  # D-049/B2
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
         music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
@@ -316,6 +317,23 @@ def create_app(projects_dir: Path = Path("projects"),
                               "prompt_manual": s.prompt_manual,
                               "prompt_stale": s.prompt_stale} for s in todo]}
 
+    @app.post("/api/projects/{slug}/shots/{scene_id}")
+    async def gen_shot_previews(slug: str, scene_id: str, body: dict = {}):
+        """D-048/A4: genera (encadenados) los keyframes de los planos 2+ de la escena
+        desde el ancla elegida, para previsualizar coherencia. Job/SSE."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        force = bool(body.get("force"))
+
+        async def coro():
+            paths = await studio.preview_shot_keyframes(project, spec, cfg, scene_id, force=force)
+            return {"scene": scene_id, "shots": len(paths)}
+
+        return jobs.spawn("shots", f"{slug}/{scene_id}", coro()).to_dict()
+
     @app.get("/api/projects/{slug}/candidates")
     def candidates(slug: str):
         project, _spec, _cfg = load(slug)
@@ -333,6 +351,7 @@ def create_app(projects_dir: Path = Path("projects"),
 
         return {"keyframes": read(project.candidates_path),
                 "cast": read(project.dir / "cast_candidates.yaml"),
+                "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
                 "selections": load_yaml(project.selections_path),
                 "cast_selections": load_yaml(project.dir / "casting.yaml")}
 

@@ -24,8 +24,14 @@
   // Estado por escena para generación individual
   let sceneTweak  = $state({}); // { sceneId: "texto del ajuste" }
   let sceneErr    = $state({}); // { sceneId: "mensaje de error" }
+  let shotsBusy   = $state({}); // { sceneId: bool } generando planos encadenados (A4)
 
   let hasFal = $derived(!!studio.status?.keys?.fal_key);
+
+  // Foco de generación (C3): el casting va ANTES que los encuadres.
+  let castNeeded = $derived(studio.status?.casting?.needed ?? 0);
+  let castChosen = $derived(studio.status?.casting?.chosen ?? 0);
+  let castReady  = $derived(castNeeded === 0 || castChosen >= castNeeded);
 
   async function load() {
     try {
@@ -210,6 +216,21 @@
     }
   }
 
+  // A4: genera (encadenados) los keyframes de los planos 2+ desde el ancla elegida.
+  function genShotPreviews(sceneId, force = false) {
+    shotsBusy = { ...shotsBusy, [sceneId]: true };
+    err = "";
+    runJob(`/api/projects/${slug}/shots/${sceneId}`, {
+      body: force ? { force: true } : {},
+      onDone: async (status) => {
+        shotsBusy = { ...shotsBusy, [sceneId]: false };
+        if (status !== "done") err = `Planos: terminó como ${status}.`;
+        await load();
+      },
+      onError: (e) => { shotsBusy = { ...shotsBusy, [sceneId]: false }; err = humanError(e); },
+    });
+  }
+
   async function savePicks() {
     err = "";
     try {
@@ -257,14 +278,24 @@
     <label class="n-lbl">opciones
       <input type="number" min="1" max="8" bind:value={n} />
     </label>
-    {#if needsCast}
-      <button class="machine" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
-        {busy === "cast" ? "Generando…" : "Generar casting"}
+    {#if needsCast && !castReady}
+      <!-- Foco: primero el casting; encuadres bloqueado hasta fijar la cara -->
+      <button class="machine cta" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+        {busy === "cast" ? "Generando…" : "1 · Generar casting"}
+      </button>
+      <button class="machine" disabled title="Primero fijá la cara del personaje (casting)">
+        2 · Generar encuadres
+      </button>
+    {:else}
+      {#if needsCast}
+        <button class="ghost small" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+          {busy === "cast" ? "Generando…" : "Regenerar casting"}
+        </button>
+      {/if}
+      <button class="machine cta" onclick={() => generate("keyframes")} disabled={!!busy || !hasFal}>
+        {busy === "keyframes" ? "Generando…" : "Generar encuadres"}
       </button>
     {/if}
-    <button class="machine" onclick={() => generate("keyframes")} disabled={!!busy || !hasFal}>
-      {busy === "keyframes" ? "Generando…" : "Generar encuadres"}
-    </button>
   </div>
 </div>
 
@@ -392,6 +423,35 @@
             </button>
           {/each}
         </div>
+
+        <!-- A4: planos encadenados desde el ancla elegida (coherencia) -->
+        {#if cand.selections?.[sceneId]}
+          {@const previews = cand.shot_previews?.[sceneId] || []}
+          {@const shotBusy = !!shotsBusy[sceneId]}
+          <div class="shots-preview">
+            <div class="sp-head">
+              <span class="sp-lbl">Planos de la escena <span class="muted small-h">encadenados desde tu elección</span></span>
+              <button class="small ghost" onclick={() => genShotPreviews(sceneId, previews.length > 1)}
+                      disabled={anyBusy || shotBusy || !hasFal}>
+                {shotBusy ? "Generando…" : previews.length > 1 ? "↻ Regenerar planos" : "Generar planos"}
+              </button>
+            </div>
+            {#if shotBusy}
+              <div class="scene-progress"><span class="spin sm"></span>encadenando planos…</div>
+            {:else if previews.length > 1}
+              <div class="sp-strip">
+                {#each previews as url, k}
+                  <div class="sp-cell" class:anchor={k === 0}>
+                    <img src={url} alt="plano {k + 1}" loading="lazy" />
+                    <span class="sp-n">P{k + 1}{k === 0 ? " · ancla" : ""}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <p class="muted sp-hint">Generá los planos para ver cómo encadenan desde el encuadre que elegiste.</p>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/each}
   </section>
@@ -407,16 +467,14 @@
 {#if (hasCast || hasKf)}
   <div class="savebar">
     {#if saved}
-      <div class="saved">
-        <b>✓ Selección guardada.</b>
-        <button class="primary" onclick={() => goTo("producir")}>Siguiente: Producir →</button>
-      </div>
+      <span class="saved-seal">✓ Selección guardada</span>
+      <button class="primary cta go" onclick={() => goTo("producir")}>Siguiente: Producir →</button>
     {:else}
-      <button class="primary" onclick={savePicks} disabled={!anyPick}>
+      <button class="primary cta" onclick={savePicks} disabled={!anyPick}>
         {allPicked ? "Confirmar selección" : "Guardar lo elegido"}
       </button>
       {#if !anyPick}<span class="muted">Hacé clic en al menos una opción.</span>{/if}
-      {#if allPicked && anyPick}<span class="muted">Todas las escenas tienen encuadre. Cambiá lo que querés y confirmá.</span>{/if}
+      {#if allPicked && anyPick}<span class="muted">Todas las escenas tienen encuadre. Confirmá para seguir.</span>{/if}
     {/if}
   </div>
 {/if}
@@ -555,7 +613,26 @@
     background: linear-gradient(0deg, var(--paper) 60%, transparent);
     display: flex; align-items: center; gap: 14px;
   }
-  .saved { display: flex; align-items: center; gap: 16px; }
-  .saved b { color: var(--ok); }
+  .saved-seal {
+    font-size: 13px; font-weight: 700; color: var(--ok);
+    background: var(--ok-wash); border-radius: 999px; padding: 6px 14px;
+  }
   .muted { color: var(--ink-soft); }
+
+  /* A4: tira de planos encadenados */
+  .shots-preview {
+    margin-top: 12px; padding: 12px 14px;
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+  .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; flex-wrap: wrap; }
+  .sp-lbl { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  .sp-hint { font-size: 12.5px; margin: 0; }
+  .sp-strip { display: flex; flex-wrap: wrap; gap: 10px; }
+  .sp-cell { position: relative; line-height: 0; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line-2); }
+  .sp-cell.anchor { border-color: var(--red); box-shadow: 0 0 0 2px var(--red-wash); }
+  .sp-cell img { display: block; width: 132px; height: 132px; object-fit: cover; }
+  .sp-n {
+    position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff;
+    font-family: var(--font-mono); font-size: 10.5px; padding: 2px 6px; text-align: left;
+  }
 </style>
