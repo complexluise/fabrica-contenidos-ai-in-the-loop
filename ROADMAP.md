@@ -496,21 +496,25 @@ proveedor más económico, rápido) y `--profile prod` sea la producción final;
 `--concurrency N` varias escenas corran en vuelo simultáneo recortando el tiempo total de render.
 
 ### Acceptance Criteria
-- [ ] AC1 — `routing.yaml` tiene perfiles `prod` y `proto`; `--profile proto` aplica la tabla barata sin tocar otros archivos.
-- [ ] AC2 — `--profile prod` reproduce exactamente el comportamiento actual (ensemble/router/cascade). 🔬
-- [ ] AC3 — `pipeline run <slug> --profile proto --concurrency 3` genera las escenas en vuelo simultáneo con el mismo orden de clips que en serie.
-- [ ] AC4 — Una escena que falla con `concurrency > 1` no aborta el resto del run. 🔬
-- [ ] AC5 — El endpoint `POST /api/projects/{slug}/render` acepta `profile` y `concurrency` en el body.
+- [x] AC1 — `routing.yaml` tiene perfiles `prod` y `proto`; `--profile proto` aplica la tabla barata sin tocar otros archivos.
+- [x] AC2 — `--profile prod` reproduce exactamente el comportamiento actual (ensemble/router/cascade). 🔬
+- [x] AC3 — `pipeline run <slug> --profile proto --concurrency 3` genera las escenas en vuelo simultáneo con el mismo orden de clips que en serie.
+- [x] AC4 — Una escena que falla con `concurrency > 1` no aborta el resto del run. 🔬
+- [x] AC5 — El endpoint `POST /api/projects/{slug}/render` acepta `profile` y `concurrency` en el body.
 
 ### Tasks (orden test-first)
 - [x] T6.11.1 — ADRs D-038 y D-039 en `docs/decisiones/`.
-- [ ] T6.11.2 — `routing.yaml`: sección `profiles:` con `prod` y `proto`. 🔬 *core*
-- [ ] T6.11.3 — `config.py`: `RoutingConfig.hybrid` → `rules`; `load_routing(path, profile)`. 🔬 *core*
-- [ ] T6.11.4 — `dispatch.py` + tests. *core*
-- [ ] T6.11.5 — `runner.py`: `run_project(concurrency=1)` + `asyncio.gather` con semáforo. 🔬 *core*
-- [ ] T6.11.6 — `cli.py`: `--profile prod` y `--concurrency 1` en `run`; `--concurrency` en `render`.
-- [ ] T6.11.7 — `app.py`: endpoint render acepta `profile`/`concurrency`.
-- [ ] T6.11.8 — Smoke: `pipeline run lego_mix --profile proto --concurrency 2`.
+- [x] T6.11.2 — `routing.yaml`: sección `profiles:` con `prod` y `proto`. 🔬 *core*
+- [x] T6.11.3 — `config.py`: `RoutingConfig.hybrid` → `rules`; `load_routing(path, profile)`. 🔬 *core*
+- [x] T6.11.4 — `dispatch.py` + tests. *core*
+- [x] T6.11.5 — `runner.py`: `run_project(concurrency=1)` + `asyncio.gather` con semáforo. 🔬 *core*
+- [x] T6.11.6 — `cli.py`: `--profile prod` y `--concurrency 1` en `run`; `--concurrency` en `render`.
+- [x] T6.11.7 — `app.py`: endpoint render acepta `profile`/`concurrency`.
+- [x] T6.11.8 — Smoke: `pipeline run lego_mix --profile proto --concurrency 2`.
+
+> **✅ Sprint 6.11 CERRADO** (2026-06-07). Perfiles `prod`/`proto` seleccionables desde CLI y UI;
+> `RoutingConfig.rules` (antes `hybrid`); `run_project(concurrency=N)` con semáforo; endpoint
+> render acepta `profile`/`concurrency`; selector de velocidad en `Produccion.svelte`.
 
 ---
 
@@ -532,7 +536,7 @@ para varios planos) y que los planos sean **cortos por default (~2s)**. Refina [
 
 ---
 
-## Sprint 6.12 — Edición autónoma: describe + movis + mcp-video (D-041, D-042) ⭐ SIGUIENTE
+## Sprint 6.12 — Edición autónoma: describe + movis + mcp-video (D-041, D-042)
 
 **Objetivo:** cerrar el bucle **sin editora humana**. Un agente (Opus) monta el corte final
 priorizando **el mensaje sobre el pulido**, con tres piezas de roles separados: **`describe`** (los
@@ -540,22 +544,72 @@ ojos: Haiku evalúa cada plano), **`graphics`** (el artista: movis genera motion
 **mcp-video** (el ingeniero: servidor MCP guardrailed para el montaje). Ver [D-041]/[D-042].
 
 ### Acceptance Criteria
-- [ ] AC1 — `pipeline describe <slug>` genera `projects/<slug>/descriptions.yaml` con `{usable, on_message, issues, description}` por plano, leyendo del último run. 🔬 *(prompt/parseo)*
-- [ ] AC2 — Sin `ANTHROPIC_API_KEY`, `describe` emite warning y sale 0 con salida vacía (no rompe). 🔬
-- [ ] AC3 — `pipeline graphics <slug>` produce `export/graphics/` (lower-thirds por plano con `caption`, `title.mp4`, `end.mp4`) de forma determinista. 🔬 *(selección desde el manifest)*
-- [ ] AC4 — Si falta el extra `[edit]`, `graphics` falla con un mensaje claro que dice cómo instalarlo (`uv sync --extra edit`).
-- [ ] AC5 — `.mcp.json` registra `mcp-video` vía `uvx`; el agente lo ve como servidor MCP y no es dependencia del proyecto.
-- [ ] AC6 — La skill `narrative-cut` documenta el bucle `export → describe → graphics → (agente vía mcp-video) → final_cut.mp4` y pasa el smoke de contrato (`pipeline describe --help`, `pipeline graphics --help`).
+- [x] AC1 — `pipeline describe <slug>` genera `projects/<slug>/descriptions.yaml` con `{usable, on_message, issues, description}` por plano, leyendo del último run. 🔬 *(prompt/parseo)*
+- [x] AC2 — Sin `ANTHROPIC_API_KEY`, `describe` emite warning y sale 0 con salida vacía (no rompe). 🔬
+- [x] AC3 — `pipeline graphics <slug>` produce `export/graphics/` (lower-thirds por plano con `caption`, `title.mp4`, `end.mp4`) de forma determinista. 🔬 *(selección desde el manifest)*
+- [x] AC4 — Si falta el extra `[edit]`, `graphics` falla con un mensaje claro que dice cómo instalarlo (`uv sync --extra edit`).
+- [x] AC5 — `.mcp.json` registra `mcp-video` vía `uvx`; el agente lo ve como servidor MCP y no es dependencia del proyecto.
+- [x] AC6 — La skill `narrative-cut` documenta el bucle `export → describe → graphics → (agente vía mcp-video) → final_cut.mp4` y pasa el smoke de contrato (`pipeline describe --help`, `pipeline graphics --help`).
 
 ### Tasks (orden test-first)
 - [x] T6.12.1 — ADRs D-041 y D-042 en `docs/decisiones/`; SPEC (L10) y ROADMAP.
-- [ ] T6.12.2 — `describe.py`: `describe_prompt` + `parse_description`. 🔬 *core*
-- [ ] T6.12.3 — `gate/frames.py::extract_frame` incluye `at_seconds` en el nombre (evita colisión). 🔬 *core*
-- [ ] T6.12.4 — `describe.py::describe_bundle` (Haiku + frames) y subcomando `describe` en `cli.py`.
-- [ ] T6.12.5 — `graphics.py`: `lower_thirds`/`title_spec`/`end_spec`. 🔬 *core*
-- [ ] T6.12.6 — `graphics.py::render_graphics` (movis) + subcomando `graphics` en `cli.py` + extra `[edit]`.
-- [ ] T6.12.7 — `.mcp.json` (mcp-video por `uvx`) + `skills/narrative-cut/SKILL.md` + fila en `skills/README.md`.
-- [ ] T6.12.8 — Smoke real: `export → describe → graphics` sobre `lego_mix`; corte final vía mcp-video.
+- [x] T6.12.2 — `describe.py`: `describe_prompt` + `parse_description`. 🔬 *core*
+- [x] T6.12.3 — `gate/frames.py::extract_frame` incluye `at_seconds` en el nombre (evita colisión). 🔬 *core*
+- [x] T6.12.4 — `describe.py::describe_bundle` (Haiku + frames) y subcomando `describe` en `cli.py`.
+- [x] T6.12.5 — `graphics.py`: `lower_thirds`/`title_spec`/`end_spec`. 🔬 *core*
+- [x] T6.12.6 — `graphics.py::render_graphics` (movis) + subcomando `graphics` en `cli.py` + extra `[edit]`.
+- [x] T6.12.7 — `.mcp.json` (mcp-video por `uvx`) + `skills/narrative-cut/SKILL.md` + fila en `skills/README.md`.
+- [~] T6.12.8 — Smoke real: `export → describe → graphics` sobre `lego_mix`; corte final vía mcp-video. **Pendiente** del render pago.
+
+> **✅ Sprint 6.12 CERRADO** (2026-06-08). `describe` (Haiku analiza cada plano → `descriptions.yaml`)
+> + `graphics` (movis genera lower-thirds/placas deterministas → `export/graphics/`) + `.mcp.json`
+> (mcp-video por uvx) + skill `narrative-cut`. Core en verde. Pendiente: smoke pago end-to-end.
+
+---
+
+## Sprint 6.13 — Veo explícito + perfiles dinámicos en UI (D-043, D-044)
+
+**Objetivo:** cuando los créditos de fal.ai se agotan, poder usar Google Veo **sin fallback
+automático**; y que la UI descubra los perfiles del YAML **sin recompilarse**.
+
+### Acceptance Criteria
+- [x] AC1 — `proto_veo` es un perfil independiente en `routing.yaml`; elegirlo envía todo a Veo sin tocar `proto`. (D-043)
+- [x] AC2 — Cada perfil tiene un bloque `_meta` (label/desc/badge/color); el config loader lo elimina antes del parse. (D-044)
+- [x] AC3 — `GET /api/profiles` devuelve la lista de perfiles con su metadata desde el YAML en runtime.
+- [x] AC4 — `Produccion.svelte` carga los perfiles dinámicamente con `onMount → fetch /api/profiles`; fallback estático si el servidor no responde.
+- [x] AC5 — `providers/google_veo.py` usa polling asíncrono (`asyncio.to_thread` + `asyncio.sleep`) y descarga autenticada vía `client.files.download`.
+
+### Tasks
+- [x] T6.13.1 — ADRs D-043 y D-044 en `docs/decisiones/`.
+- [x] T6.13.2 — Perfil `proto_veo` + bloque `_meta` en los tres perfiles de `routing.yaml`.
+- [x] T6.13.3 — `config.load_routing` hace `rules.pop("_meta", None)`.
+- [x] T6.13.4 — `server/app.py`: endpoint `GET /api/profiles`.
+- [x] T6.13.5 — `Produccion.svelte`: `onMount → fetch`, `COLOR_MAP`, `badgeStyle`, fallback estático.
+- [x] T6.13.6 — `providers/google_veo.py` reescrito; `providers.yaml` ajusta veo a `veo-2.0-generate-001`; `pyproject.toml` añade `google-genai>=0.8`.
+
+> **✅ Sprint 6.13 CERRADO** (2026-06-08). Veo disponible como perfil explícito (`proto_veo`);
+> UI descubre perfiles dinámicamente desde routing.yaml; el proveedor Google corre sin fallback.
+
+---
+
+## Sprint 6.14 — Storyboard centrado en la historia: UX humano-first (D-045) ⭐ SIGUIENTE
+
+**Objetivo:** que el Storyboard (paso 2) muestre la **historia** que el humano firma, no los
+prompts que la IA consume. Los prompts se desplazan a **Elegir** (paso 3) donde se revisan antes
+de generar. Ver [D-045].
+
+### Acceptance Criteria
+- [ ] AC1 — Modo lectura colapsado del Storyboard muestra: `beat` + chips de VO + duración; **no `s.prompt`**.
+- [ ] AC2 — Modo lectura expandido muestra: beat, diálogo, voiceover, caption, ambience. Sin `prompt` ni `framing` visibles en modo lectura.
+- [ ] AC3 — Modo edición del Storyboard: prompt visual y framing agrupados en un panel **"Para la IA"** colapsable (editable pero subordinado).
+- [ ] AC4 — Elegir (paso 3) tiene una sección **"Prompts para la IA"** (colapsable, por escena) que muestra/edita `s.prompt` y `shot.framing`; guardar usa `PUT /api/projects/{slug}` (sin cambio de API).
+- [ ] AC5 — El flujo `cast → keyframes → pick` **no se rompe**: los prompts siguen fluyendo al pipeline.
+
+### Tasks
+- [x] T6.14.1 — ADR D-045 en `docs/decisiones/`.
+- [x] T6.14.2 — `Storyboard.svelte`: read-compact muestra dialogo/vo/ambience; read-full muestra dialogo/vo/caption sin `s.prompt`; edit mode pone prompt en panel "Para la IA" colapsable.
+- [x] T6.14.3 — `Picker.svelte`: sección "Para la IA" colapsable por escena (prompt + framings), editable + `PUT /api/projects/{slug}` al guardar.
+- [x] T6.14.4 — Build limpio (0 errores, warnings CSS resueltos).
 
 ---
 

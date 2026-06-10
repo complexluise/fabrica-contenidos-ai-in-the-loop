@@ -289,15 +289,10 @@
       </div>
 
       {#if isEditing}
-        <!-- MODO EDICIÓN: L1 visual → L2 audio escena → L3 planos -->
+        <!-- MODO EDICIÓN: narrativa → planos → prompt IA (colapsable) -->
         <div class="sbody">
 
-          <!-- L1: Lo que la cámara ve -->
-          <span class="lbl">Qué pasa — visual del beat</span>
-          <textarea class="prompt-in" bind:value={s.prompt} oninput={touch} rows="3"
-                    placeholder="setting + personajes + acción física. Lo que la cámara VE. Sin diálogo."></textarea>
-
-          <!-- L2: Audio de escena — secundario, agrupado en franja discreta -->
+          <!-- Dialogo y ambience de la escena -->
           <div class="scene-audio">
             <div class="audio-col">
               <span class="audio-lbl">Diálogo</span>
@@ -341,6 +336,16 @@
             {/each}
             <button class="small ghost addshot" onclick={() => addShot(s)}>+ plano</button>
           </div>
+
+          <!-- Panel colapsable "Para la IA": prompt visual tecnico -->
+          <details class="ia-section">
+            <summary class="ia-toggle">Para la IA — prompt visual <span class="ia-hint">(tecnico)</span></summary>
+            <div class="ia-body">
+              <span class="lbl small-lbl">Descripcion visual para el modelo de imagen</span>
+              <textarea class="prompt-in ia-prompt" bind:value={s.prompt} oninput={touch} rows="3"
+                        placeholder="setting + personajes + accion fisica. Lo que la camara VE. Sin dialogo."></textarea>
+            </div>
+          </details>
         </div>
 
       {:else}
@@ -349,15 +354,23 @@
           <!-- COLAPSADO: resumen compacto, click para expandir -->
           <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0">
             <div class="read-compact-text">
-              <p class="prompt-preview">{s.prompt || "—"}</p>
+              {#if s.dialogue}
+                <p class="scene-preview italic">{s.dialogue.length > 95 ? s.dialogue.slice(0, 95) + "…" : s.dialogue}</p>
+              {:else if s.shots[0]?.voiceover}
+                <p class="scene-preview">{s.shots[0].voiceover.length > 95 ? s.shots[0].voiceover.slice(0, 95) + "…" : s.shots[0].voiceover}</p>
+              {:else if s.ambience}
+                <p class="scene-preview muted-text">{s.ambience.length > 95 ? s.ambience.slice(0, 95) + "…" : s.ambience}</p>
+              {:else}
+                <p class="scene-preview muted-text">Sin dialogo ni voz — editá para agregar</p>
+              {/if}
               <div class="shots-chips">
                 {#each s.shots as sh, j}
                   <span class="chip">
                     <span class="chip-n">P{j + 1}</span>
-                    <span class="chip-fr">{sh.framing || "—"}</span>
                     <span class="chip-dur">{sh.duration_s}s</span>
                     {#if sh.sfx}<span class="chip-sfx" title={sh.sfx}>♪</span>{/if}
                     {#if sh.voiceover}<span class="chip-vo" title={sh.voiceover}>vo</span>{/if}
+                    {#if sh.caption}<span class="chip-vo" title={sh.caption}>cc</span>{/if}
                   </span>
                 {/each}
               </div>
@@ -372,16 +385,10 @@
           </div>
 
         {:else}
-          <!-- EXPANDIDO: toda la información, organizada en L1 / L2 / L3 -->
+          <!-- EXPANDIDO: contenido narrativo (beat, dialogo, VO, ambience, planos) -->
           <div class="read-full">
 
-            <!-- L1 — Visual -->
-            <div class="rf-section">
-              <span class="rf-lbl">Visual</span>
-              <p class="rf-prompt">{s.prompt || "—"}</p>
-            </div>
-
-            <!-- L2 — Audio de escena -->
+            <!-- Dialogo de la escena -->
             {#if s.dialogue || s.ambience}
               <div class="rf-section rf-audio-grid">
                 {#if s.dialogue}
@@ -392,14 +399,14 @@
                 {/if}
                 {#if s.ambience}
                   <div class="rf-audio-col">
-                    <span class="rf-lbl">Ambience</span>
+                    <span class="rf-lbl">Ambience / lugar</span>
                     <p class="rf-ambience">{s.ambience}</p>
                   </div>
                 {/if}
               </div>
             {/if}
 
-            <!-- L3 — Planos -->
+            <!-- Planos: duracion + VO + caption + sfx (sin framing tecnico) -->
             <div class="rf-section">
               <span class="rf-lbl">Planos</span>
               <div class="rf-shots">
@@ -407,21 +414,22 @@
                   <div class="rf-shot">
                     <div class="rf-shot-h">
                       <span class="ptag">P{j + 1}</span>
-                      <span class="rf-framing">{sh.framing || "—"}</span>
                       <span class="rf-dur mono">{sh.duration_s}s</span>
                     </div>
                     {#if sh.sfx || sh.voiceover || sh.caption}
                       <div class="rf-cues">
-                        {#if sh.sfx}
-                          <span class="rf-cue sfx-cue"><span class="cue-tag">sfx</span>{sh.sfx}</span>
-                        {/if}
                         {#if sh.voiceover}
                           <span class="rf-cue vo-cue"><span class="cue-tag">vo</span>{sh.voiceover}</span>
                         {/if}
                         {#if sh.caption}
                           <span class="rf-cue cc-cue"><span class="cue-tag">cc</span>{sh.caption}</span>
                         {/if}
+                        {#if sh.sfx}
+                          <span class="rf-cue sfx-cue"><span class="cue-tag">sfx</span>{sh.sfx}</span>
+                        {/if}
                       </div>
+                    {:else}
+                      <p class="rf-noaudio muted">Sin VO ni caption</p>
                     {/if}
                   </div>
                 {/each}
@@ -624,13 +632,6 @@
   }
 
   /* Boton expand en cabecera */
-  .expand-tog {
-    width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
-    background: var(--paper); border: 1px solid var(--line-2); border-radius: var(--r-sm);
-    font-size: 12px; color: var(--ink-soft); box-shadow: none;
-  }
-  .expand-tog:hover { background: var(--card); color: var(--ink); }
-  .expand-tog.open { background: var(--blue-wash); color: var(--blue-deep); border-color: var(--blue); }
 
   /* --- MODO EDICIÓN --- */
   .sbody { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
@@ -711,6 +712,33 @@
   .ok-msg { color: var(--ok); font-weight: 600; font-size: 13px; }
   .error.inline { margin: 0; font-size: 13px; }
   .muted { color: var(--ink-soft); }
+
+  /* --- Modo lectura: contenido narrativo --- */
+  .scene-preview {
+    font-size: 13px; line-height: 1.65; color: var(--ink-2); margin: 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .scene-preview.italic { font-style: italic; border-left: 2px solid var(--line-2); padding-left: 8px; }
+  .scene-preview.muted-text { color: var(--ink-soft); }
+  .rf-noaudio { font-size: 12px; margin: 0; }
+
+  /* --- Panel "Para la IA" (colapsable en modo edicion) --- */
+  .ia-section {
+    border-top: 1px dashed var(--line); margin-top: 6px;
+  }
+  .ia-toggle {
+    cursor: pointer; list-style: none; padding: 9px 2px;
+    font-size: 11px; font-weight: 700; color: var(--ink-soft);
+    text-transform: uppercase; letter-spacing: 0.10em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ia-toggle::-webkit-details-marker { display: none; }
+  .ia-toggle::before { content: "▶"; font-size: 9px; transition: transform 0.15s; }
+  details[open] > .ia-toggle::before { transform: rotate(90deg); }
+  .ia-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
+  .ia-body { padding: 8px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+  .ia-prompt { border-color: var(--line); background: var(--paper); }
+  .small-lbl { font-size: 10px; }
 
   /* --- Musica de fondo --- */
   .music-card { display: flex; flex-direction: column; gap: 10px; }

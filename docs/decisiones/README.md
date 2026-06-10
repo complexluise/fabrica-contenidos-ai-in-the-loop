@@ -71,3 +71,6 @@ es continua entre archivos.
 |---|---|---|
 | D-041 | Ojos semánticos: `pipeline describe` (Haiku ve y evalúa cada plano) | Vigente |
 | D-042 | Edición autónoma mixta: movis (CLI) + mcp-video (MCP), sin EDL | Vigente |
+| D-043 | Selección explícita de proveedor: `proto_veo` como perfil propio (no fallback) | Vigente |
+| D-044 | Metadata `_meta` en perfiles + `/api/profiles` endpoint (UI dinámica) | Vigente |
+| D-045 | Storyboard centrado en la historia (humano): prompts se desplazan a Elegir | Vigente |

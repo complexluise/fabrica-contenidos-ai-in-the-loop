@@ -1,5 +1,5 @@
 <script>
-  import { get, post, runJob, humanError, bufToBase64 } from "../lib/api.js";
+  import { get, post, put, runJob, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
@@ -12,6 +12,13 @@
   let saved = $state(false);
   let n     = $state(2);
 
+  // Prompts para la IA (cargados del spec, editables antes de generar)
+  let projectSpec = $state(null);
+  let promptEdits = $state({}); // { sceneId: { prompt, framings: [] } }
+  let promptsOpen = $state({}); // { sceneId: bool }
+  let promptsSaved = $state({}); // { sceneId: bool }
+  let promptsErr  = $state({}); // { sceneId: string }
+
   // Estado por escena para generación individual
   let sceneTweak  = $state({}); // { sceneId: "texto del ajuste" }
   let sceneErr    = $state({}); // { sceneId: "mensaje de error" }
@@ -20,7 +27,23 @@
 
   async function load() {
     try {
-      cand = await get(`/api/projects/${slug}/candidates`);
+      const [c, spec] = await Promise.all([
+        get(`/api/projects/${slug}/candidates`),
+        get(`/api/projects/${slug}`),
+      ]);
+      cand = c;
+      projectSpec = spec;
+      // Inicializar promptEdits solo si no hay ediciones en curso
+      if (!Object.keys(promptEdits).length) {
+        const edits = {};
+        for (const s of (spec.scenes || [])) {
+          edits[s.id] = {
+            prompt: s.prompt || "",
+            framings: (s.shots || []).map(sh => sh.framing || ""),
+          };
+        }
+        promptEdits = edits;
+      }
       // Pre-poblar kfPicks y castPicks desde las selecciones ya persistidas.
       // Tanto selections como cast_selections guardan rutas relativas;
       // buscamos el indice por nombre de archivo en el array de URLs.
@@ -49,6 +72,8 @@
     if (slug) {
       kfPicks = {}; castPicks = {}; progress = ""; err = ""; saved = false;
       sceneTweak = {}; sceneErr = {};
+      promptEdits = {}; promptsOpen = {}; promptsSaved = {}; promptsErr = {};
+      projectSpec = null;
       load();
     }
   });
@@ -112,6 +137,41 @@
     } finally {
       busy = "";
       fileInput.value = "";
+    }
+  }
+
+  async function savePrompts(sceneId) {
+    if (!projectSpec) return;
+    promptsErr = { ...promptsErr, [sceneId]: "" };
+    try {
+      const body = {
+        sign: false,
+        title: projectSpec.title || "",
+        brief: projectSpec.brief || "",
+        scenes: (projectSpec.scenes || []).map(s => {
+          const edits = promptEdits[s.id];
+          return {
+            id: s.id,
+            beat: s.beat || null,
+            prompt: (s.id === sceneId ? edits?.prompt : s.prompt) ?? s.prompt,
+            dialogue: s.dialogue || null,
+            ambience: s.ambience || null,
+            shots: (s.shots || []).map((sh, j) => ({
+              framing: (s.id === sceneId ? edits?.framings?.[j] : sh.framing) ?? sh.framing ?? "",
+              duration_s: Number(sh.duration_s) || 1,
+              voiceover: sh.voiceover || null,
+              caption: sh.caption || null,
+              sfx: sh.sfx || null,
+            })),
+          };
+        }),
+      };
+      await put(`/api/projects/${slug}`, body);
+      projectSpec = await get(`/api/projects/${slug}`);
+      promptsSaved = { ...promptsSaved, [sceneId]: true };
+      await refreshStatus();
+    } catch (e) {
+      promptsErr = { ...promptsErr, [sceneId]: humanError(e) };
     }
   }
 
@@ -218,6 +278,32 @@
           <b class="scene-id">{sceneId}</b>
           {#if kfPicks[sceneId] != null}<span class="badge red">elegido · {kfPicks[sceneId]}</span>{/if}
         </div>
+
+        <!-- Prompts para la IA (colapsable, editable antes de generar) -->
+        {#if promptEdits[sceneId]}
+          <details class="prompts-panel" bind:open={promptsOpen[sceneId]}>
+            <summary class="prompts-tog">Para la IA — prompt visual <span class="tog-hint">(revisa antes de generar)</span></summary>
+            <div class="prompts-body">
+              <span class="prompt-lbl">Descripcion visual de la escena</span>
+              <textarea class="prompt-ta" rows="3" bind:value={promptEdits[sceneId].prompt}
+                        placeholder="setting + personajes + accion fisica" disabled={anyBusy}></textarea>
+              {#each (promptEdits[sceneId].framings ?? []) as _f, j}
+                <div class="shot-prompt-row">
+                  <span class="ptag-sm">P{j + 1}</span>
+                  <input class="frame-in" bind:value={promptEdits[sceneId].framings[j]}
+                         placeholder="encuadre del plano {j + 1}" disabled={anyBusy} />
+                </div>
+              {/each}
+              <div class="prompts-foot">
+                {#if promptsErr[sceneId]}<span class="sm-err">{promptsErr[sceneId]}</span>{/if}
+                {#if promptsSaved[sceneId]}<span class="saved-ok">✓ guardado</span>{/if}
+                <button class="small ghost" onclick={() => savePrompts(sceneId)} disabled={anyBusy}>
+                  Guardar prompts
+                </button>
+              </div>
+            </div>
+          </details>
+        {/if}
 
         <!-- Controles por escena -->
         <div class="scene-ctrl">
@@ -353,6 +439,41 @@
     letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 30px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   }
+
+  /* Panel "Para la IA" (prompts colapsables por escena) */
+  .prompts-panel {
+    margin-bottom: 8px; border: 1px dashed var(--line-2);
+    border-radius: var(--r-sm); background: var(--paper-2);
+  }
+  .prompts-tog {
+    cursor: pointer; list-style: none; padding: 8px 12px;
+    font-size: 11px; font-weight: 700; color: var(--ink-soft);
+    text-transform: uppercase; letter-spacing: 0.10em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .prompts-tog::-webkit-details-marker { display: none; }
+  .prompts-tog::before { content: "▶"; font-size: 9px; transition: transform 0.15s; }
+  details[open] > .prompts-tog::before { transform: rotate(90deg); }
+  .tog-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
+  .prompts-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .prompt-lbl { font-size: 10px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.08em; }
+  .prompt-ta {
+    width: 100%; resize: vertical; font-size: 13px; line-height: 1.55;
+    background: var(--card); border-color: var(--line); border-radius: var(--r-sm);
+    padding: 6px 9px; font-family: var(--font-sans); color: var(--ink-2);
+  }
+  .shot-prompt-row { display: flex; align-items: center; gap: 8px; }
+  .ptag-sm {
+    background: var(--blue); color: #fff; border-radius: var(--r-sm);
+    padding: 1px 7px; font-size: 10px; font-weight: 700; flex-shrink: 0; letter-spacing: 0.04em;
+  }
+  .frame-in {
+    flex: 1; font-size: 12.5px; padding: 4px 8px;
+    background: var(--card); border-color: var(--line); border-radius: var(--r-sm);
+    color: var(--ink-2);
+  }
+  .prompts-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .saved-ok { color: var(--ok); font-size: 12px; font-weight: 600; }
 
   .empty { padding: 30px; text-align: center; margin-top: 16px; }
   .empty p { margin: 4px 0; }
