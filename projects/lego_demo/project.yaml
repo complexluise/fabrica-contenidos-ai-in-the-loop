@@ -4,7 +4,24 @@ style: lego
 format: '9:16'
 scenes:
 - id: s1
-  prompt: Plano general de una ciudad LEGO al amanecer, calles vacias
+  prompt: wide shot of a LEGO city at dawn, empty streets
   duration_s: 5
+  beat: apertura
+  class: volume
+  ambience: quiet dawn city ambience, distant birds
+  visual_intensity: 2
   shots:
-  - duration_s: 5
+  - intention: establecer el mundo en calma, antes del relato
+    action: empty LEGO streets at dawn, long shadows, soft golden light
+    duration_s: 5
+    camera:
+      size: LS
+      move: push_in
+    visual:
+      tone: high_key
+      focal_point: the empty main avenue
+      palette:
+      - amber
+      - cream
+    transition: cut
+    voiceover: Una ciudad que despierta.
