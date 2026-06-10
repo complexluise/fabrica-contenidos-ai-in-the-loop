@@ -101,12 +101,12 @@ def load_casting(project: Project) -> dict[str, str]:
 
 
 async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
-               open_sheet: bool = True) -> Path:
+               open_sheet: bool = True, backend: str | None = None) -> Path:
     """Genera N caras candidatas por personaje con `design` (multi-imagen + prompt)."""
     designed = {name: ch for name, ch in spec.characters.items() if ch.design}
     if not designed:
         raise RuntimeError("Ningún personaje tiene 'design:' en project.yaml.")
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
     groups: dict[str, list[Path]] = {}
     manifest: dict[str, list[str]] = {}
 
@@ -192,13 +192,14 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
 
 
 async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int,
-                        open_sheet: bool = True, concurrency: int = 5) -> Path:
+                        open_sheet: bool = True, concurrency: int = 5,
+                        backend: str | None = None) -> Path:
     """Genera N candidatos de keyframe por escena en paralelo (semaforo=concurrency).
 
     Todas las (escena x candidato) se lanzan a la vez limitadas por el semaforo.
     fal.ai flux-lora soporta ~10 requests simultaneos en plan Pro; 5 es seguro.
     """
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
     sem = asyncio.Semaphore(concurrency)
 
     # Pre-computa metadatos por escena (sincrono, sin I/O)
@@ -272,6 +273,7 @@ async def gen_keyframes_scene(
     project: Project, spec: ProjectSpec, cfg: Config,
     scene_id: str, n: int,
     prompt_tweak: str = "",
+    backend: str | None = None,
 ) -> None:
     """Genera N keyframes para UNA escena y hace MERGE en candidates.yaml existente.
 
@@ -283,7 +285,7 @@ async def gen_keyframes_scene(
     if scene is None:
         raise ValueError(f"Escena '{scene_id}' no encontrada en el proyecto.")
 
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
     refs = character_refs(scene, spec.characters)
     scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)
@@ -331,7 +333,8 @@ async def gen_keyframes_scene(
 
 
 async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Config,
-                                 scene_id: str, force: bool = False) -> list[str]:
+                                 scene_id: str, force: bool = False,
+                                 backend: str | None = None) -> list[str]:
     """D-048/A4: genera (ENCADENADOS) los keyframes de los planos 2+ de una escena,
     partiendo del ANCLA ya elegida, para que el humano VEA la coherencia antes de
     renderizar. No se eligen (el ancla manda); es una previsualizacion read-only.
@@ -349,7 +352,7 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
         raise RuntimeError(f"Primero elegí el encuadre ancla de '{scene_id}'.")
     anchor = _resolve_under(project.dir, anchor_rel)
 
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch")
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
     refs = character_refs(scene, spec.characters)
     scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)

@@ -26,7 +26,8 @@ def test_load_config_real_files_typed():
 def test_providers_capabilities_are_sets():
     provs = load_providers(CONFIG_DIR / "providers.yaml")
     assert isinstance(provs["veo"].capabilities, set)
-    assert "audio" in provs["veo"].capabilities
+    # veo-2.0-generate-001 (D-043) es i2v; el audio nativo es de Veo 3, no de este modelo.
+    assert "i2v" in provs["veo"].capabilities
 
 
 def test_audio_block_loaded_from_config(tmp_path):

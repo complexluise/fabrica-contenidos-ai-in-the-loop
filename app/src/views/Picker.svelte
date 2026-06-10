@@ -27,6 +27,12 @@
   let shotsBusy   = $state({}); // { sceneId: bool } generando planos encadenados (A4)
 
   let hasFal = $derived(!!studio.status?.keys?.fal_key);
+  let hasGoogle = $derived(!!studio.status?.keys?.google_api_key);
+
+  // D-051: backend de imagen del keyframe (toggle fal/Google, independiente del perfil de video).
+  let genBackend = $state("fal");
+  // Generar requiere la clave del backend elegido.
+  let canGen = $derived(genBackend === "google" ? hasGoogle : hasFal);
 
   // Foco de generación (C3): el casting va ANTES que los encuadres.
   let castNeeded = $derived(studio.status?.casting?.needed ?? 0);
@@ -97,7 +103,7 @@
   function generate(kind) {
     busy = kind; err = ""; saved = false;
     progress = "Pidiendole opciones a la IA...";
-    runJob(`/api/projects/${slug}/${kind}?n=${n}`, {
+    runJob(`/api/projects/${slug}/${kind}?n=${n}&backend=${genBackend}`, {
       onLine: (l) => (progress = l),
       onDone: async (status) => {
         busy = "";
@@ -116,7 +122,7 @@
     sceneErr = { ...sceneErr, [sceneId]: "" };
     const tweak = (sceneTweak[sceneId] || "").trim();
     const body = tweak ? { prompt_tweak: tweak } : {};
-    runJob(`/api/projects/${slug}/keyframes/${sceneId}?n=1`,
+    runJob(`/api/projects/${slug}/keyframes/${sceneId}?n=1&backend=${genBackend}`,
       {
         body,
         onLine: (l) => (progress = l),
@@ -221,7 +227,7 @@
     shotsBusy = { ...shotsBusy, [sceneId]: true };
     err = "";
     runJob(`/api/projects/${slug}/shots/${sceneId}`, {
-      body: force ? { force: true } : {},
+      body: { backend: genBackend, ...(force ? { force: true } : {}) },
       onDone: async (status) => {
         shotsBusy = { ...shotsBusy, [sceneId]: false };
         if (status !== "done") err = `Planos: terminó como ${status}.`;
@@ -229,6 +235,46 @@
       },
       onError: (e) => { shotsBusy = { ...shotsBusy, [sceneId]: false }; err = humanError(e); },
     });
+  }
+
+  // --- Acciones MASIVAS (sobre todas las escenas) ---
+  let bulkBusy = $state("");   // "prompts" | "shots" | ""
+  let bulkMsg  = $state("");
+
+  // Compila TODOS los prompts desactualizados de una (D-046). force=true recompila todo.
+  async function compileAllPrompts(force = false) {
+    bulkBusy = "prompts"; bulkMsg = ""; err = "";
+    try {
+      const r = await post(`/api/projects/${slug}/prompts/compile`, force ? { force: true } : {});
+      const nC = (r.compiled || []).length;
+      bulkMsg = nC ? `Compilados ${nC} prompt(s).` : "Todo en sintonía.";
+      await load();
+    } catch (e) {
+      err = humanError(e);
+    } finally {
+      bulkBusy = "";
+    }
+  }
+
+  // Genera los planos encadenados de TODAS las escenas con ancla elegida (A4).
+  async function genAllShots() {
+    const ids = entries(cand.keyframes).map(([id]) => id).filter(id => cand.selections?.[id]);
+    if (!ids.length) { err = "Primero elegí y guardá el encuadre ancla de las escenas."; return; }
+    bulkBusy = "shots"; bulkMsg = ""; err = "";
+    for (const id of ids) {
+      bulkMsg = `Generando planos de ${id}…`;
+      try {
+        await new Promise((res, rej) => {
+          shotsBusy = { ...shotsBusy, [id]: true };
+          runJob(`/api/projects/${slug}/shots/${id}`, {
+            body: { backend: genBackend },
+            onDone: (s) => { shotsBusy = { ...shotsBusy, [id]: false }; s === "done" ? res() : rej(new Error(`${id}: ${s}`)); },
+            onError: (e) => { shotsBusy = { ...shotsBusy, [id]: false }; rej(e); },
+          });
+        });
+      } catch (e) { err = humanError(e); break; }
+    }
+    bulkBusy = ""; bulkMsg = err ? "" : "Planos generados."; await load();
   }
 
   async function savePicks() {
@@ -275,12 +321,20 @@
     </p>
   </div>
   <div class="gen-controls">
+    <div class="backend-toggle" title="Motor de imagen para los keyframes (D-051)">
+      <span class="bt-lbl">motor</span>
+      <button class="bt-opt" class:active={genBackend === "fal"} disabled={!!busy}
+              onclick={() => (genBackend = "fal")}>fal</button>
+      <button class="bt-opt" class:active={genBackend === "google"} disabled={!!busy || !hasGoogle}
+              onclick={() => (genBackend = "google")}
+              title={hasGoogle ? "Gemini 2.5 Flash Image (sin fal)" : "Falta GOOGLE_API_KEY"}>Google</button>
+    </div>
     <label class="n-lbl">opciones
       <input type="number" min="1" max="8" bind:value={n} />
     </label>
     {#if needsCast && !castReady}
       <!-- Foco: primero el casting; encuadres bloqueado hasta fijar la cara -->
-      <button class="machine cta" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+      <button class="machine cta" onclick={() => generate("cast")} disabled={!!busy || !canGen}>
         {busy === "cast" ? "Generando…" : "1 · Generar casting"}
       </button>
       <button class="machine" disabled title="Primero fijá la cara del personaje (casting)">
@@ -288,21 +342,39 @@
       </button>
     {:else}
       {#if needsCast}
-        <button class="ghost small" onclick={() => generate("cast")} disabled={!!busy || !hasFal}>
+        <button class="ghost small" onclick={() => generate("cast")} disabled={!!busy || !canGen}>
           {busy === "cast" ? "Generando…" : "Regenerar casting"}
         </button>
       {/if}
-      <button class="machine cta" onclick={() => generate("keyframes")} disabled={!!busy || !hasFal}>
+      <button class="machine cta" onclick={() => generate("keyframes")} disabled={!!busy || !canGen}>
         {busy === "keyframes" ? "Generando…" : "Generar encuadres"}
       </button>
     {/if}
   </div>
 </div>
 
-{#if !hasFal}
-  <p class="note">🔒 Para generar necesitás tu clave de fal.ai.
+{#if !canGen}
+  <p class="note">🔒 Para generar con <b>{genBackend === "google" ? "Google" : "fal"}</b> necesitás tu clave de
+    {genBackend === "google" ? "Google (GOOGLE_API_KEY)" : "fal.ai"}.
     <button class="small ghost" onclick={() => goTo("ajustes")}>Configurarla</button></p>
 {/if}
+
+<!-- Acciones masivas (D-046/D-048): sobre todas las escenas de una -->
+<div class="bulk-bar">
+  <span class="bulk-lbl">En lote:</span>
+  <button class="small ghost" onclick={() => compileAllPrompts(false)}
+          disabled={!!bulkBusy}>
+    {bulkBusy === "prompts" ? "Compilando…" : "↻ Compilar prompts desactualizados"}
+  </button>
+  <button class="small ghost" onclick={() => compileAllPrompts(true)} disabled={!!bulkBusy}
+          title="Recompila TODOS desde la narrativa (pisa lo manual)">Recompilar todos</button>
+  <button class="small ghost" onclick={genAllShots} disabled={!!bulkBusy || !canGen}
+          title="Genera los planos encadenados de todas las escenas con ancla elegida">
+    {bulkBusy === "shots" ? "Generando…" : "Generar todos los planos"}
+  </button>
+  {#if bulkMsg}<span class="bulk-msg">{bulkMsg}</span>{/if}
+</div>
+
 {#if busy === "keyframes" || busy === "cast"}
   <div class="progress mono"><span class="spin"></span>{progress}</div>
 {/if}
@@ -492,6 +564,22 @@
   .gen-controls { display: flex; align-items: center; gap: 9px; }
   .n-lbl { display: flex; flex-direction: column; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); gap: 3px; }
   .n-lbl input { width: 64px; font-family: var(--font-mono); }
+
+  /* Toggle de backend de imagen (D-051) */
+  .backend-toggle { display: inline-flex; align-items: center; gap: 0; border: 1.5px solid var(--line-2); border-radius: 999px; overflow: hidden; }
+  .bt-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); padding: 0 8px 0 11px; }
+  .bt-opt { border: none; border-radius: 0; box-shadow: none; background: var(--paper); padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+  .bt-opt.active { background: var(--blue); color: #fff; }
+  .bt-opt:disabled { opacity: 0.4; }
+
+  /* Barra de acciones masivas (D-046/D-048) */
+  .bulk-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 9px 12px; margin-bottom: 14px;
+    background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r-sm);
+  }
+  .bulk-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
+  .bulk-msg { font-size: 12.5px; color: var(--ok); font-weight: 600; }
 
   .note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
   .progress { display: flex; align-items: center; gap: 10px; background: var(--blue-wash); border: 1px solid #b9c2ee; color: var(--blue-deep); border-radius: var(--r); padding: 10px 14px; font-size: 13px; }

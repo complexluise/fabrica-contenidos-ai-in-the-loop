@@ -4,13 +4,14 @@
   import { goTo, refreshStatus, nextStep, studio } from "../lib/studio.svelte.js";
 
   let status = $state({});
-  let vals = $state({ fal_key: "", anthropic_api_key: "", elevenlabs_api_key: "" });
+  let vals = $state({ fal_key: "", anthropic_api_key: "", elevenlabs_api_key: "", google_api_key: "" });
   let msg = $state("");
   let err = $state("");
 
   // [clave, label, requerida?, ayuda]
   const fields = [
     ["fal_key", "FAL_KEY", true, "El motor de imágenes y video (fal.ai). Sin esto no se genera nada."],
+    ["google_api_key", "GOOGLE_API_KEY", false, "Opcional: camino Google sin fal — Veo (video) y Gemini (keyframes)."],
     ["anthropic_api_key", "ANTHROPIC_API_KEY", false, "Recomendada: clasifica escenas, evalúa candidatos y nombra archivos."],
     ["elevenlabs_api_key", "ELEVENLABS_API_KEY", false, "Opcional: voz en off."],
   ];
@@ -25,7 +26,7 @@
     for (const k in vals) if (vals[k]) body[k] = vals[k];
     try {
       status = await put("/api/settings", body);
-      vals = { fal_key: "", anthropic_api_key: "", elevenlabs_api_key: "" };
+      vals = { fal_key: "", anthropic_api_key: "", elevenlabs_api_key: "", google_api_key: "" };
       msg = "Guardado en tu .env local.";
       await refreshStatus();
     } catch (e) {

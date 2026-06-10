@@ -678,6 +678,25 @@ foco por pantalla. Ver [D-048], [D-049].
 
 ---
 
+## Sprint 6.18 — Keyframe por Google + acciones masivas (D-051)
+
+**Objetivo:** que el keyframe también se pueda generar por Google (Gemini 2.5 Flash Image), para un
+camino completo sin fal; y botones para operar en lote (compilar prompts, generar planos). Ver [D-051].
+
+### Acceptance Criteria
+- [x] AC1 — `KeyframeGenerator` soporta `backend=google` (genera y edita/encadena vía google-genai).
+- [x] AC2 — Toggle fal/Google en Elegir, gateado por `GOOGLE_API_KEY`, pasado por endpoints → studio.
+- [x] AC3 — Acciones masivas: "Compilar prompts desactualizados / Recompilar todos" y "Generar todos los planos".
+- [x] AC4 — `GOOGLE_API_KEY` expuesta en `/api/settings` + campo en Ajustes; test de veo alineado a `i2v`.
+
+### Tasks
+- [x] T6.18.1 — `keyframe.py` backend Google (`_submit_google`, `_extract_image_bytes`).
+- [x] T6.18.2 — Thread `backend` por studio + 4 endpoints; `google_api_key` en `_KEYS`.
+- [x] T6.18.3 — UI: toggle + barra de acciones masivas (Picker), campo Google (Ajustes).
+- [x] T6.18.4 — ADR D-051; fix test veo; build limpio.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

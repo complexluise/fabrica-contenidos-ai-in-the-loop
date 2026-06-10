@@ -20,7 +20,7 @@ from ..settings import get_settings
 from .jobs import JobManager
 
 _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
-         "elevenlabs_api_key": "ELEVENLABS_API_KEY"}
+         "elevenlabs_api_key": "ELEVENLABS_API_KEY", "google_api_key": "GOOGLE_API_KEY"}
 
 # Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
 # requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
@@ -327,9 +327,11 @@ def create_app(projects_dir: Path = Path("projects"),
         if not any(s.id == scene_id for s in spec.scenes):
             raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
         force = bool(body.get("force"))
+        backend = (body.get("backend") or None)  # D-051: fal | google (toggle de Elegir)
 
         async def coro():
-            paths = await studio.preview_shot_keyframes(project, spec, cfg, scene_id, force=force)
+            paths = await studio.preview_shot_keyframes(project, spec, cfg, scene_id,
+                                                        force=force, backend=backend)
             return {"scene": scene_id, "shots": len(paths)}
 
         return jobs.spawn("shots", f"{slug}/{scene_id}", coro()).to_dict()
@@ -377,20 +379,22 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- jobs de generación ----------------------------------------------
     @app.post("/api/projects/{slug}/keyframes")
-    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5):
+    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5,
+                            backend: str | None = None):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.gen_keyframes(project, spec, cfg, n,
-                                               open_sheet=False, concurrency=concurrency)
+            sheet = await studio.gen_keyframes(project, spec, cfg, n, open_sheet=False,
+                                               concurrency=concurrency, backend=backend)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("keyframes", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/keyframes/{scene_id}")
-    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2, body: dict = {}):
+    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2,
+                                  backend: str | None = None, body: dict = {}):
         """Genera N keyframes para UNA escena con prompt_tweak opcional."""
         from .. import studio
 
@@ -400,7 +404,8 @@ def create_app(projects_dir: Path = Path("projects"),
         tweak = (body.get("prompt_tweak") or "").strip()
 
         async def coro():
-            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n, prompt_tweak=tweak)
+            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n,
+                                             prompt_tweak=tweak, backend=backend)
             return {"scene": scene_id, "n": n}
 
         return jobs.spawn("keyframes", f"{slug}/{scene_id}", coro()).to_dict()
@@ -488,13 +493,13 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("music", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/cast")
-    async def gen_cast(slug: str, n: int = 4):
+    async def gen_cast(slug: str, n: int = 4, backend: str | None = None):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.cast(project, spec, cfg, n, open_sheet=False)
+            sheet = await studio.cast(project, spec, cfg, n, open_sheet=False, backend=backend)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("cast", slug, coro()).to_dict()

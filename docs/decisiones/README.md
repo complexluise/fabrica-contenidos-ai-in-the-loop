@@ -74,3 +74,13 @@ es continua entre archivos.
 | D-043 | Selección explícita de proveedor: `proto_veo` como perfil propio (no fallback) | Vigente |
 | D-044 | Metadata `_meta` en perfiles + `/api/profiles` endpoint (UI dinámica) | Vigente |
 | D-045 | Storyboard centrado en la historia (humano): prompts se desplazan a Elegir | Vigente |
+| D-046 | Prompt derivado de la narrativa (compilable + sincronizable) | Vigente |
+| D-047 | El plano como artefacto audiovisual: gramática de cámara + estructura de Block | Vigente |
+| D-048 | Coherencia de planos (keyframe ≠ video, encadenado) + flujo guiado por foco | Vigente |
+| D-049 | Casting como artefacto de personaje | Vigente |
+| D-050 | Convención de idioma: usuario en español, IA en inglés | Vigente |
+
+### [0051-0060.md](0051-0060.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-051 | Backend de keyframe por Google (Gemini) + toggle fal/Google + acciones masivas | Vigente |
