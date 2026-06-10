@@ -71,6 +71,50 @@ def test_draft_to_spec_carries_fields():
     assert len(spec.scenes) == 1
 
 
+# --- D-047: artefacto audiovisual enriquecido ------------------------------
+
+_ARTIFACT = """{
+  "title": "Pozo", "scenes": [{
+    "id": "s1", "prompt": "telescopio de acero", "visual_intensity": 4,
+    "shots": [{
+      "intention": "revelar la estructura", "action": "manos deslizan tres tubos",
+      "duration_s": 3,
+      "camera": {"size": "LS", "angle": "overhead", "move": "push_in", "focus": "deep"},
+      "visual": {"tone": "neutral", "palette": ["plata", "crema"], "focal_point": "el centro",
+                 "graphics": "ACERO + CEMENTO = el sello"},
+      "transition": "match_cut", "voiceover": "Un pozo no es un tubo."
+    }]
+  }]
+}"""
+
+
+def test_parse_draft_enriched_shot_artifact():
+    s = parse_draft(_ARTIFACT).scenes[0]
+    assert s.visual_intensity == 4
+    sh = s.shots[0]
+    assert sh.intention == "revelar la estructura"
+    assert sh.action == "manos deslizan tres tubos"
+    assert sh.camera.size == "LS" and sh.camera.angle == "overhead" and sh.camera.move == "push_in"
+    assert sh.visual.tone == "neutral" and sh.visual.palette == ["plata", "crema"]
+    assert sh.transition == "match_cut"
+
+
+def test_parse_draft_drops_invalid_camera_enum_without_crashing():
+    raw = ('{"title": "X", "scenes": [{"id": "s1", "prompt": "a", "duration_s": 3, '
+           '"shots": [{"action": "algo", "duration_s": 3, '
+           '"camera": {"size": "wide-ish", "angle": "overhead"}, "transition": "fancy"}]}]}')
+    sh = parse_draft(raw).scenes[0].shots[0]
+    assert sh.camera.size == "MS"  # 'wide-ish' invalido -> default
+    assert sh.camera.angle == "overhead"  # valido se conserva
+    assert sh.transition is None  # 'fancy' invalido -> descartado
+
+
+def test_parse_draft_clamps_visual_intensity():
+    raw = ('{"title": "X", "scenes": [{"id": "s1", "prompt": "a", "duration_s": 3, '
+           '"visual_intensity": 9, "shots": [{"action": "x", "duration_s": 3}]}]}')
+    assert parse_draft(raw).scenes[0].visual_intensity == 5
+
+
 # --- ingest.extract_text ---------------------------------------------------
 
 def test_extract_text_reads_md(tmp_path):

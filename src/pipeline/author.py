@@ -12,10 +12,19 @@ es I/O (Claude, smoke). El borrador se materializa con `project.write_spec`.
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 from pydantic import BaseModel, Field
 
-from .contracts import Scene
+from .contracts import (
+    CameraAngle,
+    CameraMove,
+    FocusDepth,
+    Scene,
+    ShotSize,
+    ToneKey,
+    Transition,
+)
 from .project import Character, CharacterDesign
 from .settings import get_settings
 
@@ -33,7 +42,11 @@ hay diálogo escrito; si hay acción, hay SFX pensados; si hay momentos clave, e
 como `hero`; cada escena tiene su espacio sonoro (ambience) porque el sonido construye el
 lugar tanto como la imagen.
 
-Pensás en arcos emocionales, no en listas de hechos. Cada beat tiene una función narrativa.\
+Pensás en arcos emocionales, no en listas de hechos. Cada beat tiene una función narrativa.
+
+Como director de fotografía, cada plano lo definís con gramática real: tamaño de plano, ángulo,
+movimiento y foco (shot-list), y estructura visual (tono, color, profundidad, punto focal — Bruce
+Block), para construir contraste e intensidad a lo largo del video. No describís planos genéricos.\
 """
 
 _DRAFT_PROMPT = """\
@@ -60,17 +73,34 @@ Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
       "dialogue": "líneas literales de diálogo como en un guion: 'Personaje: frase exacta.' — null si la escena es sin diálogo",
       "ambience": "el espacio sonoro del lugar: room tone + sonidos pasivos del entorno. Siempre presente. Ej: 'tráfico lejano y lluvia sobre asfalto', 'silencio de biblioteca con páginas pasando y aire acondicionado'",
       "characters": ["NombrePersonaje"],
+      "visual_intensity": 3,
       "requirements": {{
         "needs_audio": false,
         "needs_lipsync": false
       }},
       "shots": [
         {{
-          "framing": "tipo de plano + movimiento de cámara + acción específica. Ej: 'PG con paneo lento de izquierda a derecha sobre la ciudad al amanecer', 'PP de manos abriendo el sobre, cámara fija'",
+          "intention": "la FUNCIÓN dramática del plano: qué hace entender o sentir. Ej: 'revelar que el pozo no es un tubo simple'",
+          "action": "qué SE VE y qué pasa: sujeto + acción física + qué entra/sale del cuadro. Lo que la cámara capta. Sin diálogo.",
           "duration_s": 3,
+          "camera": {{
+            "size": "ECU|CU|MCU|MS|MLS|LS|ELS|insert",
+            "angle": "eye|high|low|overhead|worm|dutch|ots",
+            "move": "static|pan|tilt|push_in|pull_out|track|crane|handheld|zoom",
+            "focus": "deep|shallow|rack"
+          }},
+          "visual": {{
+            "tone": "high_key|low_key|neutral|silhouette",
+            "palette": ["2-3 colores dominantes"],
+            "foreground": "qué hay en primer plano, o null",
+            "background": "qué hay en el fondo, o null",
+            "focal_point": "dónde va el ojo del espectador",
+            "graphics": "texto en pantalla / lower-third / tipografía cinética, o null"
+          }},
+          "transition": "cut|match_cut|dissolve|smash_cut|wipe",
           "voiceover": "texto para voz en off narrativa. null si no hay narrador en este plano.",
           "caption": "texto en pantalla / lower-third / subtítulo. null si no corresponde.",
-          "sfx": "el sonido concreto de la ACCIÓN de este plano. Ej: 'clic de cerradura y puerta crujiendo', 'teclas de laptop y pitido de notificación'. null si no aporta narrativamente."
+          "sfx": "el sonido concreto de la ACCIÓN de este plano. Ej: 'clic de cerradura'. null si no aporta."
         }}
       ]
     }}
@@ -106,10 +136,23 @@ Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
 • Un plano de paisaje estático sin acción específica: null.
 • No repitas el ambience acá.
 
-**`shots`** — la gramática visual:
-• Vocabulario: PG (plano general), PM (plano medio), PP (primer plano), PD (plano detalle), PE (plano entero).
-• Movimientos: paneo, travelling, zoom in/out, cámara fija, handheld (cámara al hombro), drone.
-• Cada plano tiene una razón dramática: no listés planos por listar.
+**`shots`** — cada plano es un ARTEFACTO audiovisual (pensá como director de fotografía):
+• `intention`: la función dramática. Cada plano existe por una razón o no debería estar.
+• `action`: qué SE VE y qué pasa físicamente. Es el visual primario (reemplaza al viejo "framing").
+• `camera`: la gramática del shot-list. Elegí SOLO de estos valores controlados:
+  - size: ECU (primerísimo) · CU (primer plano) · MCU · MS (medio) · MLS · LS (general) · ELS · insert (detalle).
+  - angle: eye (normal) · high (picado) · low (contrapicado) · overhead (cenital) · worm · dutch (holandés) · ots (sobre el hombro).
+  - move: static (fija) · pan (paneo) · tilt · push_in · pull_out · track (travelling) · crane · handheld · zoom.
+  - focus: deep (foco profundo) · shallow (poca prof. de campo) · rack (foco que viaja).
+• `visual` (estructura de Bruce Block — construí contraste ENTRE cortes):
+  - tone: high_key · low_key · neutral · silhouette. palette: 2-3 colores dominantes.
+  - foreground/background: planos de profundidad. focal_point: dónde va el ojo. graphics: texto en pantalla.
+• `transition`: cut · match_cut · dissolve · smash_cut · wipe. Cómo entra al plano siguiente.
+• Alterná tamaños de plano entre cortes (un detalle pega más después de un general).
+
+**`visual_intensity`** — la curva visual del video (1-5):
+• Es el arco de intensidad/contraste. Las escenas `hero`/clímax van alto (4-5); aperturas y respiros bajo (1-2).
+• Construí tensión hacia el clímax; no dejes todo el video en la misma intensidad (Bruce Block).
 
 **`voiceover`** — narración:
 • Solo cuando el video tiene un narrador explícito (documental, publicitario con voz en off).
@@ -156,17 +199,83 @@ class ProjectDraft(BaseModel):
         )
 
 
+_CAM_ENUMS = {
+    "size": set(get_args(ShotSize)), "angle": set(get_args(CameraAngle)),
+    "move": set(get_args(CameraMove)), "focus": set(get_args(FocusDepth)),
+}
+_TONES = set(get_args(ToneKey))
+_TRANSITIONS = set(get_args(Transition))
+
+
+def _coerce_camera(raw) -> dict | None:
+    """Mantiene solo los enums VÁLIDOS de camera (D-047); descarta valores inventados
+    por el LLM para que la validación nunca reviente el borrador entero."""
+    if not isinstance(raw, dict):
+        return None
+    out = {k: raw[k] for k, allowed in _CAM_ENUMS.items()
+           if isinstance(raw.get(k), str) and raw[k] in allowed}
+    if isinstance(raw.get("lens_mm"), (int, float)):
+        out["lens_mm"] = int(raw["lens_mm"])
+    return out or None
+
+
+def _coerce_visual(raw) -> dict | None:
+    """Sanea el bloque visual (Block): tono enum válido, palette lista, resto strings."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict = {}
+    if isinstance(raw.get("tone"), str) and raw["tone"] in _TONES:
+        out["tone"] = raw["tone"]
+    if isinstance(raw.get("palette"), list):
+        pal = [str(x).strip() for x in raw["palette"] if str(x).strip()]
+        if pal:
+            out["palette"] = pal
+    for k in ("foreground", "midground", "background", "focal_point", "line", "rhythm", "graphics"):
+        v = raw.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    return out or None
+
+
+def _sanitize_shot(sh: dict) -> dict:
+    """Normaliza un plano del LLM: enums controlados de camera/visual/transition (D-047)."""
+    sh = dict(sh)
+    cam = _coerce_camera(sh.get("camera"))
+    sh["camera"] = cam if cam else None
+    if sh["camera"] is None:
+        sh.pop("camera")
+    vis = _coerce_visual(sh.get("visual"))
+    sh["visual"] = vis if vis else None
+    if sh["visual"] is None:
+        sh.pop("visual")
+    if not (isinstance(sh.get("transition"), str) and sh["transition"] in _TRANSITIONS):
+        sh.pop("transition", None)
+    return sh
+
+
 def _scene_from_raw(raw: dict, idx: int) -> Scene:
     """Normaliza una escena del LLM en un Scene válido (rellena lo que falte)."""
     s = dict(raw)
     s.setdefault("id", f"s{idx + 1}")
+    if s.get("shots"):  # D-047: sanear enums de cada plano antes de validar
+        s["shots"] = [_sanitize_shot(sh) for sh in s["shots"]]
+    # visual_intensity: clamp 1-5 o descartar.
+    vi = s.get("visual_intensity")
+    if isinstance(vi, (int, float)):
+        s["visual_intensity"] = max(1, min(5, int(vi)))
+    else:
+        s.pop("visual_intensity", None)
     # duration_s obligatorio (>0): derivar de los planos o caer a un default.
     if not s.get("duration_s"):
         shots = s.get("shots") or []
         total = sum(float(sh.get("duration_s") or 0) for sh in shots)
         s["duration_s"] = total or 5
     # Usar model_validate para manejar el alias "class" -> class_ correctamente.
-    return Scene.model_validate(s)
+    scene = Scene.model_validate(s)
+    # D-046: el prompt del draft nace DE la narrativa propuesta -> sellar como
+    # en-sintonia para que el storyboard no aparezca todo "desactualizado".
+    scene.prompt_src_hash = scene.narrative_hash()
+    return scene
 
 
 def _character_from_raw(name: str, raw) -> Character:

@@ -15,9 +15,11 @@
   // Prompts para la IA (cargados del spec, editables antes de generar)
   let projectSpec = $state(null);
   let promptEdits = $state({}); // { sceneId: { prompt, framings: [] } }
+  let promptState = $state({}); // { sceneId: { manual, stale } } (D-046)
   let promptsOpen = $state({}); // { sceneId: bool }
   let promptsSaved = $state({}); // { sceneId: bool }
   let promptsErr  = $state({}); // { sceneId: string }
+  let promptsBusy = $state({}); // { sceneId: bool } compilando
 
   // Estado por escena para generación individual
   let sceneTweak  = $state({}); // { sceneId: "texto del ajuste" }
@@ -44,6 +46,12 @@
         }
         promptEdits = edits;
       }
+      // Estado del prompt (auto/manual/desactualizado) siempre fresco del backend (D-046)
+      const states = {};
+      for (const s of (spec.scenes || [])) {
+        states[s.id] = { manual: !!s.prompt_manual, stale: !!s.prompt_stale };
+      }
+      promptState = states;
       // Pre-poblar kfPicks y castPicks desde las selecciones ya persistidas.
       // Tanto selections como cast_selections guardan rutas relativas;
       // buscamos el indice por nombre de archivo en el array de URLs.
@@ -73,6 +81,7 @@
       kfPicks = {}; castPicks = {}; progress = ""; err = ""; saved = false;
       sceneTweak = {}; sceneErr = {};
       promptEdits = {}; promptsOpen = {}; promptsSaved = {}; promptsErr = {};
+      promptState = {}; promptsBusy = {};
       projectSpec = null;
       load();
     }
@@ -140,6 +149,28 @@
     }
   }
 
+  // Compila el prompt de UNA escena desde la narrativa (D-046). Override explicito.
+  async function compilePrompt(sceneId) {
+    promptsErr = { ...promptsErr, [sceneId]: "" };
+    promptsBusy = { ...promptsBusy, [sceneId]: true };
+    try {
+      const r = await post(`/api/projects/${slug}/prompts/compile`, { scene_id: sceneId });
+      const c = (r.compiled || []).find(x => x.id === sceneId);
+      if (c) {
+        promptEdits = { ...promptEdits,
+          [sceneId]: { ...promptEdits[sceneId], prompt: c.prompt } };
+        promptState = { ...promptState,
+          [sceneId]: { manual: c.prompt_manual, stale: c.prompt_stale } };
+        promptsSaved = { ...promptsSaved, [sceneId]: true };
+      }
+      if (projectSpec) projectSpec = await get(`/api/projects/${slug}`);
+    } catch (e) {
+      promptsErr = { ...promptsErr, [sceneId]: humanError(e) };
+    } finally {
+      promptsBusy = { ...promptsBusy, [sceneId]: false };
+    }
+  }
+
   async function savePrompts(sceneId) {
     if (!projectSpec) return;
     promptsErr = { ...promptsErr, [sceneId]: "" };
@@ -168,6 +199,10 @@
       };
       await put(`/api/projects/${slug}`, body);
       projectSpec = await get(`/api/projects/${slug}`);
+      const fresh = (projectSpec.scenes || []).find(s => s.id === sceneId);
+      if (fresh)
+        promptState = { ...promptState,
+          [sceneId]: { manual: !!fresh.prompt_manual, stale: !!fresh.prompt_stale } };
       promptsSaved = { ...promptsSaved, [sceneId]: true };
       await refreshStatus();
     } catch (e) {
@@ -281,23 +316,42 @@
 
         <!-- Prompts para la IA (colapsable, editable antes de generar) -->
         {#if promptEdits[sceneId]}
+          {@const pst = promptState[sceneId] || {}}
+          {@const compiling = !!promptsBusy[sceneId]}
           <details class="prompts-panel" bind:open={promptsOpen[sceneId]}>
-            <summary class="prompts-tog">Para la IA — prompt visual <span class="tog-hint">(revisa antes de generar)</span></summary>
+            <summary class="prompts-tog">
+              Para la IA — prompt visual
+              {#if pst.manual}
+                <span class="pbadge manual" title="Lo editaste a mano; no se recompila solo">manual</span>
+              {:else if pst.stale}
+                <span class="pbadge stale" title="La narrativa cambió desde la última compilación">⚠ desactualizado</span>
+              {:else}
+                <span class="pbadge synced" title="En sintonía con la narrativa firmada">✓ en sintonía</span>
+              {/if}
+            </summary>
             <div class="prompts-body">
-              <span class="prompt-lbl">Descripcion visual de la escena</span>
+              <div class="prompt-lbl-row">
+                <span class="prompt-lbl">Descripcion visual de la escena</span>
+                <button class="compile-btn" onclick={() => compilePrompt(sceneId)}
+                        disabled={anyBusy || compiling}
+                        title="Reescribe el prompt desde el beat, diálogo, ambience y personajes">
+                  {compiling ? "Compilando…" : "↻ Compilar desde la narrativa"}
+                </button>
+              </div>
               <textarea class="prompt-ta" rows="3" bind:value={promptEdits[sceneId].prompt}
-                        placeholder="setting + personajes + accion fisica" disabled={anyBusy}></textarea>
+                        placeholder="setting + personajes + accion fisica" disabled={anyBusy || compiling}></textarea>
               {#each (promptEdits[sceneId].framings ?? []) as _f, j}
                 <div class="shot-prompt-row">
                   <span class="ptag-sm">P{j + 1}</span>
                   <input class="frame-in" bind:value={promptEdits[sceneId].framings[j]}
-                         placeholder="encuadre del plano {j + 1}" disabled={anyBusy} />
+                         placeholder="encuadre del plano {j + 1}" disabled={anyBusy || compiling} />
                 </div>
               {/each}
               <div class="prompts-foot">
                 {#if promptsErr[sceneId]}<span class="sm-err">{promptsErr[sceneId]}</span>{/if}
                 {#if promptsSaved[sceneId]}<span class="saved-ok">✓ guardado</span>{/if}
-                <button class="small ghost" onclick={() => savePrompts(sceneId)} disabled={anyBusy}>
+                <span class="foot-hint">Editar a mano lo marca <b>manual</b>.</span>
+                <button class="small ghost" onclick={() => savePrompts(sceneId)} disabled={anyBusy || compiling}>
                   Guardar prompts
                 </button>
               </div>
@@ -454,9 +508,27 @@
   .prompts-tog::-webkit-details-marker { display: none; }
   .prompts-tog::before { content: "▶"; font-size: 9px; transition: transform 0.15s; }
   details[open] > .prompts-tog::before { transform: rotate(90deg); }
-  .tog-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
   .prompts-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .prompt-lbl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .prompt-lbl { font-size: 10px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* Badge de estado del prompt (D-046) */
+  .pbadge {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 1px 7px; border-radius: 999px; text-transform: none;
+  }
+  .pbadge.synced { background: var(--ok-wash, #e3f3e8); color: var(--ok, #2c8a4a); }
+  .pbadge.stale  { background: var(--warn-wash, #fbeed0); color: var(--warn-deep, #9a6b00); }
+  .pbadge.manual { background: var(--blue-wash); color: var(--blue-deep); }
+  /* Boton compilar desde la narrativa */
+  .compile-btn {
+    font-size: 11.5px; padding: 3px 10px; box-shadow: none;
+    background: var(--blue-wash); color: var(--blue-deep);
+    border: 1px solid var(--blue); border-radius: var(--r-sm);
+  }
+  .compile-btn:hover:not(:disabled) { background: var(--blue); color: #fff; }
+  .compile-btn:disabled { opacity: 0.5; }
+  .foot-hint { font-size: 11px; color: var(--ink-soft); flex: 1; }
   .prompt-ta {
     width: 100%; resize: vertical; font-size: 13px; line-height: 1.55;
     background: var(--card); border-color: var(--line); border-radius: var(--r-sm);

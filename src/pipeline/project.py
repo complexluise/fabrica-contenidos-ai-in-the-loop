@@ -118,13 +118,52 @@ def _num(x: float) -> float | int:
     return int(x) if float(x).is_integer() else x
 
 
+def _camera_to_dict(cam) -> dict:
+    """Camera -> dict, omitiendo los valores por defecto (YAML limpio, D-047)."""
+    d: dict = {}
+    if cam.size != "MS":
+        d["size"] = cam.size
+    if cam.angle != "eye":
+        d["angle"] = cam.angle
+    if cam.move != "static":
+        d["move"] = cam.move
+    if cam.focus != "deep":
+        d["focus"] = cam.focus
+    if cam.lens_mm:
+        d["lens_mm"] = cam.lens_mm
+    return d
+
+
+def _visual_to_dict(vis) -> dict:
+    """Visual (Block) -> dict, solo las dimensiones llenas (D-047)."""
+    d: dict = {}
+    for key in ("tone", "foreground", "midground", "background", "focal_point", "line",
+                "rhythm", "graphics"):
+        v = getattr(vis, key)
+        if v:
+            d[key] = v
+    if vis.palette:
+        d["palette"] = list(vis.palette)
+    return d
+
+
 def _shot_to_dict(sh: Shot) -> dict:
     d: dict = {}
-    if sh.framing:
+    if sh.intention:  # D-047: funcion dramatica del plano
+        d["intention"] = sh.intention
+    if sh.action:  # D-047: que se ve (visual primario)
+        d["action"] = sh.action
+    if sh.framing:  # legacy/fallback
         d["framing"] = sh.framing
     d["duration_s"] = _num(sh.duration_s)
     if sh.seed:
         d["seed"] = sh.seed
+    if not sh.camera.is_default():  # D-047: gramatica de camara
+        d["camera"] = _camera_to_dict(sh.camera)
+    if not sh.visual.is_empty():  # D-047: estructura visual de Block
+        d["visual"] = _visual_to_dict(sh.visual)
+    if sh.transition:  # D-047
+        d["transition"] = sh.transition
     if sh.voiceover:
         d["voiceover"] = sh.voiceover
     if sh.caption:
@@ -136,6 +175,10 @@ def _shot_to_dict(sh: Shot) -> dict:
 
 def _scene_to_dict(s: Scene) -> dict:
     d: dict = {"id": s.id, "prompt": s.prompt, "duration_s": _num(s.duration_s)}
+    if s.prompt_manual:  # D-046: solo si el humano lo sobrescribio (default False)
+        d["prompt_manual"] = True
+    if s.prompt_src_hash:  # D-046: hash de la narrativa al compilar (default None)
+        d["prompt_src_hash"] = s.prompt_src_hash
     if s.beat:
         d["beat"] = s.beat
     if s.characters:
@@ -161,6 +204,8 @@ def _scene_to_dict(s: Scene) -> dict:
         d["voice_id"] = s.voice_id
     if s.ambience:
         d["ambience"] = s.ambience
+    if s.visual_intensity is not None:  # D-047: curva de intensidad visual
+        d["visual_intensity"] = s.visual_intensity
     if s.seed:
         d["seed"] = s.seed
     if s.shots:  # vacío = 1 plano implícito; no se persiste (compat)

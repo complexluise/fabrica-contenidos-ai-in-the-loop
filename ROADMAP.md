@@ -592,7 +592,7 @@ automático**; y que la UI descubra los perfiles del YAML **sin recompilarse**.
 
 ---
 
-## Sprint 6.14 — Storyboard centrado en la historia: UX humano-first (D-045) ⭐ SIGUIENTE
+## Sprint 6.14 — Storyboard centrado en la historia: UX humano-first (D-045)
 
 **Objetivo:** que el Storyboard (paso 2) muestre la **historia** que el humano firma, no los
 prompts que la IA consume. Los prompts se desplazan a **Elegir** (paso 3) donde se revisan antes
@@ -610,6 +610,50 @@ de generar. Ver [D-045].
 - [x] T6.14.2 — `Storyboard.svelte`: read-compact muestra dialogo/vo/ambience; read-full muestra dialogo/vo/caption sin `s.prompt`; edit mode pone prompt en panel "Para la IA" colapsable.
 - [x] T6.14.3 — `Picker.svelte`: sección "Para la IA" colapsable por escena (prompt + framings), editable + `PUT /api/projects/{slug}` al guardar.
 - [x] T6.14.4 — Build limpio (0 errores, warnings CSS resueltos).
+
+---
+
+## Sprint 6.15 — Prompt derivado de la narrativa: compilable + sincronizable (D-046)
+
+**Objetivo:** cerrar el hueco de D-045. El Storyboard es la fuente de verdad; `scene.prompt` pasa
+a ser un artefacto **derivado-pero-sobrescribible**: se **compila** desde la narrativa (Haiku), se
+detecta cuando quedó **desactualizado** y se resincroniza de un clic. Ver [D-046].
+
+### Acceptance Criteria
+- [x] AC1 — `Scene` lleva `prompt_manual` + `prompt_src_hash`; `narrative_hash()` y `prompt_stale` derivan el estado (en sintonía / desactualizado / manual).
+- [x] AC2 — `prompt_compile.compile_prompt` arma el prompt desde beat+ambience+diálogo+personajes vía Haiku; sin `ANTHROPIC_API_KEY` cae a concatenación determinista (no rompe).
+- [x] AC3 — `POST /api/projects/{slug}/prompts/compile` y `pipeline prompts <slug> [--scene] [--force]` compilan los prompts desactualizados (D-023).
+- [x] AC4 — El draft de `author.py` sella el hash al nacer; el `PUT` marca `prompt_manual` solo cuando el prompt entrante difiere del base.
+- [x] AC5 — Elegir muestra el badge de estado por escena + botón "Compilar desde la narrativa"; los campos nuevos hacen round-trip idempotente en el YAML.
+
+### Tasks
+- [x] T6.15.1 — ADR D-046 en `docs/decisiones/`.
+- [x] T6.15.2 — `contracts.py` (campos + `narrative_hash`/`prompt_stale`); `prompt_compile.py` (+ tests core).
+- [x] T6.15.3 — `author.py` (sella hash), `project.py::_scene_to_dict` (persistencia), subcomando `prompts` en `cli.py`.
+- [x] T6.15.4 — `server/app.py` (endpoint compile + serialización + manual en PUT); `Picker.svelte` (badge + botón compilar).
+
+---
+
+## Sprint 6.16 — El plano como artefacto audiovisual: gramática + Block (D-047)
+
+**Objetivo:** elevar el `Shot` de un blob de `framing` a un **artefacto de producción**: intención,
+gramática de cámara (shot-list), estructura visual (Bruce Block) y transición, más la **curva de
+intensidad** por escena. El artista piensa en gramática; `compose_shot_visual` la ensambla en el
+prompt. Aditivo y retrocompatible. Ver [D-047].
+
+### Acceptance Criteria
+- [x] AC1 — `Camera`/`Visual` + enums controlados; `Shot` con intention/action/camera/visual/transition; `Scene.visual_intensity`. Defaults omitidos en el YAML, round-trip idempotente.
+- [x] AC2 — `compose_shot_visual` ensambla action + cámara + visual en lenguaje natural (fallback a `framing`); `runner`/`studio` generan desde ahí.
+- [x] AC3 — `author.py` propone el artefacto enriquecido; sanitizador de enums tolera valores inválidos del LLM sin romper el borrador.
+- [x] AC4 — Storyboard: shot-card editable (cámara como selects + diseño visual de Block), lectura muestra la descripción por plano, y gráfico de la curva de intensidad. PUT mergea shots por índice.
+- [x] AC5 — Proyecto `desmintiendo_fracking_sostenible` enriquecido (19 planos) listo para re-generar.
+
+### Tasks
+- [x] T6.16.1 — ADR D-047 + referencias (StudioBinder, Bruce Block, Mascelli).
+- [x] T6.16.2 — F1 contrato + `prompt_compile` + persistencia + `tests/test_shot_artifact.py`.
+- [x] T6.16.3 — F2 `author.py` (artefacto + sanitizador) + tests; F3 wiring `runner`/`studio`.
+- [x] T6.16.4 — F4 UI `Storyboard.svelte` (shot-card + curva) + `server/app.py` (serialización + merge); build limpio.
+- [x] T6.16.5 — F5 enriquecer el proyecto fracking (`scripts/_enrich_fracking.py`).
 
 ---
 

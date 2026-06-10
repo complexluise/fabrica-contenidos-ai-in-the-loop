@@ -332,6 +332,39 @@ def graphics(
 
 
 @app.command()
+def prompts(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    scene: str = typer.Option(None, "--scene", help="Compilar solo esta escena (id). Default: todas las desactualizadas."),
+    force: bool = typer.Option(False, "--force", help="Recompila tambien las en-sintonia y las marcadas como manual."),
+    config_dir: Path = typer.Option(Path("config")),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[L1.5] Compila el prompt visual de cada escena desde la narrativa (Haiku) (D-046)."""
+    from .project import write_spec
+    from .prompt_compile import sync_scene_prompt
+
+    proj, spec, _cfg = _load_project(project, projects_dir, config_dir)
+    targets = [s for s in spec.scenes if (scene is None or s.id == scene)]
+    if scene and not targets:
+        console.print(f"[red]Escena '{scene}' no encontrada.[/]")
+        raise typer.Exit(1)
+
+    # Explicito (--scene) -> esa escena siempre. Bulk -> solo stale (que ya excluye
+    # las manual); --force incluye en-sintonia y manual.
+    todo = [s for s in targets if (scene is not None or force or s.prompt_stale)]
+    if not todo:
+        console.print("[green]Todo en sintonia.[/] Nada que compilar.")
+        return
+
+    console.print(f"[bold]{project}[/] - compilando {len(todo)} prompt(s) desde la narrativa...")
+    for s in todo:
+        sync_scene_prompt(s, spec.characters)
+        console.print(f"  - {s.id}: {s.prompt[:72]}...")
+    write_spec(spec, proj.spec_path)
+    console.print(f"\n[bold green]Listo[/] {proj.spec_path} - {len(todo)} prompt(s) en sintonia.")
+
+
+@app.command()
 def run(
     project: str = typer.Argument(..., help="Slug del proyecto (projects/<slug>/project.yaml) o, con --brief, ignorado."),
     brief: Path = typer.Option(None, "--brief", help="Modo smoke: corre un brief YAML suelto a out/ (sin proyecto/cache)."),

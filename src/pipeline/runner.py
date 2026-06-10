@@ -31,6 +31,7 @@ from .contracts import GenResult
 from .deliver import reframe
 from .gate import FusedGate
 from .keyframe import KeyframeGenerator, build_styled_prompt
+from .prompt_compile import compose_shot_visual
 from .post import burn_lower_third, default_font
 from .project import (
     Project,
@@ -92,7 +93,9 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     refs_io = resolve_refs(project.dir, refs)
 
     # --- L3 keyframe (cacheado, con identidad de personaje) ---
-    styled = build_styled_prompt(scene, cfg.style, shot.framing)
+    # D-047: el plano aporta su artefacto (action + camara + visual), no solo `framing`.
+    shot_ext = compose_shot_visual(shot)
+    styled = build_styled_prompt(scene, cfg.style, shot_ext)
     kf_key = cache_key("keyframe", _keyframe_inputs(styled, cfg, ref_sig))
     kf_cost = 0.0
     if idx == 0 and scene.id in keyframe_overrides:  # plano 1 = keyframe elegido/inyectado (D-022/D-025)
@@ -106,13 +109,13 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
             logger.info("[%s] keyframe (cache hit): %s", shot_id, kf_hit.name)
         else:
             logger.info("[%s] %s | generando keyframe...", shot_id, scene.class_)
-            tmp = await keyframer.generate(scene, ref_images=refs_io, framing=shot.framing)
+            tmp = await keyframer.generate(scene, ref_images=refs_io, framing=shot_ext)
             keyframe = project.cache_store("keyframes", kf_key, tmp, ".png")
             kf_cost = cfg.style.keyframe.cost_per_image
             logger.info("[%s] keyframe generado: %s ($%.4f)", shot_id, keyframe.name, kf_cost)
 
-    # Escena efectiva del plano: prompt+framing, duración/seed/audio del plano.
-    eff_prompt = scene.prompt if not shot.framing else f"{scene.prompt}, {shot.framing}"
+    # Escena efectiva del plano: prompt + artefacto del plano, duración/seed/audio del plano.
+    eff_prompt = scene.prompt if not shot_ext else f"{scene.prompt}, {shot_ext}"
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed,
@@ -217,7 +220,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
         "strategy": rule.strategy, "provider": result.provider,
         "keyframe_key": kf_key, "keyframe_path": str(keyframe),
         "video_key": vid_key, "cached": cached, "duration_s": shot.duration_s,
-        "seed": shot.seed, "framing": shot.framing, "caption": cap,
+        "seed": shot.seed, "framing": shot_ext or shot.framing, "caption": cap,
+        "intention": shot.intention or "",  # D-047: funcion dramatica al guion
         "voiceover": plano.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
         "sfx": shot.sfx or "", "ambience": scene.ambience or "", "sfx_key": sfx_key,
         "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {})}

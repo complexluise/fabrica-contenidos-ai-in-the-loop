@@ -24,8 +24,10 @@ _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
 
 # Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
 # requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
+# `shots` se mergea por indice (no se reemplaza) para que un editor parcial no
+# borre los campos del artefacto (D-047) que no manda.
 _EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters",
-                   "shots", "dialogue", "ambience"}
+                   "dialogue", "ambience", "visual_intensity"}
 
 
 def _available_styles(config_dir: Path) -> list[str]:
@@ -210,10 +212,28 @@ def create_app(projects_dir: Path = Path("projects"),
                 base = existing.get(sid)
                 data = base.model_dump(by_alias=True) if base else {}
                 data.update({k: raw[k] for k in _EDITABLE_SCENE if k in raw})
+                # D-047: `shots` se MERGEA por indice (no se reemplaza): las claves que
+                # el cliente manda pisan al plano base; las que no manda se conservan.
+                # Asi un editor parcial (Picker manda framing/audio) no borra camera/visual.
+                if isinstance(raw.get("shots"), list):
+                    base_shots = data.get("shots") or []
+                    merged = []
+                    for j, rsh in enumerate(raw["shots"]):
+                        bsh = dict(base_shots[j]) if j < len(base_shots) else {}
+                        bsh.update({k: v for k, v in (rsh or {}).items()})
+                        merged.append(bsh)
+                    data["shots"] = merged
                 data["id"] = sid
                 scene = Scene(**data)
                 if scene.shots:  # el total de la escena = suma de sus planos
                     scene.duration_s = sum(sh.duration_s for sh in scene.shots)
+                # D-046: si el humano edito el prompt a mano (difiere del base), es
+                # un override -> marcar manual para que no se recompile solo. El
+                # round-trip de un prompt sin cambios no toca el flag.
+                if "prompt" in raw:
+                    prev = (base.prompt if base else "") or ""
+                    if (raw.get("prompt") or "") != prev:
+                        scene.prompt_manual = True
                 new_scenes.append(scene)
         except Exception as exc:  # noqa: BLE001 — validación -> 422 legible
             raise HTTPException(422, f"Storyboard inválido: {exc}")
@@ -246,12 +266,17 @@ def create_app(projects_dir: Path = Path("projects"),
         _project, spec, _cfg = load(slug)
         scenes = [{
             "id": s.id, "beat": s.beat, "class": s.class_, "prompt": s.prompt,
+            "prompt_manual": s.prompt_manual, "prompt_stale": s.prompt_stale,  # D-046
             "dialogue": s.dialogue, "ambience": s.ambience,
+            "visual_intensity": s.visual_intensity,  # D-047
             "characters": s.characters,
-            "shots": [{"framing": sh.framing, "duration_s": sh.duration_s,
-                       "voiceover": sh.voiceover, "caption": sh.caption,
-                       "sfx": sh.sfx}
-                      for sh in effective_shots(s)],
+            "shots": [{
+                "intention": sh.intention, "action": sh.action,  # D-047
+                "framing": sh.framing, "duration_s": sh.duration_s,
+                "camera": sh.camera.model_dump(), "visual": sh.visual.model_dump(),  # D-047
+                "transition": sh.transition,
+                "voiceover": sh.voiceover, "caption": sh.caption, "sfx": sh.sfx,
+            } for sh in effective_shots(s)],
         } for s in spec.scenes]
         characters = [{
             "name": name,
@@ -262,6 +287,34 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
                 "style": spec.style, "format": spec.format, "music": music_url,
                 "characters": characters, "scenes": scenes}
+
+    @app.post("/api/projects/{slug}/prompts/compile")
+    async def compile_prompts(slug: str, body: dict = {}):
+        """Compila el prompt visual desde la narrativa (D-046). Sincrono (Haiku via
+        to_thread). Body: { scene_id?, force? }. Con scene_id compila ESA escena
+        (override explicito del humano); sin el, compila las desactualizadas
+        (force incluye las en-sintonia y las manual)."""
+        from ..project import write_spec
+        from ..prompt_compile import sync_scene_prompt
+
+        project, spec, _cfg = load(slug)
+        scene_id = (body.get("scene_id") or "").strip() or None
+        force = bool(body.get("force"))
+        targets = [s for s in spec.scenes if (scene_id is None or s.id == scene_id)]
+        if scene_id and not targets:
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        todo = [s for s in targets if (scene_id is not None or force or s.prompt_stale)]
+
+        def work():
+            for s in todo:
+                sync_scene_prompt(s, spec.characters)
+            if todo:
+                write_spec(spec, project.spec_path)
+
+        await asyncio.to_thread(work)
+        return {"compiled": [{"id": s.id, "prompt": s.prompt,
+                              "prompt_manual": s.prompt_manual,
+                              "prompt_stale": s.prompt_stale} for s in todo]}
 
     @app.get("/api/projects/{slug}/candidates")
     def candidates(slug: str):

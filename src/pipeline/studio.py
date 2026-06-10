@@ -19,6 +19,7 @@ import yaml
 from .config import Config
 from .contact_sheet import build_contact_sheet, write_and_open
 from .keyframe import KeyframeGenerator, build_styled_prompt
+from .prompt_compile import compose_shot_visual
 from .naming import readable_name, semantic_slug
 from .project import (
     Character,
@@ -207,8 +208,9 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
         refs_resolved = resolve_refs(project.dir, refs)
         ref_sig = sorted(str(r) for r in refs)
         anchor = effective_shots(scene)[0]
-        styled = build_styled_prompt(scene, cfg.style, anchor.framing)
-        slug = semantic_slug(f"{scene.prompt} {anchor.framing}".strip())
+        anchor_ext = compose_shot_visual(anchor)  # D-047: artefacto del plano 1
+        styled = build_styled_prompt(scene, cfg.style, anchor_ext)
+        slug = semantic_slug(f"{scene.prompt} {anchor_ext}".strip())
         scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
 
     async def _one(scene, refs_resolved, ref_sig, anchor, styled, slug, i):
@@ -224,7 +226,7 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
             else:
                 logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=i, framing=anchor.framing)
+                                               seed=i, framing=compose_shot_visual(anchor))
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene.id, slug, i, stored)
             logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
@@ -287,7 +289,8 @@ async def gen_keyframes_scene(
     ref_sig = sorted(str(r) for r in refs)
     anchor = effective_shots(scene)[0]
 
-    framing = f"{anchor.framing}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor.framing
+    anchor_ext = compose_shot_visual(anchor)  # D-047: artefacto del plano 1
+    framing = f"{anchor_ext}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor_ext
     styled = build_styled_prompt(scene, cfg.style, framing)
     slug = semantic_slug(f"{scene.prompt} {framing}".strip())
 

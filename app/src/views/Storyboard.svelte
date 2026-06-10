@@ -18,6 +18,34 @@
   let musicErr = $state("");
   let showMusicGen = $state(false);
 
+  // --- D-047: vocabulario audiovisual (etiquetas legibles para el humano) ---
+  const SIZE = { ECU:"PPP", CU:"PP", MCU:"PMC", MS:"PM", MLS:"PML", LS:"PG", ELS:"PGG", insert:"detalle" };
+  const ANGLE = { eye:"normal", high:"picado", low:"contrapicado", overhead:"cenital", worm:"contrap. extremo", dutch:"holandés", ots:"sobre hombro" };
+  const MOVE = { static:"fija", pan:"paneo", tilt:"tilt", push_in:"push-in", pull_out:"pull-out", track:"travelling", crane:"grúa", handheld:"handheld", zoom:"zoom" };
+  const FOCUS = { deep:"foco profundo", shallow:"shallow", rack:"rack focus" };
+  const TONE = { high_key:"clave alta", low_key:"clave baja", neutral:"neutro", silhouette:"silueta" };
+  const TRANS = { cut:"corte", match_cut:"match cut", dissolve:"disolvencia", smash_cut:"smash cut", wipe:"barrido" };
+  const SIZES = Object.keys(SIZE), ANGLES = Object.keys(ANGLE), MOVES = Object.keys(MOVE);
+  const FOCUSES = Object.keys(FOCUS), TONES = Object.keys(TONE), TRANSS = Object.keys(TRANS);
+
+  const newCamera = () => ({ size:"MS", angle:"eye", move:"static", focus:"deep", lens_mm:null });
+  const newVisual = () => ({ tone:null, palette:[], foreground:null, midground:null,
+                             background:null, focal_point:null, line:null, rhythm:null, graphics:"" });
+  function loadShot(sh) {
+    return {
+      intention: sh.intention || "", action: sh.action || "",
+      framing: sh.framing || "", duration_s: sh.duration_s ?? 3,
+      transition: sh.transition || null,
+      camera: { ...newCamera(), ...(sh.camera || {}) },
+      visual: { ...newVisual(), ...(sh.visual || {}), palette: sh.visual?.palette || [] },
+      voiceover: sh.voiceover || "", caption: sh.caption || "", sfx: sh.sfx || "",
+    };
+  }
+  const camDefault = (c) => c.size==="MS" && c.angle==="eye" && c.move==="static" && c.focus==="deep" && !c.lens_mm;
+  const camChips = (c) => camDefault(c) ? [] : [SIZE[c.size], ANGLE[c.angle], MOVE[c.move]].filter(Boolean);
+  const shotDesc = (sh) => (sh.action || sh.framing || "").trim();
+  const setPalette = (sh, str) => { sh.visual.palette = str.split(",").map(x => x.trim()).filter(Boolean); touch(); };
+
   $effect(() => {
     if (!slug) return;
     doc = null; error = ""; msg = ""; dirty = false;
@@ -33,12 +61,9 @@
           scenes: d.scenes.map((s) => ({
             id: s.id, beat: s.beat || "", prompt: s.prompt || "",
             dialogue: s.dialogue || "", ambience: s.ambience || "",
+            visual_intensity: s.visual_intensity ?? null,   // D-047
             characters: s.characters || [],
-            shots: (s.shots || []).map((sh) => ({
-              framing: sh.framing || "", duration_s: sh.duration_s ?? 3,
-              voiceover: sh.voiceover || "", caption: sh.caption || "",
-              sfx: sh.sfx || "",
-            })),
+            shots: (s.shots || []).map(loadShot),
           })),
         };
       })
@@ -96,8 +121,8 @@
   function addScene() {
     const id = uniqueId();
     doc.scenes = [...doc.scenes, {
-      id, beat: "", prompt: "", dialogue: "", ambience: "", characters: [],
-      shots: [{ framing: "", duration_s: 3, voiceover: "", caption: "", sfx: "" }],
+      id, beat: "", prompt: "", dialogue: "", ambience: "", visual_intensity: null,
+      characters: [], shots: [loadShot({})],
     }];
     editing = { ...editing, [id]: true }; // nueva escena abre en modo edicion
     touch();
@@ -115,7 +140,7 @@
     doc.scenes = a; touch();
   }
   function addShot(s) {
-    s.shots = [...s.shots, { framing: "", duration_s: 3, voiceover: "", caption: "", sfx: "" }];
+    s.shots = [...s.shots, loadShot({})];
     touch();
   }
   function deleteShot(s, j) {
@@ -164,13 +189,23 @@
 
   async function save(sign) {
     error = ""; msg = ""; saving = true;
+    const cleanVisual = (v) => ({
+      tone: v.tone || null, palette: v.palette || [],
+      foreground: v.foreground || null, midground: v.midground || null,
+      background: v.background || null, focal_point: v.focal_point || null,
+      line: v.line || null, rhythm: v.rhythm || null, graphics: v.graphics || null,
+    });
     const body = {
       sign: !!sign, title: doc.title, brief: doc.brief,
       scenes: doc.scenes.map((s) => ({
         id: s.id, beat: s.beat || null, prompt: s.prompt,
         dialogue: s.dialogue || null, ambience: s.ambience || null,
+        visual_intensity: s.visual_intensity ?? null,            // D-047
         shots: s.shots.map((sh) => ({
+          intention: sh.intention || null, action: sh.action || null,  // D-047
           framing: sh.framing || "", duration_s: Number(sh.duration_s) || 1,
+          camera: { ...sh.camera }, visual: cleanVisual(sh.visual),     // D-047
+          transition: sh.transition || null,
           voiceover: sh.voiceover || null, caption: sh.caption || null,
           sfx: sh.sfx || null,
         })),
@@ -208,6 +243,20 @@
       {#if signed && !dirty}<span class="pill ok">✓ firmado</span>
       {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
     </div>
+    {#if doc.scenes.some((s) => s.visual_intensity)}
+      <div class="intensity-curve" title="Curva de intensidad visual (Bruce Block) a lo largo del video">
+        <span class="ic-lbl">arco visual</span>
+        <div class="ic-bars">
+          {#each doc.scenes as s}
+            <div class="ic-col" title="{s.id}: {s.visual_intensity ?? '—'}/5">
+              <div class="ic-bar" class:hero={(s.visual_intensity || 0) >= 4}
+                   style="height:{(s.visual_intensity || 0) * 18 + 3}px"></div>
+              <span class="ic-id mono">{s.id}</span>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
   </header>
 
   <section class="card pad">
@@ -306,6 +355,16 @@
             </div>
           </div>
 
+          <!-- Intensidad visual de la escena (curva de Block) -->
+          <div class="intensity-row">
+            <span class="audio-lbl">Intensidad visual</span>
+            <input class="intensity-range" type="range" min="0" max="5" step="1"
+                   value={s.visual_intensity ?? 0}
+                   oninput={(e) => { s.visual_intensity = Number(e.target.value) || null; touch(); }} />
+            <span class="intensity-val mono">{s.visual_intensity ? `${s.visual_intensity}/5` : "—"}</span>
+            <span class="muted intensity-hint">aperturas bajo · clímax alto</span>
+          </div>
+
           <!-- L3: Planos — sub-elementos anidados -->
           <div class="shots">
             {#each s.shots as sh, j}
@@ -314,7 +373,7 @@
               <div class="shot">
                 <div class="shot-h">
                   <span class="ptag">P{j + 1}</span>
-                  <input class="fr-in" bind:value={sh.framing} oninput={touch} placeholder="encuadre / acción" />
+                  <input class="fr-in" bind:value={sh.action} oninput={touch} placeholder="qué SE VE / qué pasa en el plano" />
                   <input class="num-in" type="number" min="1" step="1" bind:value={sh.duration_s} oninput={touch} />
                   <span class="muted s">s</span>
                   <button class="audio-tog" class:open={audioOpen}
@@ -325,6 +384,48 @@
                   <button class="icon danger" title="Quitar plano" onclick={() => deleteShot(s, j)}
                           disabled={s.shots.length === 1}>✕</button>
                 </div>
+
+                <input class="intention-in" bind:value={sh.intention} oninput={touch}
+                       placeholder="intención: qué comunica este plano (función dramática)" />
+
+                <!-- Cámara: gramática del shot-list -->
+                <div class="cam-row">
+                  <select bind:value={sh.camera.size} onchange={touch} title="tamaño de plano">
+                    {#each SIZES as o}<option value={o}>{SIZE[o]}</option>{/each}
+                  </select>
+                  <select bind:value={sh.camera.angle} onchange={touch} title="ángulo">
+                    {#each ANGLES as o}<option value={o}>{ANGLE[o]}</option>{/each}
+                  </select>
+                  <select bind:value={sh.camera.move} onchange={touch} title="movimiento">
+                    {#each MOVES as o}<option value={o}>{MOVE[o]}</option>{/each}
+                  </select>
+                  <select bind:value={sh.camera.focus} onchange={touch} title="foco">
+                    {#each FOCUSES as o}<option value={o}>{FOCUS[o]}</option>{/each}
+                  </select>
+                  <select class="trans-sel" bind:value={sh.transition} onchange={touch} title="transición al siguiente">
+                    <option value={null}>→ corte</option>
+                    {#each TRANSS as o}<option value={o}>→ {TRANS[o]}</option>{/each}
+                  </select>
+                </div>
+
+                <!-- Diseño visual (Bruce Block), colapsable -->
+                <details class="design-panel">
+                  <summary class="design-tog">Diseño visual <span class="ia-hint">(Block: tono, color, profundidad)</span></summary>
+                  <div class="design-body">
+                    <select bind:value={sh.visual.tone} onchange={touch}>
+                      <option value={null}>tono / luz…</option>
+                      {#each TONES as o}<option value={o}>{TONE[o]}</option>{/each}
+                    </select>
+                    <input value={(sh.visual.palette || []).join(", ")}
+                           oninput={(e) => setPalette(sh, e.target.value)} placeholder="paleta: cyan, ámbar" />
+                    <input bind:value={sh.visual.focal_point} oninput={touch} placeholder="punto focal (dónde va el ojo)" />
+                    <input bind:value={sh.visual.foreground} oninput={touch} placeholder="primer plano" />
+                    <input bind:value={sh.visual.background} oninput={touch} placeholder="fondo" />
+                    <input bind:value={sh.visual.graphics} oninput={touch} placeholder="texto en pantalla / lower-third" />
+                    <input bind:value={sh.framing} oninput={touch} placeholder="encuadre (legacy)" />
+                  </div>
+                </details>
+
                 {#if audioOpen}
                   <div class="shot-audio">
                     <input class="audio-in" bind:value={sh.voiceover} oninput={touch} placeholder="voz en off" />
@@ -415,7 +516,26 @@
                     <div class="rf-shot-h">
                       <span class="ptag">P{j + 1}</span>
                       <span class="rf-dur mono">{sh.duration_s}s</span>
+                      {#each camChips(sh.camera) as chip}
+                        <span class="cam-chip">{chip}</span>
+                      {/each}
+                      {#if sh.transition}<span class="trans-chip">→ {TRANS[sh.transition]}</span>{/if}
                     </div>
+                    {#if sh.intention}
+                      <p class="rf-intention"><span class="cue-tag">idea</span>{sh.intention}</p>
+                    {/if}
+                    {#if shotDesc(sh)}
+                      <p class="rf-visual"><span class="cue-tag">visual</span>{shotDesc(sh)}</p>
+                    {:else}
+                      <p class="rf-noaudio muted">Sin descripción visual — editá para agregar</p>
+                    {/if}
+                    {#if sh.visual.tone || sh.visual.palette?.length || sh.visual.graphics}
+                      <div class="rf-design">
+                        {#if sh.visual.tone}<span class="design-bit">{TONE[sh.visual.tone]}</span>{/if}
+                        {#each (sh.visual.palette || []) as col}<span class="design-bit pal">{col}</span>{/each}
+                        {#if sh.visual.graphics}<span class="design-bit gfx">“{sh.visual.graphics}”</span>{/if}
+                      </div>
+                    {/if}
                     {#if sh.sfx || sh.voiceover || sh.caption}
                       <div class="rf-cues">
                         {#if sh.voiceover}
@@ -428,8 +548,6 @@
                           <span class="rf-cue sfx-cue"><span class="cue-tag">sfx</span>{sh.sfx}</span>
                         {/if}
                       </div>
-                    {:else}
-                      <p class="rf-noaudio muted">Sin VO ni caption</p>
                     {/if}
                   </div>
                 {/each}
@@ -551,10 +669,6 @@
   .read-compact-text {
     flex: 1; padding: 13px 18px; display: flex; flex-direction: column; gap: 8px;
   }
-  .prompt-preview {
-    font-size: 13px; line-height: 1.65; color: var(--ink-2); margin: 0;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
   .shots-chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -562,7 +676,6 @@
     border-radius: 999px; padding: 2px 10px; font-size: 11.5px; color: var(--ink-2);
   }
   .chip-n { font-family: var(--font-mono); font-weight: 700; color: var(--blue-deep); font-size: 11px; }
-  .chip-fr { color: var(--ink-2); }
   .chip-dur { font-family: var(--font-mono); color: var(--ink-soft); font-size: 11px; }
   .chip-sfx { color: var(--blue-deep); font-size: 11px; }
   .chip-vo { color: var(--ink-soft); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
@@ -587,9 +700,6 @@
     font-size: 10px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.12em; color: var(--ink-soft);
   }
-  .rf-prompt {
-    font-size: 14px; line-height: 1.72; color: var(--ink); margin: 0;
-  }
 
   /* L2: Diálogo + Ambience */
   .rf-audio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -608,8 +718,7 @@
     border-left: 3px solid var(--blue); padding-left: 12px;
     display: flex; flex-direction: column; gap: 5px;
   }
-  .rf-shot-h { display: flex; align-items: center; gap: 10px; }
-  .rf-framing { font-size: 13.5px; color: var(--ink); flex: 1; }
+  .rf-shot-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .rf-dur { font-size: 12px; color: var(--ink-soft); }
   .rf-cues { display: flex; flex-direction: column; gap: 3px; padding-left: 2px; }
   .rf-cue { font-size: 12px; color: var(--ink-2); display: flex; gap: 8px; align-items: baseline; }
@@ -757,4 +866,84 @@
     background: var(--paper-2); border-color: var(--line); border-radius: var(--r-sm);
   }
   .music-err { color: var(--red); font-size: 12.5px; margin: 0; }
+
+  /* ===== D-047: artefacto audiovisual ===== */
+
+  /* Curva de intensidad visual (cabecera) */
+  .intensity-curve { display: flex; align-items: flex-end; gap: 10px; margin-top: 12px; }
+  .ic-lbl {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-soft); padding-bottom: 14px;
+  }
+  .ic-bars { display: flex; align-items: flex-end; gap: 4px; height: 96px; }
+  .ic-col { display: flex; flex-direction: column; align-items: center; gap: 3px; justify-content: flex-end; }
+  .ic-bar {
+    width: 16px; border-radius: 3px 3px 0 0; background: var(--blue);
+    transition: height 0.15s; min-height: 3px;
+  }
+  .ic-bar.hero { background: var(--red); }
+  .ic-id { font-size: 9px; color: var(--ink-soft); }
+
+  /* Lectura expandida: artefacto del plano */
+  .cam-chip {
+    font-family: var(--font-mono); font-size: 10px; color: var(--blue-deep);
+    background: var(--blue-wash); border-radius: var(--r-sm); padding: 1px 6px;
+  }
+  .trans-chip { font-size: 10px; color: var(--ink-soft); font-style: italic; }
+  .rf-intention {
+    font-size: 12px; color: var(--ink-soft); margin: 2px 0 0; font-style: italic;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .rf-visual {
+    font-size: 13.5px; color: var(--ink); margin: 3px 0 0; line-height: 1.55;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .rf-design { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .design-bit {
+    font-size: 11px; color: var(--ink-2); background: var(--paper-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  }
+  .design-bit.pal { border-color: var(--line-2); }
+  .design-bit.gfx { color: var(--ink-soft); font-style: italic; }
+
+  /* Edicion: shot-card */
+  .intention-in {
+    width: 100%; margin-top: 7px; font-size: 12.5px; font-style: italic; padding: 4px 8px;
+    background: transparent; border-color: var(--line); border-radius: var(--r-sm); color: var(--ink-2);
+  }
+  .intention-in:focus { background: var(--card); font-style: normal; }
+  .cam-row { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+  .cam-row select {
+    font-size: 12px; padding: 3px 6px; border-radius: var(--r-sm);
+    border: 1px solid var(--line); background: var(--paper-2); color: var(--ink-2);
+  }
+  .cam-row select:focus { background: var(--card); border-color: var(--blue); }
+  .trans-sel { color: var(--ink-soft) !important; }
+
+  .design-panel { margin-top: 7px; }
+  .design-tog {
+    cursor: pointer; list-style: none; font-size: 10.5px; font-weight: 700;
+    color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.08em;
+    display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  }
+  .design-tog::-webkit-details-marker { display: none; }
+  .design-tog::before { content: "▶"; font-size: 8px; transition: transform 0.15s; }
+  .design-panel[open] > .design-tog::before { transform: rotate(90deg); }
+  .design-body {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px 0 3px;
+  }
+  .design-body select, .design-body input {
+    font-size: 12px; padding: 4px 7px; border-radius: var(--r-sm);
+    background: var(--paper-2); border: 1px solid var(--line); color: var(--ink-2);
+  }
+  .design-body input:focus, .design-body select:focus { background: var(--card); }
+
+  /* Intensidad por escena (edicion) */
+  .intensity-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+  .intensity-range { flex: 1; max-width: 220px; accent-color: var(--red); }
+  .intensity-val { font-size: 12px; color: var(--ink); min-width: 30px; }
+  .intensity-hint { font-size: 11px; }
 </style>

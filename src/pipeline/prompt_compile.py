@@ -1,0 +1,184 @@
+"""L1.5 - Prompt visual derivado de la narrativa (D-046).
+
+El Storyboard es la fuente de verdad (D-045): el humano firma la HISTORIA
+(beat, dialogo, ambience, personajes). El prompt visual `scene.prompt` —lo que
+de verdad entra a generar el keyframe (`keyframe.build_styled_prompt`)— se
+COMPILA desde esa narrativa, no se mantiene a mano en paralelo. Asi se cierra el
+hueco de D-045: el humano firma una historia y la IA genera desde ESA historia,
+no desde un prompt viejo que quedo a la deriva.
+
+Haiku traduce el beat narrativo a una descripcion visual de lo que la camara VE;
+sin ANTHROPIC_API_KEY cae a una concatenacion determinista (degrada, no rompe —
+mismo patron que `describe.py` / `gate/vlm.py`). Haiku, no Opus: traducir
+narrativa->visual es alto volumen, bajo criterio (D-041).
+
+`narrative_brief` y `_deterministic_prompt` son logica pura (testeable);
+`compile_prompt` hace la llamada a Haiku (I/O, smoke).
+"""
+
+from __future__ import annotations
+
+import logging
+
+from .contracts import Camera, Scene, Shot, Visual
+from .project import Character
+from .settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+MODEL = "claude-haiku-4-5"  # traduccion narrativa->visual: alto volumen, bajo criterio (D-041)
+
+_SYSTEM = """\
+Sos director de fotografia. Traducis un beat narrativo a una descripcion VISUAL
+concreta de lo que la camara VE: setting, personajes, accion fisica, luz,
+atmosfera, composicion del cuadro. No repetis el dialogo. No describis emociones
+abstractas; describis lo que las expresa en imagen. Respondes UNA sola frase
+densa, sin comillas ni preambulos."""
+
+_PROMPT = """\
+Convertí esta escena en una descripción visual para un modelo de imagen.
+Devolvé SOLO la descripción, sin comillas ni explicación.
+
+{brief}
+"""
+
+
+# --- Composicion del plano (D-047): gramatica/estructura -> lenguaje natural ---
+# Mapas del vocabulario controlado a frases que el modelo de imagen entiende.
+# En ingles a proposito: los modelos generativos rinden mejor en ingles, igual
+# que los `prompt_template` de los estilos.
+
+_SIZE = {
+    "ECU": "extreme close-up", "CU": "close-up", "MCU": "medium close-up",
+    "MS": "medium shot", "MLS": "medium long shot", "LS": "long shot",
+    "ELS": "extreme long shot", "insert": "insert detail shot",
+}
+_ANGLE = {
+    "eye": "eye-level angle", "high": "high angle", "low": "low angle",
+    "overhead": "overhead bird's-eye angle", "worm": "worm's-eye angle",
+    "dutch": "dutch (canted) angle", "ots": "over-the-shoulder angle",
+}
+_MOVE = {
+    "static": "static camera", "pan": "panning", "tilt": "tilting",
+    "push_in": "slow push-in", "pull_out": "pull-out", "track": "tracking shot",
+    "crane": "crane move", "handheld": "handheld", "zoom": "zoom",
+}
+_FOCUS = {"deep": "deep focus", "shallow": "shallow depth of field", "rack": "rack focus"}
+_TONE = {
+    "high_key": "high-key lighting", "low_key": "low-key lighting",
+    "neutral": "neutral lighting", "silhouette": "silhouette lighting",
+}
+
+
+def camera_phrase(cam: Camera) -> str:
+    """La gramatica de camara como frase. Pura. Vacia si es la camara por defecto."""
+    if cam.is_default():
+        return ""
+    bits = [_SIZE.get(cam.size, ""), _ANGLE.get(cam.angle, ""), _MOVE.get(cam.move, "")]
+    if cam.focus != "deep":
+        bits.append(_FOCUS.get(cam.focus, ""))
+    if cam.lens_mm:
+        bits.append(f"{cam.lens_mm}mm lens")
+    return ", ".join(b for b in bits if b)
+
+
+def visual_phrase(vis: Visual) -> str:
+    """La estructura visual (Block) como frase. Pura. Vacia si no hay nada."""
+    if vis.is_empty():
+        return ""
+    bits: list[str] = []
+    if vis.tone:
+        bits.append(_TONE.get(vis.tone, ""))
+    if vis.palette:
+        bits.append("palette " + ", ".join(vis.palette))
+    depth = [p for p in (vis.foreground, vis.midground, vis.background) if p]
+    if depth:
+        bits.append("depth: " + "; ".join(depth))
+    if vis.focal_point:
+        bits.append(f"focal point on {vis.focal_point}")
+    if vis.line:
+        bits.append(vis.line)
+    if vis.rhythm:
+        bits.append(vis.rhythm)
+    if vis.graphics:
+        bits.append(f'on-screen graphics: "{vis.graphics}"')
+    return ", ".join(b for b in bits if b)
+
+
+def compose_shot_visual(shot: Shot) -> str:
+    """Ensambla el artefacto del plano (action + camera + visual) en un texto de
+    encuadre apto para generacion (D-047). Reemplaza al viejo `framing` como
+    fuente; si el plano no tiene `action`, cae al `framing` legacy. Pura."""
+    base = (shot.action or "").strip() or (shot.framing or "").strip()
+    parts = [base, camera_phrase(shot.camera), visual_phrase(shot.visual)]
+    return ". ".join(p for p in parts if p)
+
+
+def narrative_brief(scene: Scene, characters: dict[str, Character] | None = None) -> str:
+    """Texto fuente (la narrativa de la escena) que alimenta la compilacion. Pura."""
+    characters = characters or {}
+    bits: list[str] = []
+    if scene.beat:
+        bits.append(f"Beat: {scene.beat.strip()}")
+    if scene.characters:
+        who: list[str] = []
+        for name in scene.characters:
+            ch = characters.get(name)
+            design = ch.design.prompt.strip() if ch and ch.design else ""
+            who.append(f"{name} ({design})" if design else name)
+        bits.append("Personajes: " + ", ".join(who))
+    if scene.dialogue:
+        bits.append(f"Diálogo (contexto, no lo describas literal): {scene.dialogue.strip()}")
+    if scene.ambience:
+        bits.append(f"Lugar/ambiente: {scene.ambience.strip()}")
+    return "\n".join(bits) or "(sin narrativa; describí un plano neutro y atmosférico)"
+
+
+def _deterministic_prompt(scene: Scene, characters: dict[str, Character] | None = None) -> str:
+    """Fallback sin LLM: concatena los campos narrativos en algo usable. Pura."""
+    parts: list[str] = []
+    if scene.beat:
+        parts.append(scene.beat.strip())
+    if scene.characters:
+        parts.append(", ".join(scene.characters))
+    if scene.ambience:
+        parts.append(scene.ambience.strip())
+    return ", ".join(parts) or (scene.prompt or scene.id)
+
+
+def compile_prompt(scene: Scene, characters: dict[str, Character] | None = None) -> str:
+    """Compila el prompt visual desde la narrativa. Haiku; sin key, deterministico."""
+    key = get_settings().anthropic_api_key
+    if not key:
+        logger.warning("prompts: sin ANTHROPIC_API_KEY -> prompt deterministico (degradado).")
+        return _deterministic_prompt(scene, characters)
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover
+        logger.warning("prompts: sin paquete anthropic -> prompt deterministico.")
+        return _deterministic_prompt(scene, characters)
+    client = anthropic.Anthropic(api_key=key)
+    msg = client.messages.create(
+        model=MODEL,
+        max_tokens=300,
+        system=_SYSTEM,
+        messages=[{"role": "user",
+                   "content": _PROMPT.format(brief=narrative_brief(scene, characters))}],
+    )
+    text = (msg.content[0].text or "").strip()
+    return text or _deterministic_prompt(scene, characters)
+
+
+def sync_scene_prompt(scene: Scene, characters: dict[str, Character] | None = None) -> Scene:
+    """Recompila el prompt y lo marca en-sintonia (auto, hash actualizado). Muta y devuelve."""
+    scene.prompt = compile_prompt(scene, characters)
+    scene.prompt_src_hash = scene.narrative_hash()
+    scene.prompt_manual = False
+    return scene
+
+
+def mark_synced(scene: Scene) -> Scene:
+    """Marca el prompt ACTUAL como en-sintonia sin recompilar (p.ej. tras el draft de author)."""
+    scene.prompt_src_hash = scene.narrative_hash()
+    scene.prompt_manual = False
+    return scene
