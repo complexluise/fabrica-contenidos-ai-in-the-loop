@@ -82,6 +82,26 @@ def create_app(projects_dir: Path = Path("projects"),
     def list_styles():
         return _available_styles(config_dir)
 
+    @app.get("/api/profiles")
+    def list_profiles():
+        """Perfiles de renderizado disponibles leidos de routing.yaml."""
+        raw = yaml.safe_load((config_dir / "routing.yaml").read_text(encoding="utf-8")) or {}
+        profiles = raw.get("profiles", {})
+        out = []
+        for key, rules in profiles.items():
+            meta = rules.get("_meta", {})
+            # Inferir proveedor principal del perfil hero para mostrarlo
+            hero_providers = (rules.get("hero") or {}).get("providers", [])
+            out.append({
+                "key":   key,
+                "label": meta.get("label", key),
+                "desc":  meta.get("desc", ""),
+                "badge": meta.get("badge", key),
+                "color": meta.get("color", "gray"),
+                "providers": hero_providers,
+            })
+        return out
+
     @app.get("/api/projects")
     def list_projects():
         from ..project import load_project_spec

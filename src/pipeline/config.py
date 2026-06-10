@@ -86,7 +86,8 @@ def load_routing(path: Path, profile: str = "prod") -> RoutingConfig:
     raw = _load_yaml(path)
     if "profiles" in raw:
         profiles = raw.pop("profiles")
-        rules = profiles.get(profile) or profiles["prod"]
+        rules = dict(profiles.get(profile) or profiles["prod"])
+        rules.pop("_meta", None)  # metadata de display — no es una regla de routing
     else:
         rules = raw.pop("hybrid", {})
     raw["rules"] = rules

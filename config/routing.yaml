@@ -7,6 +7,11 @@
 #           minimo costo, sin gate enforcement. Ideal para validar el storyboard.
 profiles:
   prod:
+    _meta:
+      label: "Produccion"
+      desc: "Ensemble en hero, gate de calidad, modelos premium. Para entrega final."
+      badge: "calidad"
+      color: "green"
     hero:
       strategy: ensemble
       providers: [veo, seedance, kling]
@@ -16,7 +21,13 @@ profiles:
     volume:
       strategy: cascade
       providers: [kling, seedance, veo]
+
   proto:
+    _meta:
+      label: "Prototipo fal"
+      desc: "Kling directo, sin ensemble. Barato y rapido para validar el storyboard."
+      badge: "fal.ai"
+      color: "yellow"
     hero:
       strategy: router
       providers: [kling]
@@ -26,6 +37,22 @@ profiles:
     volume:
       strategy: router
       providers: [kling]
+
+  proto_veo:
+    _meta:
+      label: "Prototipo Google"
+      desc: "Veo directo desde Google AI. Para cuando no hay credito en fal."
+      badge: "google"
+      color: "blue"
+    hero:
+      strategy: router
+      providers: [veo]
+    standard:
+      strategy: router
+      providers: [veo]
+    volume:
+      strategy: router
+      providers: [veo]
 
 # Gate suave por defecto: puntua y registra (Claude vision) pero NO bloquea ni
 # regenera mientras iteras. Poner true para endurecer (dispara reintento/escalado).

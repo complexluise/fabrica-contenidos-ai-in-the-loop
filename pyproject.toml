@@ -18,6 +18,7 @@ dependencies = [
 apis = [
     "anthropic>=0.40",
     "fal-client>=0.5",
+    "google-genai>=0.8",
 ]
 vision = [  # señales numéricas del gate (CLIP/aesthetic). Pesado: torch.
     "torch>=2.2",
