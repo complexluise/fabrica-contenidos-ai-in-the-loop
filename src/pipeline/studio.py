@@ -598,5 +598,19 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
             f"El keyframe elegido de estas escenas ya no está en disco: {broken}. "
             "Regenerá los encuadres (la cache se limpió o el proyecto se movió) y volvé a elegir."
         )
+    # D-056: hueco simétrico de D-055. Igual que la selección, la cara de casting
+    # puede apuntar a un archivo borrado (cache limpiada, proyecto forkeado sin cache).
+    # `apply_casting` ya la metió como `character.refs`; si está rota, el provider
+    # revienta tarde al subir el init_image de identidad. Fallar acá, claro y temprano.
+    # Solo importan las caras que ESTE render usa: personajes referenciados por alguna
+    # escena (no bloquear por entradas de casting viejas de personajes no usados).
+    used_characters = {name for s in spec.scenes for name in s.characters}
+    broken_faces = sorted(set(verify_casting(project)) & used_characters)
+    if broken_faces:
+        raise RuntimeError(
+            f"La cara elegida de estos personajes ya no está en disco: {broken_faces}. "
+            "Volvé a elegir la cara ('pipeline pick-cast') o regenerá el casting "
+            "(la cache se limpió o el proyecto se movió)."
+        )
     return await run_project(project, spec, cfg, keyframe_overrides=merged,
                              concurrency=concurrency)

@@ -19,7 +19,7 @@ import yaml
 
 from pipeline.config import RoutingConfig, StrategyRule
 from pipeline.contracts import Scene, Shot
-from pipeline.project import Project, ProjectSpec, relativize
+from pipeline.project import Character, Project, ProjectSpec, relativize
 from pipeline.state import estimate_image_cost, signing_advisories
 from pipeline.strategies.dispatch import select_rule
 from pipeline.studio import (
@@ -88,6 +88,43 @@ async def test_render_raises_on_broken_selection(tmp_path):
     # cfg no se toca antes de la validacion (run_project nunca se llama).
     with pytest.raises(RuntimeError, match="ya no está en disco"):
         await render(proj, spec, None)
+
+
+async def test_render_raises_on_broken_casting(tmp_path):
+    # D-056: hueco simetrico de D-055. La seleccion de keyframe esta OK en disco,
+    # pero la cara de casting de un personaje referenciado apunta a un archivo
+    # borrado (residuo de fork/rename, cache limpiada). render() debe fallar claro
+    # y temprano, no dejar que el provider reviente subiendo un init_image fantasma.
+    proj = _project(tmp_path)
+    a = _img(proj, "a.png")  # keyframe valido -> pasa el chequeo de selections
+    _write(proj.selections_path, {"s1": relativize(proj.dir, a)})
+    _write(proj.dir / "casting.yaml", {"Presentador": "cache/cast/missing.png"})
+    spec = ProjectSpec(
+        slug="t", style="lego", format="9:16",
+        characters={"Presentador": Character(
+            name="Presentador", refs=[Path("cache/cast/missing.png")])},
+        scenes=[Scene(id="s1", prompt="p", duration_s=2, characters=["Presentador"])],
+    )
+    with pytest.raises(RuntimeError, match="cara elegida"):
+        await render(proj, spec, None)
+
+
+async def test_render_ignores_broken_casting_of_unused_character(tmp_path):
+    # No bloquear por una entrada de casting vieja de un personaje que ninguna escena
+    # del render usa: solo importan las caras que el render realmente va a subir.
+    proj = _project(tmp_path)
+    a = _img(proj, "a.png")
+    _write(proj.selections_path, {"s1": relativize(proj.dir, a)})
+    _write(proj.dir / "casting.yaml", {"Viejo": "cache/cast/missing.png"})
+    spec = ProjectSpec(
+        slug="t", style="lego", format="9:16",
+        scenes=[Scene(id="s1", prompt="p", duration_s=2)],  # no referencia a "Viejo"
+    )
+    # cfg=None: si la validacion no bloquea, run_project se invoca y revienta con
+    # AttributeError sobre None -> prueba que pasamos la validacion de casting.
+    with pytest.raises(Exception) as exc:
+        await render(proj, spec, None)
+    assert "cara elegida" not in str(exc.value)
 
 
 # --- T9: invalidar previews al reelegir el ancla ---------------------------
