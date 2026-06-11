@@ -801,6 +801,30 @@ review ya estaban cerrados o son deudas asumidas (ver [D-054]). Aditivo, sin cam
 
 ---
 
+## Sprint 6.22 — `render()` valida casting (D-056)
+
+**Objetivo:** cerrar el hueco simétrico que dejó [D-055]: `render()` validaba selecciones rotas pero no
+el casting, aunque el detector (`verify_casting`) ya existía. Disparado por un `casting.yaml` real
+apuntando a otro proyecto (fork). Backend testeado (core); ver [D-056].
+
+### Acceptance Criteria
+- [x] AC1 — `render()` interseca `verify_casting` con los personajes referenciados por las escenas y
+  **falla claro y temprano** (antes de tocar el provider) si una cara usada no está en disco. 🔬
+- [x] AC2 — Una entrada de casting vieja de un personaje **no usado** no aborta el render. 🔬
+- [x] AC3 — Alineación de datos del proyecto fracking: `casting.yaml` relativo local +
+  `storyboard_backend: fal` explícito ([D-053]).
+
+### Tasks (orden test-first)
+- [x] T6.22.1 — `tests/test_keyframes_integrity.py`: `test_render_raises_on_broken_casting` (red) +
+  `test_render_ignores_broken_casting_of_unused_character`. 🔬 ✅
+- [x] T6.22.2 — `studio.py`: `render` valida casting de personajes usados (green). 🔬 ✅
+- [x] T6.22.3 — ADR D-056 + índice del README. ✅
+- [x] T6.22.4 — Datos: `desmintiendo_fracking_sostenible/{casting.yaml,project.yaml}`. ✅
+
+> **Estado:** core en verde (**287 tests**, +2 en `test_keyframes_integrity`).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
