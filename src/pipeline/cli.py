@@ -280,6 +280,33 @@ def pick(
 
 
 @app.command()
+def animatic(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    backend: str = typer.Option(None, "--backend", help="Backend de imagen: fal (default) o google (D-053)."),
+    config_dir: Path = typer.Option(Path("config")),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[AI-in-the-Loop · D-060] La película en poses: genera las poses frontera
+    (apertura -> destino) de cada plano y abre la hoja de contactos, ANTES de pagar video."""
+    from .studio import animatic as build_animatic
+
+    try:
+        proj, spec, cfg = _load_project(project, projects_dir, config_dir, backend=backend)
+        n_shots = sum(len(s.shots) or 1 for s in spec.scenes)
+        console.print(f"[bold]{project}[/] - animatic: {n_shots} planos x 2 poses"
+                      f" | backend {cfg.storyboard.name}")
+        _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
+        sheet = asyncio.run(build_animatic(proj, spec, cfg))
+        console.print(f"\n[bold green]Listo[/] animatic: {sheet}\n"
+                      "  si una pose no convence: ajusta el ancla (pick) o el seed del plano y re-corre.")
+        console.print(_cost_summary("poses", n_shots * 2, cfg.storyboard.est_cost_per_image_usd))
+    except Exception as exc:
+        if _is_balance_error(exc):
+            console.print("[yellow]Saldo agotado.[/] Cambia con: [cyan]--backend google[/]")
+        raise
+
+
+@app.command()
 def render(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     keyframe: list[str] = typer.Option(

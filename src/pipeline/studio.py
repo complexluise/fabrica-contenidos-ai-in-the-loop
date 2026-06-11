@@ -614,3 +614,40 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
         )
     return await run_project(project, spec, cfg, keyframe_overrides=merged,
                              concurrency=concurrency)
+
+
+async def animatic(project: Project, spec: ProjectSpec, cfg: Config,
+                   open_sheet: bool = True) -> Path:
+    """[D-060] Genera/asegura el ANIMATIC: las poses frontera (start → destino) de
+    cada plano del film, en orden de cinta, y abre la hoja de contactos.
+
+    El checkpoint humano que faltaba: ver la película en stills ANTES de pagar el
+    video. Las poses quedan cacheadas con las MISMAS keys que usará el render →
+    revisar es barato y el render reusa todo. Curación por excepción: si una pose
+    no convence, se ajusta el spec/seed o el ancla y se re-corre (solo esa cambia)."""
+    from .contact_sheet import build_contact_sheet, write_and_open
+    from .keyframe import KeyframeGenerator
+    from .project import character_refs
+    from .runner import ensure_boundary_stills, plan_ribbon
+
+    # Anclas elegidas (selections.yaml), igual que render — sin exigir completitud:
+    # el animatic puede verse con anclas parciales (los destinos faltantes se generan).
+    overrides: dict[str, Path] = {}
+    if project.selections_path.exists():
+        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+        overrides = {sid: _resolve_under(project.dir, p) for sid, p in sel.items()
+                     if _resolve_under(project.dir, p).exists()}
+    for scene in spec.scenes:  # refs de personaje, como hace el runner
+        scene.character_refs = character_refs(scene, spec.characters)
+
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch",
+                                  backend=cfg.storyboard.keyframe.backend)
+    boundaries = await ensure_boundary_stills(project, spec, cfg, keyframer, overrides)
+
+    groups: dict[str, list[Path]] = {}
+    for entry, b in zip(plan_ribbon(spec), boundaries):
+        if b is not None:
+            groups[f"{entry['shot_id']}  (apertura → destino)"] = [b["start"], b["destino"]]
+    html = build_contact_sheet(
+        f"Animatic · {spec.slug} — la película en poses, antes de pagar el video", groups)
+    return write_and_open(html, project.dir / "animatic_review.html", open_browser=open_sheet)

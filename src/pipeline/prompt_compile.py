@@ -134,6 +134,36 @@ def compose_video_prompt(shot: Shot) -> str:
     return ", ".join(p for p in parts if p)
 
 
+# Cómo entra la cámara al plano según la transición de ENTRADA (D-060): en cortes
+# duros el encuadre se libera; en transiciones suaves se mantiene cercano al previo.
+_REFRAME_BY_TRANSITION = {
+    "cut": "a hard cut: completely new framing and camera position",
+    "smash_cut": "an abrupt smash cut: drastically different framing",
+    "wipe": "a wipe: new framing",
+    "match_cut": "a match cut: closely matched composition to the previous moment",
+    "dissolve": "a soft dissolve: similar framing flowing from the previous moment",
+    None: "a continuous flow from the previous moment, same framing language",
+}
+
+
+def compose_start_pose_prompt(shot: Shot, transition_in: str | None = None) -> str:
+    """Texto para el START-STILL del plano (D-060): la pose de APERTURA.
+
+    Describe el estado donde el movimiento APENAS COMIENZA (no el pico — el pico
+    es el destino) y cómo se reencuadra según la transición de entrada. El still
+    se genera EDITANDO el destino del plano anterior → continuidad de elementos
+    a través de todo el film, incluso en cortes. Pura."""
+    base = _shot_base(shot)
+    reframe = _REFRAME_BY_TRANSITION.get(transition_in, _REFRAME_BY_TRANSITION[None])
+    parts = [
+        f"One beat later, entering the next shot via {reframe}",
+        f"the OPENING composition of: {base}" if base else "",
+        "the action just beginning, NOT yet at its peak",
+        camera_phrase(shot.camera),
+    ]
+    return ". ".join(p for p in parts if p)
+
+
 # Alias retrocompatible: el "visual del plano" es el del keyframe (la imagen fija).
 compose_shot_visual = compose_keyframe_prompt
 
