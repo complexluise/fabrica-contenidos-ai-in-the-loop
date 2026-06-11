@@ -178,7 +178,8 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
 # (centavos, secuencial) + Fase B clips (paralelo). El trim conserva la COLA (el aterrizaje vive
 # en el último frame). La key del clip incluye la key de su start-still → la cascada de cache se
 # acota al nivel barato. Checkpoint `pipeline animatic`: la película en poses ANTES de pagar video.
-# UX en 4 etapas: Casting → Keyframe (escena/storyboard) → Planos/Animatic → Producción.
+# UX en etapas (D-061, una página = una decisión): Guion → Storyboard → Casting → Encuadres →
+# Animatic → Producción. El Studio refleja esto en páginas separadas con costo visible en cada una.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):

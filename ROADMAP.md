@@ -949,6 +949,38 @@ checkpoint **Animatic**: la película en stills antes de pagar video. Ver [D-060
 
 ---
 
+## Sprint 6.27 — El Studio en etapas: Casting / Encuadres / Animatic (D-061)
+
+**Objetivo:** "Elegir" (Picker, 831 líneas) acumulaba tres decisiones disfrazadas de una. Una página
+= una decisión = una altitud: **Casting** (quiénes) → **Encuadres** (cómo se ve cada escena) →
+**Animatic** (cómo fluye la película, en poses, antes de pagar video). Costos visibles en CADA etapa
+(requisito del usuario). Ver [D-061].
+
+### Acceptance Criteria
+- [x] AC1 — `ensure_boundary_stills(dry=True)`: solo lectura, mismas cache keys que el render;
+  `studio.animatic_strip`. 🔬
+- [x] AC2 — Endpoints: `GET /animatic` (tira + poses faltantes + costo de completar), `POST /animatic`
+  (job), `DELETE /animatic/{shot}/{which}` (curación por excepción); `status.animatic`.
+- [x] AC3 — UI: `Casting.svelte` + `Encuadres.svelte` (split fiel del Picker) + `Animatic.svelte`
+  (cinta por escena, par apertura→destino, íconos de transición, ↻ por pose); Picker eliminado;
+  espina de 7 pasos. Build limpio.
+- [x] AC4 — Costo visible antes de cada botón que gasta: caras, encuadres, poses faltantes y render
+  estimado (perfil más barato) en el Animatic.
+- [x] AC5 — Verificación real sin costo sobre `esquiva_conversemos`: 11 destinos en cache,
+  11 aperturas faltantes = $0.033 por completar.
+
+### Tasks (orden test-first)
+- [x] T6.27.1 — `tests/test_animatic_strip.py` (core): tira completa sin generar, transición/duración,
+  ancla elegida como destino. 🔬 ✅
+- [x] T6.27.2 — `runner.py` dry + `studio.animatic_strip` + endpoints + `status.animatic`. 🔬 ✅
+- [x] T6.27.3 — `studio.svelte.js` (STAGES/NEXT/stepDone/GLOSARIO) + `App.svelte` + 3 vistas. ✅
+- [x] T6.27.4 — ADR D-061 (estrena `0061-0070.md`) + índice + SPEC. ✅
+
+> **Estado:** core en verde (**314 tests**, +3). Deuda asumida: "▶ reproducir animatic" (poses en
+> secuencia con audio) y seed por pose, para una iteración futura.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
