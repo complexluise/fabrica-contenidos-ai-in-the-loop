@@ -759,6 +759,48 @@ review ya estaban cerrados o son deudas asumidas (ver [D-054]). Aditivo, sin cam
 
 ---
 
+## Sprint 6.21 — Endurecimiento del flujo keyframes/UI (D-055)
+
+**Objetivo:** cerrar las tensiones del diagnóstico de UI (`docs/notas/feedback-keyframes-ui.md`) que
+**rompen en silencio** o esconden incompletitud/costo, priorizando el ciclo de vida de los artefactos
+(`selections.yaml`/`casting.yaml`/`shot_previews.yaml`) y la honestidad de la UI. Backend testeado
+(core); UI por build + smoke. Ver [D-055].
+
+### Acceptance Criteria
+- [x] AC1 — Integridad (T5/T10/T14): `verify_selections`/`verify_casting` detectan referencias a
+  archivos borrados; `render()` falla claro si el ancla no está en disco; el status expone `integrity`
+  y la UI lo muestra como banner. 🔬
+- [x] AC2 — Previews coherentes (T9/T2): `record_picks` invalida `shot_previews` de la escena al
+  reelegir el ancla; la UI recarga tras guardar y rotula la tira como previa (el render regenera). 🔬
+- [x] AC3 — Avisos al firmar (T7/T13): `signing_advisories` reporta escena sin planos + clase fuera del
+  perfil; `select_rule` loguea el fallback a `standard`; PUT y status devuelven `advisories`. 🔬
+- [x] AC4 — Costo + velocidad (T15/T6): `estimate_image_cost` + status `est_cost_per_image_usd`; el
+  Picker muestra el costo estimado antes de generar y un dial de concurrencia. 🔬
+- [x] AC5 — Pool de candidatos (T3/T11): `delete_candidate` descarta y reconcilia la selección por
+  path; `is_upload` marca el origen; UI con ✕ por miniatura y badge "tu foto". 🔬
+- [x] AC6 — `GLOSARIO` vivo (T8): cableado como tooltips en los encabezados (antes código muerto).
+- [~] AC7 — Deuda asumida (T1/T4): par backend-imagen × perfil-video como contrato visual persistido y
+  rediseño de granularidad global/escena/plano. **Parcial**: rótulos + dial + costo hechos; el contrato
+  persistido y el rediseño completo quedan para su propia iteración.
+
+### Tasks (orden test-first)
+- [x] T6.21.1 — `studio.py`: `verify_selections`/`verify_casting`/`invalidate_shot_previews`/
+  `delete_candidate`/`is_upload`; `record_picks` invalida previews; `render` valida disco. 🔬 ✅
+- [x] T6.21.2 — `state.py`: `signing_advisories` + `estimate_image_cost`; `dispatch.select_rule` loguea fallback. 🔬 ✅
+- [x] T6.21.3 — `tests/test_keyframes_integrity.py` (15 casos de core). 🔬 ✅
+- [x] T6.21.4 — `server/app.py`: status (`integrity`/`advisories`/`est_cost`), `/candidates`
+  (`keyframe_sources`), PUT (`advisories`), `DELETE /candidates/{scene}/{idx}`. ✅
+- [x] T6.21.5 — `Picker.svelte`: banners, dial de velocidad, costo, ✕ de descarte, badge origen, tooltips; build limpio. ✅
+- [x] T6.21.6 — ADR D-055 + índice del README. ✅
+- [ ] T6.21.7 — Smoke real (UI): abrir Elegir con una selección rota → banner; descartar candidato →
+  reconciliación; generar con dial → concurrencia. **Pendiente** de correr el Studio.
+
+> **Estado:** core en verde (**285 tests**, +15 en `test_keyframes_integrity`); build de UI limpio.
+> Las 15 tensiones del diagnóstico atacadas: 13 cerradas (backend + UI), 2 (T1/T4) parcialmente con la
+> deuda explícita en [D-055]. **Pendiente:** smoke del Studio corriendo (AC7 / T6.21.7).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
