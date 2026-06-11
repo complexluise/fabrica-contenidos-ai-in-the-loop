@@ -72,6 +72,7 @@ class ProjectSpec:
     title: str | None = None  # título legible (para el guion de export, D-029)
     brief: str | None = None  # brief del proyecto (para el guion de export, D-029)
     storyboard_backend: str = "fal"  # backend de imagen activo (D-053): "fal" | "google"
+    voice_backend: str = "kokoro"  # backend de voz/TTS activo (D-058): "kokoro" | "elevenlabs"
 
 
 def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
@@ -115,6 +116,7 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
         title=data.get("title"),
         brief=data.get("brief"),
         storyboard_backend=data.get("storyboard_backend", "fal"),
+        voice_backend=data.get("voice_backend", "kokoro"),
     )
 
 
@@ -262,6 +264,8 @@ def spec_to_dict(spec: ProjectSpec) -> dict:
     data["format"] = spec.format
     if spec.storyboard_backend and spec.storyboard_backend != "fal":
         data["storyboard_backend"] = spec.storyboard_backend
+    if spec.voice_backend and spec.voice_backend != "kokoro":
+        data["voice_backend"] = spec.voice_backend
     if spec.music:
         data["music"] = str(spec.music)
     if spec.voice_id:
