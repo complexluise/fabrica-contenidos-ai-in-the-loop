@@ -626,22 +626,9 @@ async def animatic(project: Project, spec: ProjectSpec, cfg: Config,
     revisar es barato y el render reusa todo. Curación por excepción: si una pose
     no convence, se ajusta el spec/seed o el ancla y se re-corre (solo esa cambia)."""
     from .contact_sheet import build_contact_sheet, write_and_open
-    from .keyframe import KeyframeGenerator
-    from .project import character_refs
     from .runner import ensure_boundary_stills, plan_ribbon
 
-    # Anclas elegidas (selections.yaml), igual que render — sin exigir completitud:
-    # el animatic puede verse con anclas parciales (los destinos faltantes se generan).
-    overrides: dict[str, Path] = {}
-    if project.selections_path.exists():
-        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
-        overrides = {sid: _resolve_under(project.dir, p) for sid, p in sel.items()
-                     if _resolve_under(project.dir, p).exists()}
-    for scene in spec.scenes:  # refs de personaje, como hace el runner
-        scene.character_refs = character_refs(scene, spec.characters)
-
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch",
-                                  backend=cfg.storyboard.keyframe.backend)
+    keyframer, overrides = _animatic_prep(project, spec, cfg)
     boundaries = await ensure_boundary_stills(project, spec, cfg, keyframer, overrides)
 
     groups: dict[str, list[Path]] = {}
@@ -651,3 +638,52 @@ async def animatic(project: Project, spec: ProjectSpec, cfg: Config,
     html = build_contact_sheet(
         f"Animatic · {spec.slug} — la película en poses, antes de pagar el video", groups)
     return write_and_open(html, project.dir / "animatic_review.html", open_browser=open_sheet)
+
+
+def _animatic_prep(project: Project, spec: ProjectSpec, cfg: Config):
+    """Preparación común del animatic: anclas elegidas + refs de personaje + keyframer.
+
+    Las anclas (selections.yaml) entran sin exigir completitud: el animatic puede
+    verse con anclas parciales (los destinos faltantes se generan/quedan None)."""
+    from .keyframe import KeyframeGenerator
+    from .project import character_refs
+
+    overrides: dict[str, Path] = {}
+    if project.selections_path.exists():
+        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+        overrides = {sid: _resolve_under(project.dir, p) for sid, p in sel.items()
+                     if _resolve_under(project.dir, p).exists()}
+    for scene in spec.scenes:  # refs de personaje, como hace el runner
+        scene.character_refs = character_refs(scene, spec.characters)
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch",
+                                  backend=cfg.storyboard.keyframe.backend)
+    return keyframer, overrides
+
+
+async def animatic_strip(project: Project, spec: ProjectSpec, cfg: Config) -> list[dict]:
+    """[D-061] La tira del animatic en SOLO LECTURA (cero costo): por plano, sus
+    poses (o None si faltan), la transición de entrada y la duración.
+
+    Computa las MISMAS cache keys que el render (dry=True) → lo que la página
+    Animatic muestra es exactamente lo que el render va a usar. La consumen
+    `GET /api/.../animatic` y el status (visibilidad de avance y costo)."""
+    from .runner import ensure_boundary_stills, plan_ribbon
+
+    keyframer, overrides = _animatic_prep(project, spec, cfg)
+    boundaries = await ensure_boundary_stills(project, spec, cfg, keyframer,
+                                              overrides, dry=True)
+    out: list[dict] = []
+    for entry, b in zip(plan_ribbon(spec), boundaries):
+        shot = entry["shot"]
+        out.append({
+            "shot_id": entry["shot_id"],
+            "scene": entry["scene"].id,
+            "beat": entry["scene"].beat,
+            "transition_in": entry["transition_in"],
+            "duration_s": shot.duration_s,
+            "intention": shot.intention or "",
+            "start": str(b["start"]) if b and b["start"] else None,
+            "destino": str(b["destino"]) if b and b["destino"] else None,
+            "ready": bool(b and b["start"] and b["destino"]),
+        })
+    return out

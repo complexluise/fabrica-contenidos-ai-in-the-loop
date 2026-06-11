@@ -425,7 +425,7 @@ def create_app(projects_dir: Path = Path("projects"),
                 "cast_selections": load_yaml(project.dir / "casting.yaml")}
 
     @app.get("/api/projects/{slug}/status")
-    def project_status(slug: str):
+    async def project_status(slug: str):
         """Estado derivado del proyecto (D-032): el `stage` del bucle + el detalle
         por paso. La verdad se calcula en `state.derive_state`; aca solo decoramos
         con lo que es del server (claves de settings, URL del video final)."""
@@ -441,6 +441,17 @@ def create_app(projects_dir: Path = Path("projects"),
                             "casting": verify_casting(project)}          # T10
         out["advisories"] = signing_advisories(spec, _cfg.routing, _cfg.providers)  # T7/T13/D-057
         out["est_cost_per_image_usd"] = _cfg.storyboard.est_cost_per_image_usd  # T15
+        # D-061: avance del animatic (solo lectura, cero costo) para la espina/página.
+        try:
+            from ..studio import animatic_strip
+            strip = await animatic_strip(project, spec, _cfg)
+            missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
+            out["animatic"] = {
+                "total": len(strip), "ready": sum(1 for e in strip if e["ready"]),
+                "missing_poses": missing,
+                "est_missing_cost_usd": round(missing * _cfg.storyboard.est_cost_per_image_usd, 4)}
+        except Exception:
+            out["animatic"] = None
 
         final_url = None
         run = project.latest_run()
@@ -578,6 +589,65 @@ def create_app(projects_dir: Path = Path("projects"),
             return {"url": file_url(dest), "file": dest.name}
 
         return jobs.spawn("music", slug, coro()).to_dict()
+
+    # --- animatic (D-060/D-061): la película en poses, antes de pagar video ---
+    @app.get("/api/projects/{slug}/animatic")
+    async def get_animatic(slug: str):
+        """La tira del animatic en SOLO LECTURA (cero costo): poses por plano +
+        costo estimado de completar lo que falta. Mismas cache keys que el render."""
+        from ..studio import animatic_strip
+
+        project, spec, cfg = load(slug)
+        strip = await animatic_strip(project, spec, cfg)
+        missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
+        for e in strip:  # paths -> URLs servibles
+            e["start"] = file_url(e["start"]) if e["start"] else None
+            e["destino"] = file_url(e["destino"]) if e["destino"] else None
+        return {"strip": strip,
+                "total": len(strip),
+                "ready": sum(1 for e in strip if e["ready"]),
+                "missing_poses": missing,
+                "est_missing_cost_usd": round(missing * cfg.storyboard.est_cost_per_image_usd, 4)}
+
+    @app.post("/api/projects/{slug}/animatic")
+    async def gen_animatic(slug: str, backend: str | None = None):
+        """Genera las poses frontera que falten (job). Cacheado: re-correr = $0."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if backend:  # toggle de motor de imagen por llamada (D-051/D-053)
+            from ..config import load_config
+            cfg = load_config(config_dir, spec.style, backend=backend)
+
+        async def coro():
+            sheet = await studio.animatic(project, spec, cfg, open_sheet=False)
+            return {"sheet": str(sheet)}
+
+        return jobs.spawn("animatic", slug, coro()).to_dict()
+
+    @app.delete("/api/projects/{slug}/animatic/{shot_id}/{which}")
+    async def drop_animatic_pose(slug: str, shot_id: str, which: str):
+        """Descarta UNA pose cacheada (curación por excepción, D-060): el próximo
+        'generar' regenera solo esa. `which` = start | destino."""
+        from ..studio import animatic_strip
+
+        if which not in ("start", "destino"):
+            raise HTTPException(400, "which debe ser 'start' o 'destino'.")
+        project, spec, cfg = load(slug)
+        strip = await animatic_strip(project, spec, cfg)
+        entry = next((e for e in strip if e["shot_id"] == shot_id), None)
+        if entry is None:
+            raise HTTPException(404, f"Plano '{shot_id}' no encontrado.")
+        path = entry.get(which)
+        if not path:
+            return {"dropped": False, "reason": "la pose no existe en cache"}
+        p = Path(path)
+        if p.exists():
+            p.unlink()
+        sidecar = p.with_suffix(".meta.json")
+        if sidecar.exists():
+            sidecar.unlink()
+        return {"dropped": True, "shot_id": shot_id, "which": which}
 
     @app.post("/api/projects/{slug}/cast")
     async def gen_cast(slug: str, n: int = 4, backend: str | None = None):

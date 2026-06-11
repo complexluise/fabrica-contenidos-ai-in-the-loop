@@ -106,7 +106,7 @@ def plan_ribbon(spec: ProjectSpec) -> list[dict]:
 
 
 async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyframer,
-                                 keyframe_overrides: dict) -> list[dict]:
+                                 keyframe_overrides: dict, dry: bool = False) -> list[dict]:
     """Fase A del animatic (D-060): asegura las DOS poses frontera de cada plano.
 
     - **Destino** (el keyframe): el ancla elegida por el humano en el plano 1 de la
@@ -115,6 +115,10 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
       ANTERIOR del film (cruza escenas → continuidad de elementos, incluso en
       cortes). El primer plano del film deriva de su propio destino ("momentos
       antes"). Todo cacheado: el animatic es revisable y el re-run cuesta $0.
+
+    `dry=True` (D-061): solo LECTURA — computa las keys y mira el cache, sin
+    generar ni gastar; las poses ausentes quedan None. Lo usan el endpoint GET
+    del animatic y el status (visibilidad sin costo).
 
     Devuelve, por entrada de la cinta: {destino, kf_key, start, start_key, cost}.
     """
@@ -136,7 +140,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
                 shot_id=shot_id, idx=idx, transition_in=entry["transition_in"],
                 keyframe_overrides=keyframe_overrides,
                 prev_destino=prev_destino, prev_destino_key=prev_destino_key,
-                scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key)
+                scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key, dry=dry)
         except Exception as exc:  # noqa: BLE001 — un still fallido no aborta el run
             logger.error("[%s] FALLO generando poses frontera: %s", shot_id, exc)
             out.append(None)
@@ -150,7 +154,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
 async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx,
                            transition_in, keyframe_overrides,
                            prev_destino, prev_destino_key,
-                           scene_prev_kf, scene_prev_key) -> dict:
+                           scene_prev_kf, scene_prev_key, dry: bool = False) -> dict:
     """Las dos poses frontera de UN plano (destino + start). Cacheadas."""
     refs_io = resolve_refs(project.dir, scene.character_refs)
     ref_sig = sorted(str(r) for r in scene.character_refs)
@@ -173,6 +177,8 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
         hit = project.cache_lookup("keyframes", kf_key, ".png")
         if hit is not None:
             destino = hit
+        elif dry:
+            destino = None  # solo lectura: falta esta pose (visible, sin gastar)
         else:
             logger.info("[%s] %s | generando destino%s...", shot_id, scene.class_,
                         " (encadenado)" if chain_refs else "")
@@ -183,8 +189,12 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             cost += cfg.style.keyframe.cost_per_image
 
     # --- start-still: la pose de apertura, derivada del destino anterior ---
-    source, source_key = (prev_destino, prev_destino_key) if prev_destino is not None \
-        else (destino, kf_key)  # primer plano del film: "momentos antes" de su destino
+    # La KEY de la cadena sigue al destino previo aunque su archivo falte (dry):
+    # las keys del animatic en solo-lectura deben coincidir con las del render.
+    if prev_destino_key is not None:
+        source, source_key = prev_destino, prev_destino_key
+    else:
+        source, source_key = destino, kf_key  # primer plano: "momentos antes" del propio destino
     start_ext = compose_start_pose_prompt(shot, transition_in)
     start_styled = build_styled_prompt(scene, cfg.style, start_ext)
     start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig)
@@ -194,6 +204,8 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     hit = project.cache_lookup("keyframes", start_key, ".png")
     if hit is not None:
         start = hit
+    elif dry or source is None:  # dry: solo lectura; sin fuente no hay derivación
+        start = None
     else:
         logger.info("[%s] generando pose de apertura (animatic)...", shot_id)
         tmp = await keyframer.generate(scene, ref_images=[source] + refs_io,

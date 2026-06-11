@@ -15,12 +15,17 @@ export const studio = $state({
 //   "ia"  -> la maquina propone/ejecuta  (azul)
 //   "lee" -> lectura/contexto            (neutro)
 // Ajustes (claves) NO es un paso del bucle: es setup. Vive aparte (CONFIG, #4).
+// D-061: "Elegir" se separa en tres etapas, de lo grueso a lo fino — una página,
+// una decisión: Casting (QUIENES) -> Encuadres (como se VE cada escena) ->
+// Animatic (como FLUYE la pelicula, en poses, antes de pagar video).
 export const STAGES = [
-  { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",          actor: "lee" },
-  { id: "importar",   n: 1, label: "Importar",   sub: "Texto -> borrador (la IA)",   actor: "ia"  },
-  { id: "storyboard", n: 2, label: "Storyboard", sub: "Edita y firma el plan",       actor: "tu"  },
-  { id: "elegir",     n: 3, label: "Elegir",     sub: "La IA propone, vos decidis",  actor: "tu"  },
-  { id: "producir",   n: 4, label: "Producir",   sub: "Armar el video y el paquete", actor: "ia"  },
+  { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",            actor: "lee" },
+  { id: "importar",   n: 1, label: "Guion",      sub: "Texto -> borrador (la IA)",     actor: "ia"  },
+  { id: "storyboard", n: 2, label: "Storyboard", sub: "Edita y firma el plan",         actor: "tu"  },
+  { id: "casting",    n: 3, label: "Casting",    sub: "La cara de cada personaje",     actor: "tu"  },
+  { id: "encuadres",  n: 4, label: "Encuadres",  sub: "La imagen clave de cada escena", actor: "tu" },
+  { id: "animatic",   n: 5, label: "Animatic",   sub: "La pelicula en poses",          actor: "tu"  },
+  { id: "producir",   n: 6, label: "Producir",   sub: "Armar el video y el paquete",   actor: "ia"  },
 ];
 
 // Configuración (claves de API): setup transversal, fuera del bucle numerado (#4).
@@ -28,8 +33,9 @@ export const CONFIG = { id: "ajustes", label: "Configuración", sub: "Claves de 
 
 // Glosario: traducir la jerga a lenguaje humano (se muestra inline).
 export const GLOSARIO = {
-  keyframe: "imagen base de la que sale cada plano",
+  keyframe: "la imagen clave de la escena: el momento donde el plano ATERRIZA (su destino)",
   casting: "la cara del personaje, fijada una vez",
+  animatic: "la pelicula completa en poses (apertura -> destino por plano), antes de pagar video",
   "rough cut": "corte de referencia, no el definitivo",
   plano: "una toma; el video se arma juntando planos",
   storyboard: "el plan: escenas y planos, antes de generar",
@@ -99,9 +105,9 @@ export const PIPELINE_ORDER = ["sin_claves", "guion", "casting", "encuadres", "r
 const NEXT = {
   sin_claves: { tab: "ajustes",    label: "Configurar FAL_KEY",              why: "Sin la clave de fal.ai no se puede generar nada." },
   guion:      { tab: "storyboard", label: "Firmar el plan",                  why: "Revisá las escenas y firmá el plan antes de generar." },
-  casting:    { tab: "elegir",     label: "Elegir la cara del personaje",    why: "Fijá el casting antes de los encuadres." },
-  encuadres:  { tab: "elegir",     label: "Elegir encuadres",                why: "La IA propone candidatos; vos elegís el de cada escena." },
-  render:     { tab: "producir",   label: "Armar el video",                  why: "Ya elegiste todo: la máquina ejecuta." },
+  casting:    { tab: "casting",    label: "Elegir la cara del personaje",    why: "Fijá el casting antes de los encuadres." },
+  encuadres:  { tab: "encuadres",  label: "Elegir encuadres",                why: "La IA propone candidatos; vos elegís el de cada escena." },
+  render:     { tab: "animatic",   label: "Revisar el animatic",             why: "Mirá la película en poses antes de gastar en video; si te convence, pasá a Producción." },
   paquete:    { tab: "producir",   label: "Armar el paquete de edición",     why: "Empaquetá para la editora." },
 };
 
@@ -124,7 +130,12 @@ export function stepDone(id, st) {
   if (id === "ajustes")    return at > PIPELINE_ORDER.indexOf("sin_claves");
   if (id === "importar")   return at > PIPELINE_ORDER.indexOf("guion");
   if (id === "storyboard") return at > PIPELINE_ORDER.indexOf("guion");
-  if (id === "elegir")     return at > PIPELINE_ORDER.indexOf("encuadres");
+  if (id === "casting")    return at > PIPELINE_ORDER.indexOf("casting");
+  if (id === "encuadres")  return at > PIPELINE_ORDER.indexOf("encuadres");
+  // Animatic: hecho cuando todas las poses estan en cache (o si ya se renderizo).
+  if (id === "animatic")
+    return (st.animatic && st.animatic.total > 0 && st.animatic.ready >= st.animatic.total)
+           || at > PIPELINE_ORDER.indexOf("render");
   if (id === "producir")   return st.stage === "completo";
   return false;
 }
