@@ -1,6 +1,6 @@
 <script>
-  import { get, post, put, runJob, humanError, bufToBase64 } from "../lib/api.js";
-  import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
+  import { get, post, put, del, runJob, humanError, bufToBase64 } from "../lib/api.js";
+  import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
   let cand  = $state({ keyframes: {}, cast: {} });
@@ -11,6 +11,7 @@
   let err   = $state("");
   let saved = $state(false);
   let n     = $state(2);
+  let conc  = $state(5); // T6/D-055: velocidad de generación (escenas en vuelo simultáneo)
 
   // Prompts para la IA (cargados del spec, editables antes de generar)
   let projectSpec = $state(null);
@@ -103,7 +104,7 @@
   function generate(kind) {
     busy = kind; err = ""; saved = false;
     progress = "Pidiendole opciones a la IA...";
-    runJob(`/api/projects/${slug}/${kind}?n=${n}&backend=${genBackend}`, {
+    runJob(`/api/projects/${slug}/${kind}?n=${n}&backend=${genBackend}&concurrency=${conc}`, {
       onLine: (l) => (progress = l),
       onDone: async (status) => {
         busy = "";
@@ -285,6 +286,22 @@
       if (Object.keys(castPicks).length)
         await post(`/api/projects/${slug}/pick-cast`, { picks: castPicks });
       saved = true;
+      // T9/D-055: (re)elegir el ancla invalida los previews encadenados server-side;
+      // recargamos para que la tira de planos viejos desaparezca (no muestra el ancla viejo).
+      await load();
+      await refreshStatus();
+    } catch (e) {
+      err = humanError(e);
+    }
+  }
+
+  // T3/D-055: descartar un candidato ("dejame solo 3"). Reconcilia la selección server-side.
+  async function discardCandidate(sceneId, i) {
+    err = "";
+    try {
+      await del(`/api/projects/${slug}/candidates/${sceneId}/${i}`);
+      const np = { ...kfPicks }; delete np[sceneId]; kfPicks = np; // los índices se corrieron
+      await load();
       await refreshStatus();
     } catch (e) {
       err = humanError(e);
@@ -292,6 +309,13 @@
   }
 
   const entries = (o) => Object.entries(o || {});
+  // T5/T14 + T7/T13 + T15/D-055: reconciliación disco<->estado, avisos y costo estimado.
+  let brokenSel  = $derived(studio.status?.integrity?.selections ?? []);
+  let brokenCast = $derived(studio.status?.integrity?.casting ?? []);
+  let advisories = $derived(studio.status?.advisories ?? []);
+  let sceneCount = $derived(projectSpec?.scenes?.length ?? 0);
+  let estPerImg  = $derived(studio.status?.est_cost_per_image_usd ?? 0.003);
+  let estCost    = $derived(sceneCount * n * estPerImg);
   let needsCast = $derived((studio.status?.casting?.needed ?? 0) > 0);
   let hasCast = $derived(entries(cand.cast).length > 0);
   let hasKf   = $derived(entries(cand.keyframes).length > 0);
@@ -319,6 +343,10 @@
       {#if needsCast}<b>Casting</b> = la cara del personaje (se fija una vez). {/if}
       <b>Encuadres</b> = la imagen base de cada escena.
     </p>
+    {#if sceneCount > 0}
+      <p class="est-line">≈ <b>${estCost.toFixed(3)}</b>
+        <span class="muted">por generar {n} × {sceneCount} encuadres con {genBackend === "google" ? "Google" : "fal"}</span></p>
+    {/if}
   </div>
   <div class="gen-controls">
     <div class="backend-toggle" title="Motor de imagen para los keyframes (D-051)">
@@ -331,6 +359,13 @@
     </div>
     <label class="n-lbl">opciones
       <input type="number" min="1" max="8" bind:value={n} />
+    </label>
+    <label class="n-lbl" title="Cuántas escenas se generan en paralelo (T6). Más = más rápido, más carga al proveedor.">velocidad
+      <select bind:value={conc} disabled={!!busy}>
+        <option value={1}>1×</option>
+        <option value={3}>3×</option>
+        <option value={5}>5×</option>
+      </select>
     </label>
     {#if needsCast && !castReady}
       <!-- Foco: primero el casting; encuadres bloqueado hasta fijar la cara -->
@@ -380,9 +415,36 @@
 {/if}
 {#if err}<p class="error">{err}</p>{/if}
 
+<!-- T5/T14/T10: reconciliación disco<->estado. Una selección/cara puede apuntar a un
+     frame borrado (cache limpiada, proyecto movido): avisar acá, no recién en el render. -->
+{#if brokenSel.length || brokenCast.length}
+  <div class="warn-banner broken">
+    <b>⚠ Referencias rotas.</b>
+    {#if brokenSel.length}
+      <span>El encuadre elegido de <b class="mono">{brokenSel.join(", ")}</b> ya no está en disco — regenerá y volvé a elegir.</span>
+    {/if}
+    {#if brokenCast.length}
+      <span>La cara de <b class="mono">{brokenCast.join(", ")}</b> ya no está en disco — regenerá el casting.</span>
+    {/if}
+  </div>
+{/if}
+
+<!-- T7/T13: avisos no bloqueantes de incompletitud al firmar (clase fuera del perfil,
+     escena sin planos). Advertir, no invalidar (D-046). -->
+{#if advisories.length}
+  <div class="warn-banner advisory">
+    <b>Avisos del plan:</b>
+    <ul>
+      {#each advisories as a}
+        <li><b class="mono">{a.scene}</b> {a.msg}</li>
+      {/each}
+    </ul>
+  </div>
+{/if}
+
 {#if hasCast}
   <section>
-    <h2 class="sec">Casting <span class="muted small-h">la cara del personaje</span></h2>
+    <h2 class="sec" title={GLOSARIO.casting}>Casting <span class="muted small-h">la cara del personaje</span></h2>
     {#each entries(cand.cast) as [name, urls]}
       <div class="group">
         <div class="group-h">
@@ -406,7 +468,7 @@
 
 {#if hasKf}
   <section>
-    <h2 class="sec">Encuadres <span class="muted small-h">la imagen base de cada escena</span></h2>
+    <h2 class="sec" title={GLOSARIO.keyframe}>Encuadres <span class="muted small-h">la imagen base de cada escena</span></h2>
     {#each entries(cand.keyframes) as [sceneId, urls]}
       {@const busyScene = busy === `scene:${sceneId}`}
       {@const busyUpload = busy === `upload:${sceneId}`}
@@ -487,12 +549,19 @@
 
         <div class="lighttable">
           {#each urls as url, i}
-            <button class="cell" class:sel={kfPicks[sceneId] === i}
-                    onclick={() => { kfPicks = { ...kfPicks, [sceneId]: i }; saved = false; }}>
-              <img src={url} alt="{sceneId} {i}" loading="lazy" />
-              <span class="idx">{i}</span>
-              {#if kfPicks[sceneId] === i}<span class="stamp">elegido</span>{/if}
-            </button>
+            <div class="cell-wrap">
+              <button class="cell" class:sel={kfPicks[sceneId] === i}
+                      onclick={() => { kfPicks = { ...kfPicks, [sceneId]: i }; saved = false; }}>
+                <img src={url} alt="{sceneId} {i}" loading="lazy" />
+                <span class="idx">{i}</span>
+                {#if cand.keyframe_sources?.[sceneId]?.[i] === "upload"}
+                  <span class="src-badge" title="La subiste vos; no la generó la IA">tu foto</span>
+                {/if}
+                {#if kfPicks[sceneId] === i}<span class="stamp">elegido</span>{/if}
+              </button>
+              <button class="discard" title="Descartar este candidato"
+                      onclick={() => discardCandidate(sceneId, i)} disabled={!!busy}>✕</button>
+            </div>
           {/each}
         </div>
 
@@ -502,7 +571,7 @@
           {@const shotBusy = !!shotsBusy[sceneId]}
           <div class="shots-preview">
             <div class="sp-head">
-              <span class="sp-lbl">Planos de la escena <span class="muted small-h">encadenados desde tu elección</span></span>
+              <span class="sp-lbl" title={GLOSARIO.plano}>Planos de la escena <span class="muted small-h">vista previa encadenada · el render los regenera</span></span>
               <button class="small ghost" onclick={() => genShotPreviews(sceneId, previews.length > 1)}
                       disabled={anyBusy || shotBusy || !hasFal}>
                 {shotBusy ? "Generando…" : previews.length > 1 ? "↻ Regenerar planos" : "Generar planos"}
@@ -639,6 +708,42 @@
     letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 30px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   }
+
+  /* T3: contenedor de celda + botón de descarte (no anidar <button> en <button>) */
+  .cell-wrap { position: relative; line-height: 0; }
+  .cell-wrap .cell { display: block; }
+  .discard {
+    position: absolute; top: 5px; right: 5px; z-index: 2;
+    width: 22px; height: 22px; padding: 0; line-height: 1;
+    border-radius: 50%; border: none; box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    background: rgba(0,0,0,0.55); color: #fff; font-size: 12px; cursor: pointer;
+    opacity: 0; transition: opacity 0.12s ease;
+  }
+  .cell-wrap:hover .discard { opacity: 1; }
+  .discard:hover { background: var(--red); }
+  .discard:disabled { opacity: 0; }
+  /* T11: marca de origen (subida por el humano, no generada) */
+  .src-badge {
+    position: absolute; bottom: 7px; left: 7px; z-index: 1;
+    background: var(--blue-deep); color: #fff; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.04em; border-radius: var(--r-sm); padding: 1px 7px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+
+  /* T15: costo estimado antes de generar */
+  .est-line { font-size: 12.5px; margin: 6px 0 0; }
+  .est-line b { color: var(--ink); font-family: var(--font-mono); }
+
+  /* T5/T7/T13/T14: banners de reconciliación y avisos (no bloqueantes) */
+  .warn-banner {
+    border-radius: var(--r); padding: 10px 14px; margin-bottom: 12px; font-size: 13.5px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .warn-banner.broken { background: var(--red-wash); border: 1px solid var(--red); color: var(--red-deep); }
+  .warn-banner.advisory { background: var(--warn-wash, #fbeed0); border: 1px solid var(--warn, #e0a93b); color: var(--warn-deep, #7a5400); }
+  .warn-banner ul { margin: 2px 0 0; padding-left: 18px; }
+  .warn-banner li { margin: 1px 0; }
+  .warn-banner .mono { font-family: var(--font-mono); }
 
   /* Panel "Para la IA" (prompts colapsables por escena) */
   .prompts-panel {
