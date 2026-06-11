@@ -854,6 +854,31 @@ por la auditoría del `project.yaml` real de `esquiva_conversemos`. Core testead
 
 ---
 
+## Sprint 6.24 — Backend de voz seleccionable: ElevenLabs / Kokoro (D-058)
+
+**Objetivo:** el motor de TTS se elegía implícitamente por presencia de key. Volverlo un **backend
+seleccionable y persistido**, eje independiente del perfil (patrón D-053): Kokoro (proto, default) /
+ElevenLabs (prod). Mantiene los dos motores existentes. Core testeado; ver [D-058].
+
+### Acceptance Criteria
+- [x] AC1 — `voice_backends` en routing.yaml + `VoiceConfig`/`load_voice_config` + `voice` en Config;
+  `voice_backend` persiste en project.yaml (default kokoro, lo más barato). 🔬
+- [x] AC2 — `select_tts_backend` elige el motor pedido o **degrada** al disponible (voz best-effort);
+  `runner` lo usa en vez del `if/elif` por key. 🔬
+- [x] AC3 — `--voice` en `render`/`run`; `GET /api/voice-backends` + persistencia PUT/GET; chip UI (smoke).
+
+### Tasks (orden test-first)
+- [x] T6.24.1 — `tests/test_voice_backend.py` (red): `select_tts_backend`, `load_voice_config`, round-trip. 🔬 ✅
+- [x] T6.24.2 — `config.py` (`VoiceConfig`+loader+root) + `routing.yaml` (`voice_backends`). 🔬 ✅
+- [x] T6.24.3 — `audio.select_tts_backend`/`resolve_voice`; `runner` wiring; `project.voice_backend`. 🔬 ✅
+- [x] T6.24.4 — `cli.py` (`--voice`); `server/app.py` (`/api/voice-backends` + PUT/GET). ✅
+- [x] T6.24.5 — ADR D-058 + índice del README + `SPEC.md`. ✅
+
+> **Estado:** core en verde (**302 tests**, +8 en `test_voice_backend`). Verificado sobre
+> `esquiva_conversemos`: kokoro por default, `--voice elevenlabs` resuelve, endpoint OK.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
