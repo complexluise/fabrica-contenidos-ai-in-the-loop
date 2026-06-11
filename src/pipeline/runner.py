@@ -255,13 +255,21 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     """
     keyframe_overrides = keyframe_overrides or {}
     providers_by_name = {n: build_provider(p) for n, p in cfg.providers.items()}
-    gate = FusedGate(cfg.routing.thresholds, enforce=cfg.routing.enforce)
+    # D-052: gate deshabilitado si el perfil lo pide (lista vacía → permisivo).
+    from .gate.fused import _build_default_signals
+    if cfg.profile.gate.enabled:
+        signals = _build_default_signals(vlm_model=cfg.profile.gate.vlm_model)
+    else:
+        signals = []
+    gate = FusedGate(cfg.routing.thresholds, enforce=cfg.routing.enforce, signals=signals)
 
     run = project.new_run()
     run_log = add_run_logfile(run.dir / "run.log")  # detalle completo por corrida (L9)
     logger.info("run %s | %d escenas | estilo %s | formato %s | concurrencia %d",
                 run.run_id, len(spec.scenes), spec.style, spec.format, concurrency)
-    keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch")
+    # D-053: backend del keyframe viene del storyboard backend activo.
+    keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch",
+                                   backend=cfg.storyboard.keyframe.backend)
     telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
 
     # Voz en off (Sprint 6): chequea scene.voiceover Y shot.voiceover (ambos válidos).
@@ -356,26 +364,34 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
             audio_applied = audio_applied or s_audio
 
     if not clips:
+        # El reporte se escribe aun en el peor caso: el mensaje promete failures
+        # en run_report.json, así que el archivo TIENE que existir (D-054).
+        telemetry.write_report(run.report_path)
         telemetry.close()
         logger.error("run %s | todas las escenas fallaron", run.run_id)
         remove_handler(run_log)
         raise RuntimeError("Todas las escenas fallaron; revisa run_report.json (failures).")
 
-    music = spec.music if (spec.music and spec.music.exists()) else None
-    # Con voz o audio diegético, la música baja para quedar por debajo (ducking, D-034).
-    music_volume = 0.25 if audio_applied else 1.0
-    stitched = concat_clips(clips, run.dir / "_stitched.mp4", music=music,
-                            music_volume=music_volume)
-    final = reframe(stitched, run.dir / f"final_{spec.format.replace(':', 'x')}.mp4", spec.format)
+    try:
+        music = spec.music if (spec.music and spec.music.exists()) else None
+        # Con voz o audio diegético, la música baja para quedar por debajo (ducking, D-034).
+        music_volume = 0.25 if audio_applied else 1.0
+        stitched = concat_clips(clips, run.dir / "_stitched.mp4", music=music,
+                                music_volume=music_volume)
+        final = reframe(stitched, run.dir / f"final_{spec.format.replace(':', 'x')}.mp4", spec.format)
+        _write_manifest(run, spec, cfg, manifest_scenes)
+    finally:
+        # Telemetría: cierre y reporte garantizados aunque el ensamblaje (ffmpeg)
+        # reviente a mitad. Sin esto, un fallo en concat/reframe dejaba la DB
+        # abierta y el run_report.json sin escribir (feedback Sprint 1 #10, D-054).
+        telemetry.write_report(run.report_path)
+        totals = telemetry.totals()
+        telemetry.close()
+        remove_handler(run_log)
 
-    _write_manifest(run, spec, cfg, manifest_scenes)
-    telemetry.write_report(run.report_path)
-    totals = telemetry.totals()
-    telemetry.close()
     logger.info("run %s | OK | %d clips | $%.3f | cache %d/%d | %s",
                 run.run_id, len(clips), totals["total_cost_usd"],
                 totals["cache_hits"], totals["attempts"], final.name)
-    remove_handler(run_log)
     return run, final, totals
 
 

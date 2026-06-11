@@ -49,8 +49,13 @@ class SceneRequirements(BaseModel):
     needs_hdr: bool = False
 
     def required_capabilities(self) -> set[str]:
-        """Traduce los flags a capabilities que el provider debe cumplir."""
-        caps: set[str] = set()
+        """Traduce los flags a capabilities que el provider debe cumplir.
+
+        `i2v` es la base que SIEMPRE se exige: todo el pipeline genera video a
+        partir de un keyframe (image-to-video). Declararlo evita que un provider
+        text-to-video puro entre al routing sin que nadie lo descarte (D-054).
+        """
+        caps: set[str] = {"i2v"}
         if self.needs_audio:
             caps.add("audio")
         if self.needs_lipsync:

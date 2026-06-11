@@ -84,3 +84,6 @@ es continua entre archivos.
 | # | Decisión | Estado |
 |---|---|---|
 | D-051 | Backend de keyframe por Google (Gemini) + toggle fal/Google + acciones masivas | Vigente |
+| D-052 | Perfiles multi-rol (video + keyframe + gate VLM + LLM) + visibilidad de costos | Revisada por D-053 |
+| D-053 | Split storyboard backend / render profile: dos configs para dos fases | Vigente |
+| D-054 | Endurecimiento post-review Sprint 1: i2v exigido + telemetría con cierre garantizado + concat robusto | Vigente |

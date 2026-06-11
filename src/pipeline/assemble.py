@@ -33,21 +33,79 @@ def _has_audio(clip: Path) -> bool:
     return bool(out.stdout.strip())
 
 
-def _ensure_audio(clip: Path, out: Path) -> Path:
+def _video_sig(clip: Path) -> tuple[str, int, int] | None:
+    """Firma de video del clip: (codec, ancho, alto) via ffprobe, o None.
+
+    Sirve para decidir si el concat por demuxer (-c copy) es seguro: solo lo es
+    cuando todos los clips comparten codec+resolucion.
+    """
+    probe = shutil.which("ffprobe")
+    if not probe:
+        return None
+    out = subprocess.run(
+        [probe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=codec_name,width,height", "-of", "csv=p=0", str(clip)],
+        capture_output=True, text=True,
+    )
+    parts = out.stdout.strip().split(",")
+    if len(parts) < 3:
+        return None
+    try:
+        return (parts[0], int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+
+
+def _uniform(sigs: list[tuple[str, int, int] | None]) -> bool:
+    """True si los clips comparten firma de video (concat -c copy es seguro).
+
+    Conservador: si alguna firma es None (ffprobe ausente) no podemos afirmar
+    heterogeneidad, asi que asumimos uniforme y conservamos el codec (rapido).
+    """
+    known = [s for s in sigs if s is not None]
+    return len(set(known)) <= 1
+
+
+def _canonical_size(sigs: list[tuple[str, int, int] | None]) -> tuple[int, int] | None:
+    """Resolucion canonica para conformar clips mezclados: la de mayor area.
+
+    Escalar hacia la mas grande evita perder resolucion del mejor clip; los demas
+    se letterboxean (pad) para no distorsionar.
+    """
+    known = [s for s in sigs if s is not None]
+    if not known:
+        return None
+    w, h = max(known, key=lambda s: s[1] * s[2])[1:3]
+    return (w, h)
+
+
+def _normalize(clip: Path, out: Path, video_size: tuple[int, int] | None = None) -> Path:
     """Normaliza el clip a una pista aac estereo 44100 (silencio si no tenia).
 
     Necesario para que el concat por demuxer (-c copy) sea uniforme cuando unos
-    clips traen voz en off y otros no.
+    clips traen voz en off y otros no. Si `video_size` se da, ademas conforma el
+    video a un codec/resolucion canonicos (libx264, letterbox sin distorsion):
+    indispensable cuando se mezclan clips de varios providers con codec/resolucion
+    distintos, donde `-c copy` produciria video roto en silencio (D-054). Sin
+    `video_size`, el video se COPIA (rapido; caso 1 provider, comportamiento previo).
     """
     out.parent.mkdir(parents=True, exist_ok=True)
+    if video_size is None:
+        vfilter: list[str] = []
+        vcodec = ["-c:v", "copy"]
+    else:
+        w, h = video_size
+        vfilter = ["-vf", (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                           f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30")]
+        vcodec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
     if _has_audio(clip):
         cmd = [_ffmpeg(), "-y", "-i", str(clip),
-               "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out)]
+               *vfilter, *vcodec, "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out)]
     else:
         cmd = [_ffmpeg(), "-y",
                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                "-i", str(clip),
-               "-map", "1:v:0", "-map", "0:a", "-c:v", "copy", "-c:a", "aac",
+               *vfilter, "-map", "1:v:0", "-map", "0:a", *vcodec, "-c:a", "aac",
                "-shortest", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
     return out
@@ -94,10 +152,15 @@ def concat_clips(clips: list[Path], out_path: Path, music: Path | None = None,
         raise ValueError("No hay clips para ensamblar.")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Audio uniforme antes de concatenar (algunos clips traen VO, otros no).
+    # Audio uniforme antes de concatenar (algunos clips traen VO, otros no) y,
+    # si los clips son heterogeneos (varios providers: codec/resolucion distintos),
+    # tambien video uniforme: sin esto el demuxer -c copy rompe el video (D-054).
     norm_dir = out_path.parent / "_norm"
     norm_dir.mkdir(parents=True, exist_ok=True)
-    norm_clips = [_ensure_audio(c, norm_dir / f"{i:03d}.mp4") for i, c in enumerate(clips)]
+    sigs = [_video_sig(c) for c in clips]
+    video_size = None if _uniform(sigs) else _canonical_size(sigs)
+    norm_clips = [_normalize(c, norm_dir / f"{i:03d}.mp4", video_size)
+                  for i, c in enumerate(clips)]
 
     # Lista para el demuxer concat de ffmpeg.
     list_file = out_path.parent / "_concat_list.txt"

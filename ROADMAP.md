@@ -697,6 +697,68 @@ camino completo sin fal; y botones para operar en lote (compilar prompts, genera
 
 ---
 
+## Sprint 6.19 — Split storyboard/render + visibilidad de costos (D-052, D-053)
+
+**Objetivo:** dos configuraciones para dos fases — `--backend` para la fase creativa (imágenes +
+LLM), `--profile` para la fase de producción (video + gate). El backend activo se persiste en
+`project.yaml`. El usuario ve lo que gasta al final de cada paso.
+
+### Acceptance Criteria
+- [x] AC1 — `routing.yaml` define `storyboard_backends` (fal, google) y perfiles de render limpios
+  (`fal-ultra-cheap` default, sin `keyframe`/`llm`). Gate VLM configurable por perfil. 🔬
+- [x] AC2 — El gate VLM lee `vlm_model` del perfil activo; perfil sin gate → señales vacías (permisivo). Soporta Anthropic y Gemini como backends de VLM. 🔬
+- [x] AC3 — `project.yaml` persiste `storyboard_backend: fal`; `spec_from_dict`/`spec_to_dict` hacen round-trip. 🔬
+- [x] AC4 — `--backend google` en `cast`/`keyframes`/`prompts` usa el backend de storyboard; `--profile prod` en `render`/`run` usa el perfil de render. El flag del spec se usa si no se pasa `--backend` explícito.
+- [x] AC5 — Al final de cada subcomando se imprime una línea de costo (est + actual). HTTP 402 → mensaje con alternativa sugerida.
+- [x] AC6 — `GET /api/storyboard-backends` devuelve la lista con `_meta`; UI Storyboard tiene chip discreto que persiste la elección vía PUT.
+
+### Tasks (orden test-first)
+- [x] T6.19.1 — ADRs D-052 y D-053 + SPEC + ROADMAP. ✅
+- [x] T6.19.2 — `routing.yaml` (storyboard_backends + perfiles limpios) + `config.py` (ProfileConfig gate-only, StoryboardConfig, loaders). 🔬 *core* ✅
+- [x] T6.19.3 — `gate/vlm.py` + `gate/fused.py`: vlm_model del perfil, señales vacías si disabled, soporte Gemini VLM. ✅
+- [x] T6.19.4 — `runner.py`: keyframer backend desde `cfg.storyboard`. ✅
+- [x] T6.19.5 — `cli.py`: cost summary + 402 (parcial — `--backend` queda para T6.19.6). ✅
+- [x] T6.19.6 — `project.py` (`storyboard_backend` en spec); `cli.py` (`--backend` en storyboard cmds, lee del spec). 🔬 *core* ✅
+- [x] T6.19.7 — `server/app.py`: `GET /api/storyboard-backends`; PUT persiste `storyboard_backend`. ✅
+- [x] T6.19.8 — UI `Storyboard.svelte`: chip selector de backend (discreto, carga desde `/api/storyboard-backends`). ✅
+- [ ] T6.19.9 — Smoke: `pipeline keyframes lego_demo --backend google`; `pipeline run lego_demo --profile fal-ultra-cheap` (cost summary visible).
+
+---
+
+## Sprint 6.20 — Endurecimiento post-review Sprint 1 (D-054)
+
+**Objetivo:** cerrar los **tres bugs latentes** que sobrevivían de la revisión externa del Sprint 1
+(`docs/notas/feedback-sprint-1.md`) — los del tipo "no muerde hoy, muerde cuando mezcles providers o
+falle ffmpeg", justo los escenarios que el roadmap multi-provider habilita. Los otros 7 puntos del
+review ya estaban cerrados o son deudas asumidas (ver [D-054]). Aditivo, sin cambiar el camino feliz.
+
+### Acceptance Criteria
+- [x] AC1 — `SceneRequirements.required_capabilities()` exige **siempre `i2v`** (los flags suman sobre
+  esa base); un provider sin `i2v` queda descartado del routing por construcción (#8). 🔬
+- [x] AC2 — El tail del runner (`concat_clips`/`reframe`/`_write_manifest`) corre en `try/finally`:
+  `write_report` + `close` + `remove_handler` ocurren **siempre**, aun si ffmpeg revienta; la rama
+  "todas fallaron" escribe el reporte **antes** de lanzar (#10).
+- [x] AC3 — `concat_clips` conforma el **video** a una resolución canónica (libx264 + letterbox) solo
+  cuando los clips son **heterogéneos** (codec/resolución distintos); con clips uniformes mantiene el
+  `-c copy` rápido. La decisión es lógica pura testeada (#4). 🔬
+- [ ] AC4 — Smoke real: render que **mezcla providers** (p.ej. hero→ensemble seedance + std→router
+  kling) produce un `final.mp4` reproducible sin video roto. **Pendiente** del render pago.
+
+### Tasks (orden test-first)
+- [x] T6.20.1 — `contracts.py`: `required_capabilities()` parte de `{"i2v"}`; `tests/test_contracts.py` alineado. 🔬 ✅
+- [x] T6.20.2 — `runner.py`: tail en `try/finally`; reporte en la rama de fallo total (compatible con `test_runner_concurrency`). ✅
+- [x] T6.20.3 — `assemble.py`: `_video_sig`/`_uniform`/`_canonical_size` + `_ensure_audio`→`_normalize(video_size)`; `concat_clips` conforma si hay heterogeneidad. ✅
+- [x] T6.20.4 — `tests/test_assemble.py` (decisión de uniformidad + resolución canónica). 🔬 ✅
+- [x] T6.20.5 — ADR D-054 + índice del README de decisiones. ✅
+- [ ] T6.20.6 — Smoke pago: render multi-provider (junto con los smokes pendientes de 6.6/6.19).
+
+> **Estado:** core en verde (**270 tests**, +7 de `test_assemble`; `test_contracts` ajustado al
+> contrato i2v). Los tres bugs latentes cerrados sin tocar el camino de 1 provider. **Pendiente:**
+> el smoke pago multi-provider (AC4) para **cerrar**. Deudas asumidas del review (LoRA placeholder
+> #5, costo estimado vs facturado #9) quedan registradas en [D-054], no resueltas.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
