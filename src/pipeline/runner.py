@@ -46,7 +46,7 @@ from .providers.elevenlabs_tts import ElevenLabsTTS
 from .providers.mmaudio import MMAudioV2
 from .settings import get_settings
 from .logging_setup import add_run_logfile, remove_handler
-from .strategies.dispatch import build_strategy, select_rule
+from .strategies.dispatch import build_strategy, routing_gaps, select_rule
 from .telemetry import SceneRecord, Telemetry
 
 logger = logging.getLogger(__name__)
@@ -254,6 +254,19 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     `concurrency`: escenas en vuelo simultaneo (D-039). Default 1 = serial.
     """
     keyframe_overrides = keyframe_overrides or {}
+    # D-057: guard temprano de routing. Antes de construir providers o gastar, exigir
+    # que cada escena tenga al menos un provider elegible para sus capabilities. Cierra
+    # la simetría de "fallar temprano y claro" (D-055 selecciones, D-056 casting). El
+    # caso típico: needs_audio:true sin provider de audio -> el router lanzaría a mitad
+    # del run; acá se nombra antes de generar nada.
+    gaps = routing_gaps(spec, cfg.routing, cfg.providers)
+    if gaps:
+        detail = "; ".join(f"{g['scene']} (falta: {', '.join(g['missing'])})" for g in gaps)
+        raise RuntimeError(
+            f"Estas escenas no tienen ningún provider elegible en el perfil activo: {detail}. "
+            "Quita el requisito que no se puede cumplir (p.ej. needs_audio/needs_lipsync) "
+            "o cambia a un perfil con un provider que lo soporte."
+        )
     providers_by_name = {n: build_provider(p) for n, p in cfg.providers.items()}
     # D-052: gate deshabilitado si el perfil lo pide (lista vacía → permisivo).
     from .gate.fused import _build_default_signals

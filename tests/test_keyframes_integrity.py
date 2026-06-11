@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pipeline.config import RoutingConfig, StrategyRule
+from pipeline.config import ProviderConfig, RoutingConfig, StrategyRule
 from pipeline.contracts import Scene, Shot
 from pipeline.project import Character, Project, ProjectSpec, relativize
 from pipeline.state import estimate_image_cost, signing_advisories
@@ -209,7 +209,13 @@ def test_signing_advisories_flags_empty_shots_and_unknown_class():
         Scene(id="s3", prompt="p", duration_s=2, **{"class": "hero"},
               shots=[Shot(framing="x", duration_s=2)]),  # no esta en el perfil
     ])
-    adv = signing_advisories(spec, routing_classes={"standard", "volume"})
+    routing = RoutingConfig(rules={
+        "standard": StrategyRule(strategy="router", providers=["k"]),
+        "volume": StrategyRule(strategy="cascade", providers=["k"]),
+    }, thresholds={})
+    providers = {"k": ProviderConfig(name="k", backend="fal", model="m",
+                                     cost_per_second=0.0, capabilities={"i2v"})}
+    adv = signing_advisories(spec, routing, providers)
     kinds = {(a["scene"], a["kind"]) for a in adv}
     assert ("s1", "no_shots") in kinds
     assert ("s3", "unknown_class") in kinds
@@ -221,7 +227,12 @@ def test_signing_advisories_clean_spec_has_none():
     spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
         Scene(id="s1", prompt="p", duration_s=2, shots=[Shot(framing="x", duration_s=2)]),
     ])
-    assert signing_advisories(spec, routing_classes={"standard"}) == []
+    routing = RoutingConfig(rules={
+        "standard": StrategyRule(strategy="router", providers=["k"]),
+    }, thresholds={})
+    providers = {"k": ProviderConfig(name="k", backend="fal", model="m",
+                                     cost_per_second=0.0, capabilities={"i2v"})}
+    assert signing_advisories(spec, routing, providers) == []
 
 
 # --- T7: dispatch avisa cuando cae a standard ------------------------------

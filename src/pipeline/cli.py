@@ -40,6 +40,14 @@ def _cost_summary(label: str, n: int, est_per_scene: float, actual_usd: float | 
     return "  |  ".join(parts)
 
 
+def _print_advisories(spec, cfg) -> None:
+    """Avisos NO bloqueantes del storyboard antes de generar (D-055/D-057): una línea
+    por aviso, en amarillo. No invalida — solo da visibilidad de lo que falta."""
+    from .state import signing_advisories
+    for a in signing_advisories(spec, cfg.routing, cfg.providers):
+        console.print(f"[yellow]aviso[/] {a['scene']}: {a['msg']}")
+
+
 def _is_balance_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(k in msg for k in ("402", "payment required", "insufficient", "balance", "credits"))
@@ -235,6 +243,7 @@ def keyframes(
             f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos = {total} imagenes"
             f" | backend {cfg.storyboard.name} | concurrencia {concurrency}"
         )
+        _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
         sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n, concurrency=concurrency))
         console.print(
             f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
@@ -286,6 +295,7 @@ def render(
             console.print(f"[bold]{project}[/] - render - perfil {profile} - keyframes directos: {list(overrides)}")
         else:
             console.print(f"[bold]{project}[/] - render con keyframes elegidos - perfil {profile}...")
+        _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
         run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides))
         actual = totals["total_cost_usd"]
         console.print(
