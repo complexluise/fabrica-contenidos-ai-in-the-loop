@@ -453,7 +453,89 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
     project.selections_path.write_text(
         yaml.safe_dump(selections, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+    # D-055/T9: al (re)elegir el ancla, los previews encadenados de planos 2+ de
+    # esa escena quedan derivados del ancla VIEJO -> se invalidan.
+    invalidate_shot_previews(project, list(picks.keys()))
     return project.selections_path
+
+
+def is_upload(path) -> bool:
+    """True si el candidato lo subió el humano (no lo generó la IA).
+
+    El origen se marca en el nombre del archivo (`upload_<hash>.png`, ver
+    `add_candidate_upload`) y `relativize` lo preserva al persistir project-relative
+    en selections.yaml -> la UI puede recordar "esto es TU foto" (T11/D-055)."""
+    return Path(path).name.startswith("upload_")
+
+
+def verify_selections(project: Project) -> list[str]:
+    """Scene ids cuya selección apunta a un archivo que ya NO existe en disco.
+
+    selections.yaml es portable (project-relative) pero no sobrevive a una limpieza
+    de cache ni a mover el proyecto sin el cache. Esta verificación deja que la
+    UI/CLI avise "esta selección apunta a un frame borrado" en vez de fallar recién
+    en el render (T5/T14/D-055)."""
+    if not project.selections_path.exists():
+        return []
+    selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    return [sid for sid, p in selections.items()
+            if not _resolve_under(project.dir, p).exists()]
+
+
+def verify_casting(project: Project) -> list[str]:
+    """Nombres de personaje cuya cara elegida apunta a un archivo inexistente (T10/D-055)."""
+    casting = load_casting(project)
+    return [name for name, p in casting.items()
+            if not _resolve_under(project.dir, p).exists()]
+
+
+def invalidate_shot_previews(project: Project, scene_ids: list[str]) -> list[str]:
+    """Descarta los previews encadenados (planos 2+) de las escenas cuyo ancla
+    acaba de (re)elegirse: quedaron derivados del ancla viejo (T9/D-055).
+    Devuelve los scene_ids cuyos previews se invalidaron."""
+    pv_path = project.dir / "shot_previews.yaml"
+    if not pv_path.exists():
+        return []
+    previews = yaml.safe_load(pv_path.read_text(encoding="utf-8")) or {}
+    dropped = [sid for sid in scene_ids if sid in previews]
+    if dropped:
+        for sid in dropped:
+            previews.pop(sid, None)
+        pv_path.write_text(
+            yaml.safe_dump(previews, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return dropped
+
+
+def delete_candidate(project: Project, scene_id: str, idx: int) -> dict:
+    """Descarta el candidato `idx` de una escena (T3/D-055). Permite "dejame solo 3".
+
+    Reconcilia la selección por PATH (selections.yaml guarda ruta, no índice): si la
+    escena estaba elegida con el candidato borrado, se descarta esa selección."""
+    if not project.candidates_path.exists():
+        raise RuntimeError("No hay candidatos.")
+    manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    cands = manifest.get(scene_id)
+    if not cands:
+        raise ValueError(f"No hay candidatos para '{scene_id}'.")
+    if not 0 <= idx < len(cands):
+        raise ValueError(f"Índice {idx} fuera de rango para '{scene_id}' (0..{len(cands) - 1}).")
+    removed = cands.pop(idx)
+    manifest[scene_id] = cands
+    project.candidates_path.write_text(
+        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    selection_dropped = False
+    if project.selections_path.exists():
+        selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+        removed_rel = relativize(project.dir, removed)
+        if selections.get(scene_id) == removed_rel:
+            selections.pop(scene_id, None)
+            project.selections_path.write_text(
+                yaml.safe_dump(selections, sort_keys=False, allow_unicode=True), encoding="utf-8"
+            )
+            selection_dropped = True
+    return {"removed": removed, "remaining": len(cands), "selection_dropped": selection_dropped}
 
 
 def prune_selections(project: Project, scene_ids: list[str]) -> list[str]:
@@ -505,6 +587,16 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
         raise RuntimeError(
             f"Faltan keyframes para: {missing}. "
             "Usa 'pipeline pick <proj> escena=idx' o 'pipeline render <proj> --keyframe escena=ruta'."
+        )
+    # T14/D-055: una selección puede apuntar a un frame ya borrado (cache limpiada,
+    # proyecto movido sin cache). Fallar acá, claro y temprano, en vez de que el
+    # provider reviente al subir un init_image fantasma. El flag --keyframe ya se
+    # validó arriba; esto cubre las que vienen de selections.yaml.
+    broken = sorted(sid for sid in (s.id for s in spec.scenes) if not merged[sid].exists())
+    if broken:
+        raise RuntimeError(
+            f"El keyframe elegido de estas escenas ya no está en disco: {broken}. "
+            "Regenerá los encuadres (la cache se limpió o el proyecto se movió) y volvé a elegir."
         )
     return await run_project(project, spec, cfg, keyframe_overrides=merged,
                              concurrency=concurrency)

@@ -105,6 +105,31 @@ def compute_stage(*, has_fal_key: bool, storyboard_signed: bool,
     return Stage.COMPLETO
 
 
+def signing_advisories(spec: ProjectSpec, routing_classes: set[str]) -> list[dict]:
+    """Avisos NO bloqueantes sobre incompletitudes al firmar el storyboard (T7/T13/D-055).
+
+    No invalida (coherente con D-046, "advertir, no invalidar"): solo nombra lo que
+    de otro modo el humano descubre recién en el render. Cada aviso es
+    `{scene, kind, msg}`:
+      - `no_shots`: la escena no define planos -> se sintetiza 1 implícito.
+      - `unknown_class`: la `class_` no existe en el perfil -> cae a 'standard'.
+    """
+    out: list[dict] = []
+    for s in spec.scenes:
+        if not s.shots:
+            out.append({"scene": s.id, "kind": "no_shots",
+                        "msg": "no define planos; se usará 1 plano implícito."})
+        if s.class_ and s.class_ not in routing_classes:
+            out.append({"scene": s.id, "kind": "unknown_class",
+                        "msg": f"la clase '{s.class_}' no existe en el perfil; se enruta como 'standard'."})
+    return out
+
+
+def estimate_image_cost(n_scenes: int, n_per_scene: int, cost_per_image: float) -> float:
+    """Costo estimado de generar `n_per_scene` candidatos para `n_scenes` escenas (T15/D-055)."""
+    return round(max(0, n_scenes) * max(0, n_per_scene) * max(0.0, cost_per_image), 4)
+
+
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
         return {}

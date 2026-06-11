@@ -279,8 +279,19 @@ def create_app(projects_dir: Path = Path("projects"),
             signed_marker.write_text("", encoding="utf-8")
         else:
             signed_marker.unlink(missing_ok=True)
+        # T7/T13/D-055: avisos no bloqueantes (clase fuera del perfil, escena sin
+        # planos) al momento de firmar — "advertir, no invalidar" (D-046).
+        advisories = []
+        try:
+            from ..config import load_config
+            from ..state import signing_advisories
+            cfg = load_config(config_dir, spec.style)
+            advisories = signing_advisories(spec, set(cfg.routing.rules))
+        except Exception:
+            advisories = []
         return {"saved": str(project.spec_path), "scenes": len(ids),
-                "dropped_selections": dropped, "signed": bool(body.get("sign"))}
+                "dropped_selections": dropped, "signed": bool(body.get("sign")),
+                "advisories": advisories}
 
     @app.get("/api/projects/{slug}")
     def project_detail(slug: str):
@@ -364,11 +375,20 @@ def create_app(projects_dir: Path = Path("projects"),
     def candidates(slug: str):
         project, _spec, _cfg = load(slug)
 
+        from ..studio import is_upload
+
         def read(path: Path) -> dict:
             if not path.exists():
                 return {}
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             return {k: [file_url(p) for p in v] for k, v in data.items()}
+
+        def sources(path: Path) -> dict:
+            """Origen de cada candidato: "upload" (humano) | "ia" (T11/D-055)."""
+            if not path.exists():
+                return {}
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            return {k: ["upload" if is_upload(p) else "ia" for p in v] for k, v in data.items()}
 
         def load_yaml(path: Path) -> dict:
             if not path.exists():
@@ -376,6 +396,7 @@ def create_app(projects_dir: Path = Path("projects"),
             return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
         return {"keyframes": read(project.candidates_path),
+                "keyframe_sources": sources(project.candidates_path),  # T11
                 "cast": read(project.dir / "cast_candidates.yaml"),
                 "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
                 "selections": load_yaml(project.selections_path),
@@ -386,12 +407,18 @@ def create_app(projects_dir: Path = Path("projects"),
         """Estado derivado del proyecto (D-032): el `stage` del bucle + el detalle
         por paso. La verdad se calcula en `state.derive_state`; aca solo decoramos
         con lo que es del server (claves de settings, URL del video final)."""
-        from ..state import derive_state
+        from ..state import derive_state, signing_advisories
+        from ..studio import verify_casting, verify_selections
 
         project, spec, _cfg = load(slug)
         s = get_settings()
         out = derive_state(project, spec, has_fal_key=bool(s.fal_key)).to_dict()
         out["keys"] = {attr: bool(getattr(s, attr)) for attr in _KEYS}
+        # D-055: reconciliacion disco<->estado + avisos no bloqueantes + costo unitario.
+        out["integrity"] = {"selections": verify_selections(project),  # T5/T14
+                            "casting": verify_casting(project)}          # T10
+        out["advisories"] = signing_advisories(spec, set(_cfg.routing.rules))  # T7/T13
+        out["est_cost_per_image_usd"] = _cfg.storyboard.est_cost_per_image_usd  # T15
 
         final_url = None
         run = project.latest_run()
@@ -461,6 +488,20 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(422, "El campo 'data' no es base64 válido.")
         dest = studio.add_candidate_upload(project, scene_id, data, suffix)
         return {"url": file_url(dest), "scene": scene_id, "file": dest.name}
+
+    @app.delete("/api/projects/{slug}/candidates/{scene_id}/{idx}")
+    def discard_candidate(slug: str, scene_id: str, idx: int):
+        """Descarta el candidato `idx` de una escena (T3/D-055): "dejame solo 3".
+
+        Reconcilia la selección por path: si la escena estaba elegida con ese
+        candidato, la selección se descarta también."""
+        from .. import studio
+
+        project, _spec, _cfg = load(slug)
+        try:
+            return studio.delete_candidate(project, scene_id, idx)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(422, str(exc))
 
     @app.post("/api/projects/{slug}/music/upload")
     async def upload_music(slug: str, body: dict):
