@@ -20,12 +20,14 @@ from ..settings import get_settings
 from .jobs import JobManager
 
 _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
-         "elevenlabs_api_key": "ELEVENLABS_API_KEY"}
+         "elevenlabs_api_key": "ELEVENLABS_API_KEY", "google_api_key": "GOOGLE_API_KEY"}
 
 # Campos de escena editables desde el storyboard (D-033). El resto (seed, class,
 # requirements, dialogue, voice_id, keyframe) se preserva del spec en disco.
+# `shots` se mergea por indice (no se reemplaza) para que un editor parcial no
+# borre los campos del artefacto (D-047) que no manda.
 _EDITABLE_SCENE = {"prompt", "beat", "duration_s", "caption", "voiceover", "characters",
-                   "shots", "dialogue", "ambience"}
+                   "dialogue", "ambience", "visual_intensity"}
 
 
 def _available_styles(config_dir: Path) -> list[str]:
@@ -62,7 +64,9 @@ def create_app(projects_dir: Path = Path("projects"),
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
-        cfg = load_config(config_dir, spec.style, profile=profile)
+        # D-053: backend del storyboard persiste en project.yaml
+        cfg = load_config(config_dir, spec.style, profile=profile,
+                          backend=spec.storyboard_backend)
         apply_casting(spec.characters, load_casting(project))
         return project, spec, cfg
 
@@ -81,6 +85,44 @@ def create_app(projects_dir: Path = Path("projects"),
     @app.get("/api/styles")
     def list_styles():
         return _available_styles(config_dir)
+
+    @app.get("/api/profiles")
+    def list_profiles():
+        """Perfiles de renderizado disponibles leidos de routing.yaml."""
+        raw = yaml.safe_load((config_dir / "routing.yaml").read_text(encoding="utf-8")) or {}
+        profiles = raw.get("profiles", {})
+        out = []
+        for key, rules in profiles.items():
+            meta = rules.get("_meta", {})
+            # Inferir proveedor principal del perfil hero para mostrarlo
+            hero_providers = (rules.get("hero") or {}).get("providers", [])
+            out.append({
+                "key":   key,
+                "label": meta.get("label", key),
+                "desc":  meta.get("desc", ""),
+                "badge": meta.get("badge", key),
+                "color": meta.get("color", "gray"),
+                "providers": hero_providers,
+            })
+        return out
+
+    @app.get("/api/storyboard-backends")
+    def list_storyboard_backends():
+        """Backends del storyboard (imagen + LLM) disponibles — D-053."""
+        raw = yaml.safe_load((config_dir / "routing.yaml").read_text(encoding="utf-8")) or {}
+        backends = raw.get("storyboard_backends", {})
+        out = []
+        for key, entry in backends.items():
+            meta = entry.get("_meta", {})
+            out.append({
+                "key":   key,
+                "label": meta.get("label", key),
+                "desc":  meta.get("desc", ""),
+                "badge": meta.get("badge", key),
+                "color": meta.get("color", "gray"),
+                "est_cost_per_image_usd": entry.get("est_cost_per_image_usd", 0.003),
+            })
+        return out
 
     @app.get("/api/projects")
     def list_projects():
@@ -190,10 +232,28 @@ def create_app(projects_dir: Path = Path("projects"),
                 base = existing.get(sid)
                 data = base.model_dump(by_alias=True) if base else {}
                 data.update({k: raw[k] for k in _EDITABLE_SCENE if k in raw})
+                # D-047: `shots` se MERGEA por indice (no se reemplaza): las claves que
+                # el cliente manda pisan al plano base; las que no manda se conservan.
+                # Asi un editor parcial (Picker manda framing/audio) no borra camera/visual.
+                if isinstance(raw.get("shots"), list):
+                    base_shots = data.get("shots") or []
+                    merged = []
+                    for j, rsh in enumerate(raw["shots"]):
+                        bsh = dict(base_shots[j]) if j < len(base_shots) else {}
+                        bsh.update({k: v for k, v in (rsh or {}).items()})
+                        merged.append(bsh)
+                    data["shots"] = merged
                 data["id"] = sid
                 scene = Scene(**data)
                 if scene.shots:  # el total de la escena = suma de sus planos
                     scene.duration_s = sum(sh.duration_s for sh in scene.shots)
+                # D-046: si el humano edito el prompt a mano (difiere del base), es
+                # un override -> marcar manual para que no se recompile solo. El
+                # round-trip de un prompt sin cambios no toca el flag.
+                if "prompt" in raw:
+                    prev = (base.prompt if base else "") or ""
+                    if (raw.get("prompt") or "") != prev:
+                        scene.prompt_manual = True
                 new_scenes.append(scene)
         except Exception as exc:  # noqa: BLE001 — validación -> 422 legible
             raise HTTPException(422, f"Storyboard inválido: {exc}")
@@ -207,6 +267,9 @@ def create_app(projects_dir: Path = Path("projects"),
             spec.title = body["title"]
         if "brief" in body:
             spec.brief = body["brief"]
+        # D-053: backend del storyboard persiste en project.yaml
+        if "storyboard_backend" in body and body["storyboard_backend"]:
+            spec.storyboard_backend = body["storyboard_backend"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
         # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
@@ -216,36 +279,103 @@ def create_app(projects_dir: Path = Path("projects"),
             signed_marker.write_text("", encoding="utf-8")
         else:
             signed_marker.unlink(missing_ok=True)
+        # T7/T13/D-055: avisos no bloqueantes (clase fuera del perfil, escena sin
+        # planos) al momento de firmar — "advertir, no invalidar" (D-046).
+        advisories = []
+        try:
+            from ..config import load_config
+            from ..state import signing_advisories
+            cfg = load_config(config_dir, spec.style)
+            advisories = signing_advisories(spec, set(cfg.routing.rules))
+        except Exception:
+            advisories = []
         return {"saved": str(project.spec_path), "scenes": len(ids),
-                "dropped_selections": dropped, "signed": bool(body.get("sign"))}
+                "dropped_selections": dropped, "signed": bool(body.get("sign")),
+                "advisories": advisories}
 
     @app.get("/api/projects/{slug}")
     def project_detail(slug: str):
         from ..project import effective_shots
+        from ..prompt_compile import compose_character_prompt
 
         _project, spec, _cfg = load(slug)
         scenes = [{
             "id": s.id, "beat": s.beat, "class": s.class_, "prompt": s.prompt,
+            "prompt_manual": s.prompt_manual, "prompt_stale": s.prompt_stale,  # D-046
             "dialogue": s.dialogue, "ambience": s.ambience,
+            "visual_intensity": s.visual_intensity,  # D-047
             "characters": s.characters,
-            "shots": [{"framing": sh.framing, "duration_s": sh.duration_s,
-                       "voiceover": sh.voiceover, "caption": sh.caption,
-                       "sfx": sh.sfx}
-                      for sh in effective_shots(s)],
+            "shots": [{
+                "intention": sh.intention, "action": sh.action,  # D-047
+                "framing": sh.framing, "duration_s": sh.duration_s,
+                "camera": sh.camera.model_dump(), "visual": sh.visual.model_dump(),  # D-047
+                "transition": sh.transition,
+                "voiceover": sh.voiceover, "caption": sh.caption, "sfx": sh.sfx,
+            } for sh in effective_shots(s)],
         } for s in spec.scenes]
         characters = [{
             "name": name,
-            "design": ch.design.prompt if ch.design else None,
+            "design": compose_character_prompt(ch.design) if ch.design else None,  # D-049/B2
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
         music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
                 "style": spec.style, "format": spec.format, "music": music_url,
+                "storyboard_backend": spec.storyboard_backend,  # D-053
                 "characters": characters, "scenes": scenes}
+
+    @app.post("/api/projects/{slug}/prompts/compile")
+    async def compile_prompts(slug: str, body: dict = {}):
+        """Compila el prompt visual desde la narrativa (D-046). Sincrono (Haiku via
+        to_thread). Body: { scene_id?, force? }. Con scene_id compila ESA escena
+        (override explicito del humano); sin el, compila las desactualizadas
+        (force incluye las en-sintonia y las manual)."""
+        from ..project import write_spec
+        from ..prompt_compile import sync_scene_prompt
+
+        project, spec, _cfg = load(slug)
+        scene_id = (body.get("scene_id") or "").strip() or None
+        force = bool(body.get("force"))
+        targets = [s for s in spec.scenes if (scene_id is None or s.id == scene_id)]
+        if scene_id and not targets:
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        todo = [s for s in targets if (scene_id is not None or force or s.prompt_stale)]
+
+        def work():
+            for s in todo:
+                sync_scene_prompt(s, spec.characters)
+            if todo:
+                write_spec(spec, project.spec_path)
+
+        await asyncio.to_thread(work)
+        return {"compiled": [{"id": s.id, "prompt": s.prompt,
+                              "prompt_manual": s.prompt_manual,
+                              "prompt_stale": s.prompt_stale} for s in todo]}
+
+    @app.post("/api/projects/{slug}/shots/{scene_id}")
+    async def gen_shot_previews(slug: str, scene_id: str, body: dict = {}):
+        """D-048/A4: genera (encadenados) los keyframes de los planos 2+ de la escena
+        desde el ancla elegida, para previsualizar coherencia. Job/SSE."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if not any(s.id == scene_id for s in spec.scenes):
+            raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
+        force = bool(body.get("force"))
+        backend = (body.get("backend") or None)  # D-051: fal | google (toggle de Elegir)
+
+        async def coro():
+            paths = await studio.preview_shot_keyframes(project, spec, cfg, scene_id,
+                                                        force=force, backend=backend)
+            return {"scene": scene_id, "shots": len(paths)}
+
+        return jobs.spawn("shots", f"{slug}/{scene_id}", coro()).to_dict()
 
     @app.get("/api/projects/{slug}/candidates")
     def candidates(slug: str):
         project, _spec, _cfg = load(slug)
+
+        from ..studio import is_upload
 
         def read(path: Path) -> dict:
             if not path.exists():
@@ -253,13 +383,22 @@ def create_app(projects_dir: Path = Path("projects"),
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             return {k: [file_url(p) for p in v] for k, v in data.items()}
 
+        def sources(path: Path) -> dict:
+            """Origen de cada candidato: "upload" (humano) | "ia" (T11/D-055)."""
+            if not path.exists():
+                return {}
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            return {k: ["upload" if is_upload(p) else "ia" for p in v] for k, v in data.items()}
+
         def load_yaml(path: Path) -> dict:
             if not path.exists():
                 return {}
             return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
         return {"keyframes": read(project.candidates_path),
+                "keyframe_sources": sources(project.candidates_path),  # T11
                 "cast": read(project.dir / "cast_candidates.yaml"),
+                "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
                 "selections": load_yaml(project.selections_path),
                 "cast_selections": load_yaml(project.dir / "casting.yaml")}
 
@@ -268,12 +407,18 @@ def create_app(projects_dir: Path = Path("projects"),
         """Estado derivado del proyecto (D-032): el `stage` del bucle + el detalle
         por paso. La verdad se calcula en `state.derive_state`; aca solo decoramos
         con lo que es del server (claves de settings, URL del video final)."""
-        from ..state import derive_state
+        from ..state import derive_state, signing_advisories
+        from ..studio import verify_casting, verify_selections
 
         project, spec, _cfg = load(slug)
         s = get_settings()
         out = derive_state(project, spec, has_fal_key=bool(s.fal_key)).to_dict()
         out["keys"] = {attr: bool(getattr(s, attr)) for attr in _KEYS}
+        # D-055: reconciliacion disco<->estado + avisos no bloqueantes + costo unitario.
+        out["integrity"] = {"selections": verify_selections(project),  # T5/T14
+                            "casting": verify_casting(project)}          # T10
+        out["advisories"] = signing_advisories(spec, set(_cfg.routing.rules))  # T7/T13
+        out["est_cost_per_image_usd"] = _cfg.storyboard.est_cost_per_image_usd  # T15
 
         final_url = None
         run = project.latest_run()
@@ -285,20 +430,22 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- jobs de generación ----------------------------------------------
     @app.post("/api/projects/{slug}/keyframes")
-    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5):
+    async def gen_keyframes(slug: str, n: int = 4, concurrency: int = 5,
+                            backend: str | None = None):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.gen_keyframes(project, spec, cfg, n,
-                                               open_sheet=False, concurrency=concurrency)
+            sheet = await studio.gen_keyframes(project, spec, cfg, n, open_sheet=False,
+                                               concurrency=concurrency, backend=backend)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("keyframes", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/keyframes/{scene_id}")
-    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2, body: dict = {}):
+    async def gen_keyframes_scene(slug: str, scene_id: str, n: int = 2,
+                                  backend: str | None = None, body: dict = {}):
         """Genera N keyframes para UNA escena con prompt_tweak opcional."""
         from .. import studio
 
@@ -308,7 +455,8 @@ def create_app(projects_dir: Path = Path("projects"),
         tweak = (body.get("prompt_tweak") or "").strip()
 
         async def coro():
-            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n, prompt_tweak=tweak)
+            await studio.gen_keyframes_scene(project, spec, cfg, scene_id, n,
+                                             prompt_tweak=tweak, backend=backend)
             return {"scene": scene_id, "n": n}
 
         return jobs.spawn("keyframes", f"{slug}/{scene_id}", coro()).to_dict()
@@ -340,6 +488,20 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(422, "El campo 'data' no es base64 válido.")
         dest = studio.add_candidate_upload(project, scene_id, data, suffix)
         return {"url": file_url(dest), "scene": scene_id, "file": dest.name}
+
+    @app.delete("/api/projects/{slug}/candidates/{scene_id}/{idx}")
+    def discard_candidate(slug: str, scene_id: str, idx: int):
+        """Descarta el candidato `idx` de una escena (T3/D-055): "dejame solo 3".
+
+        Reconcilia la selección por path: si la escena estaba elegida con ese
+        candidato, la selección se descarta también."""
+        from .. import studio
+
+        project, _spec, _cfg = load(slug)
+        try:
+            return studio.delete_candidate(project, scene_id, idx)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(422, str(exc))
 
     @app.post("/api/projects/{slug}/music/upload")
     async def upload_music(slug: str, body: dict):
@@ -396,13 +558,13 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("music", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/cast")
-    async def gen_cast(slug: str, n: int = 4):
+    async def gen_cast(slug: str, n: int = 4, backend: str | None = None):
         from .. import studio
 
         project, spec, cfg = load(slug)
 
         async def coro():
-            sheet = await studio.cast(project, spec, cfg, n, open_sheet=False)
+            sheet = await studio.cast(project, spec, cfg, n, open_sheet=False, backend=backend)
             return {"sheet": str(sheet)}
 
         return jobs.spawn("cast", slug, coro()).to_dict()

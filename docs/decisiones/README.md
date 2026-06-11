@@ -71,3 +71,21 @@ es continua entre archivos.
 |---|---|---|
 | D-041 | Ojos semánticos: `pipeline describe` (Haiku ve y evalúa cada plano) | Vigente |
 | D-042 | Edición autónoma mixta: movis (CLI) + mcp-video (MCP), sin EDL | Vigente |
+| D-043 | Selección explícita de proveedor: `proto_veo` como perfil propio (no fallback) | Vigente |
+| D-044 | Metadata `_meta` en perfiles + `/api/profiles` endpoint (UI dinámica) | Vigente |
+| D-045 | Storyboard centrado en la historia (humano): prompts se desplazan a Elegir | Vigente |
+| D-046 | Prompt derivado de la narrativa (compilable + sincronizable) | Vigente |
+| D-047 | El plano como artefacto audiovisual: gramática de cámara + estructura de Block | Vigente |
+| D-048 | Coherencia de planos (keyframe ≠ video, encadenado) + flujo guiado por foco | Vigente |
+| D-049 | Casting como artefacto de personaje | Vigente |
+| D-050 | Convención de idioma: usuario en español, IA en inglés | Vigente |
+
+### [0051-0060.md](0051-0060.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-051 | Backend de keyframe por Google (Gemini) + toggle fal/Google + acciones masivas | Vigente |
+| D-052 | Perfiles multi-rol (video + keyframe + gate VLM + LLM) + visibilidad de costos | Revisada por D-053 |
+| D-053 | Split storyboard backend / render profile: dos configs para dos fases | Vigente |
+| D-054 | Endurecimiento post-review Sprint 1: i2v exigido + telemetría con cierre garantizado + concat robusto | Vigente |
+| D-055 | Endurecimiento keyframes/UI: integridad de artefactos + avisos no bloqueantes + costo visible | Vigente |
+| D-056 | `render()` valida casting además de selections (cierra el hueco simétrico de integridad) | Vigente |

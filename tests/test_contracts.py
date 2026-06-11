@@ -18,12 +18,14 @@ def test_scene_class_alias_roundtrips():
 
 
 def test_required_capabilities_mapping():
+    # i2v es la base siempre exigida (D-054); los flags suman sobre ella.
     req = SceneRequirements(needs_audio=True, needs_4k=True)
-    assert req.required_capabilities() == {"audio", "4k"}
+    assert req.required_capabilities() == {"i2v", "audio", "4k"}
 
 
-def test_empty_requirements_need_nothing():
-    assert SceneRequirements().required_capabilities() == set()
+def test_empty_requirements_still_need_i2v():
+    # Sin flags, la escena sigue exigiendo i2v (todo el pipeline es image-to-video).
+    assert SceneRequirements().required_capabilities() == {"i2v"}
 
 
 def test_genresult_rejects_negative_cost():

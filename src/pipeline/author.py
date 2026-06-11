@@ -12,10 +12,19 @@ es I/O (Claude, smoke). El borrador se materializa con `project.write_spec`.
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 from pydantic import BaseModel, Field
 
-from .contracts import Scene
+from .contracts import (
+    CameraAngle,
+    CameraMove,
+    FocusDepth,
+    Scene,
+    ShotSize,
+    ToneKey,
+    Transition,
+)
 from .project import Character, CharacterDesign
 from .settings import get_settings
 
@@ -24,53 +33,86 @@ _DRAFT_MODEL = "claude-opus-4-8"
 # Persona del sistema: director-guionista con formación completa.
 _DRAFT_SYSTEM = """\
 Sos un director-guionista audiovisual con formación en narrativa visual, diseño de
-sonido y storytelling transmedia. Tu trabajo es descomponer ideas en storyboards de
-producción concretos y completos.
+sonido y fotografía. Transformás un texto en un documento de producción concreto y completo.
+Nunca dejás vacíos los campos que importan: si hablan, hay diálogo; si hay acción, hay SFX;
+los momentos clave van como `hero`; cada escena tiene su espacio sonoro (ambience).
 
-Cuando te dan un texto —brief, guion, idea— lo transformás en un documento de producción
-listo para ejecutar. Nunca dejás campos vacíos que importen: si hay personajes que hablan,
-hay diálogo escrito; si hay acción, hay SFX pensados; si hay momentos clave, están marcados
-como `hero`; cada escena tiene su espacio sonoro (ambience) porque el sonido construye el
-lugar tanto como la imagen.
+━━━ IDIOMA (regla dura) ━━━
+• Lo que la audiencia VE u OYE va en ESPAÑOL: title, brief, beat, intention, dialogue,
+  voiceover, caption y el texto en pantalla (visual.graphics).
+• Lo que alimenta a los MODELOS de IA (imagen, video, audio) va en INGLÉS: prompt, action,
+  los campos de `visual` (foreground/midground/background/focal_point/line/rhythm/palette),
+  ambience, sfx y el diseño de personaje (prompt/physical/wardrobe/palette/expression).
+  Los valores de `camera`, `tone` y `transition` son tokens fijos (ni ES ni EN).
 
-Pensás en arcos emocionales, no en listas de hechos. Cada beat tiene una función narrativa.\
+━━━ CÓMO PENSÁS LA IMAGEN ━━━
+• Cada plano es un ARTEFACTO: tamaño/ángulo/movimiento/foco (shot-list) + estructura visual
+  (tono, color, profundidad, punto focal — Bruce Block). No describís planos genéricos.
+• El KEYFRAME es una imagen FIJA: en `action` describís lo que se VE (composición), NO el
+  movimiento. El movimiento de cámara vive en `camera.move` y es cosa del VIDEO.
+• Los planos de una escena se ENCADENAN (cada plano se genera EDITANDO el anterior): comparten
+  set, props, personajes y look. Escribilos como CONTINUACIONES (qué cambia: encuadre, acción,
+  foco), no como escenas nuevas. El plano 1 es el ancla de la escena.
+• Construís un ARCO de intensidad visual hacia el clímax (visual_intensity), con contraste
+  entre cortes (alterná tamaños de plano).\
 """
 
 _DRAFT_PROMPT = """\
 Convertí el siguiente texto en un borrador de proyecto audiovisual completo.
-Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
+Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones. Cada campo lleva [ES] (español,
+lo ve/oye la audiencia) o [EN] (inglés, alimenta a un modelo de IA):
 
 {{
-  "title": "título corto y evocador",
-  "brief": "2-3 frases: tono + arco narrativo + intención emocional del video",
+  "title": "[ES] título corto y evocador",
+  "brief": "[ES] 2-3 frases: tono + arco narrativo + intención emocional",
   "style": "lego",
   "format": "9:16",
   "characters": {{
     "NombrePersonaje": {{
-      "design": "descripción visual DETALLADA: rasgos físicos, ropa, expresión característica, paleta de colores, estilo visual que lo hace reconocible"
+      "design": {{
+        "prompt": "[EN] visual description that makes the character recognizable (1-2 sentences)",
+        "physical": "[EN] distinctive physical traits: face, hair, body",
+        "wardrobe": "[EN] signature wardrobe",
+        "palette": ["[EN] 2-3 character colors"],
+        "expression": "[EN] defining gesture/expression"
+      }}
     }}
   }},
   "scenes": [
     {{
       "id": "s1",
-      "beat": "etiqueta narrativa del momento (ej: 'apertura', 'conflicto', 'revelación', 'clímax', 'cierre')",
+      "beat": "[ES] etiqueta narrativa del momento (ej: 'apertura', 'revelación', 'clímax', 'cierre')",
       "class": "hero|standard|volume",
-      "prompt": "descripción VISUAL del setting + personajes + acción física. Lo que la cámara VE. Sin diálogo. Incluí atmósfera, iluminación, estado emocional expresado visualmente.",
+      "prompt": "[EN] scene BASE for the image model: setting + characters + atmosphere + lighting. The fixed look the scene shares. No dialogue.",
       "duration_s": 6,
-      "dialogue": "líneas literales de diálogo como en un guion: 'Personaje: frase exacta.' — null si la escena es sin diálogo",
-      "ambience": "el espacio sonoro del lugar: room tone + sonidos pasivos del entorno. Siempre presente. Ej: 'tráfico lejano y lluvia sobre asfalto', 'silencio de biblioteca con páginas pasando y aire acondicionado'",
+      "dialogue": "[ES] líneas literales de guion: 'Personaje: frase exacta.' — null si no hay diálogo",
+      "ambience": "[EN] room tone of the place for the audio model: passive ambient sound. Always present. Ej: 'distant traffic and light rain', 'quiet studio room hum'",
       "characters": ["NombrePersonaje"],
-      "requirements": {{
-        "needs_audio": false,
-        "needs_lipsync": false
-      }},
+      "visual_intensity": 3,
+      "requirements": {{ "needs_audio": false, "needs_lipsync": false }},
       "shots": [
         {{
-          "framing": "tipo de plano + movimiento de cámara + acción específica. Ej: 'PG con paneo lento de izquierda a derecha sobre la ciudad al amanecer', 'PP de manos abriendo el sobre, cámara fija'",
+          "intention": "[ES] la FUNCIÓN dramática del plano: qué hace entender o sentir. Solo la lee el humano.",
+          "action": "[EN] what is SEEN (still composition) + what physically happens: subject + action + what enters/leaves frame. NO camera movement here.",
           "duration_s": 3,
-          "voiceover": "texto para voz en off narrativa. null si no hay narrador en este plano.",
-          "caption": "texto en pantalla / lower-third / subtítulo. null si no corresponde.",
-          "sfx": "el sonido concreto de la ACCIÓN de este plano. Ej: 'clic de cerradura y puerta crujiendo', 'teclas de laptop y pitido de notificación'. null si no aporta narrativamente."
+          "camera": {{
+            "size": "ECU|CU|MCU|MS|MLS|LS|ELS|insert",
+            "angle": "eye|high|low|overhead|worm|dutch|ots",
+            "move": "static|pan|tilt|push_in|pull_out|track|crane|handheld|zoom",
+            "focus": "deep|shallow|rack"
+          }},
+          "visual": {{
+            "tone": "high_key|low_key|neutral|silhouette",
+            "palette": ["[EN] 2-3 dominant colors"],
+            "foreground": "[EN] what is in the foreground, or null",
+            "background": "[EN] what is in the background, or null",
+            "focal_point": "[EN] where the viewer's eye goes",
+            "graphics": "[ES] el TEXTO que aparece en pantalla (lower-third / tipografía), o null"
+          }},
+          "transition": "cut|match_cut|dissolve|smash_cut|wipe",
+          "voiceover": "[ES] texto de voz en off. null si no hay narrador en este plano.",
+          "caption": "[ES] texto en pantalla / subtítulo. null si no corresponde.",
+          "sfx": "[EN] the concrete sound of THIS shot's action for the audio model. Ej: 'lock click'. null si no aporta."
         }}
       ]
     }}
@@ -79,52 +121,40 @@ Devolvé SOLO un objeto JSON, sin markdown, sin explicaciones:
 
 ━━━ CRITERIOS DE DIRECCIÓN ━━━
 
-**`class`** — jerarquía de producción:
-• `"hero"`: el momento climático/emocional del video. Máximo 2. Alta producción.
-• `"standard"`: escenas narrativas principales. La mayoría.
-• `"volume"`: establishing shots, transiciones, relleno visual rápido.
+**Idioma:** respetá [ES]/[EN] al pie de la letra. Un `action` o `prompt` en español, o un `caption`
+en inglés, es un ERROR. Los enums (camera/tone/transition) van tal cual.
 
-**`prompt`** — la descripción visual del beat:
-• Describí lo que la cámara VE: atmósfera, luz, acción física, composición del cuadro.
-• No repitas el diálogo. No describas emociones abstractas; describí lo que las expresa.
-• Incluí el estilo visual: si es de noche, si hay contraluz, si el espacio es íntimo o épico.
+**`class`** — jerarquía: `hero` (clímax, máx 2) · `standard` (la mayoría) · `volume` (transiciones).
 
-**`dialogue`** — lo que se dice:
-• Escribí líneas literales, no resúmenes. "Martina: 'No sabía que ibas a volver.'"
-• Si needs_lipsync es true, el modelo de video sincronizará labios.
-• Si hay diálogo significativo → needs_audio: true.
-• Si es escena de acción sin habla → null.
+**`prompt`** (scene base, [EN]) — el setting + personajes + atmósfera que la ESCENA comparte; es la
+base sobre la que cada plano suma su encuadre. Sin diálogo, sin movimiento de cámara.
 
-**`ambience`** — el espacio sonoro:
-• SIEMPRE presente. Define dónde está el espectador.
-• Es el fondo constante: no la música, no los efectos puntuales. El "room tone" del lugar.
-• Sé específico: no "sonidos de ciudad" sino "bocinas lejanas, lluvia fina, pisadas en charcos".
+**`shots`** — cada plano es un ARTEFACTO (pensá como director de fotografía):
+• `intention` [ES]: la función dramática. Cada plano existe por una razón.
+• `action` [EN]: lo que se VE (composición fija) + qué pasa. SIN movimiento de cámara (eso es video).
+• `camera` (tokens): size ECU·CU·MCU·MS·MLS·LS·ELS·insert; angle eye·high·low·overhead·worm·dutch·ots;
+  move static·pan·tilt·push_in·pull_out·track·crane·handheld·zoom; focus deep·shallow·rack.
+  El `move` es el movimiento del VIDEO (el keyframe es fijo).
+• `visual` (Bruce Block, [EN] salvo graphics): tone (token) · palette · foreground/background ·
+  focal_point. `graphics` [ES] = el texto literal en pantalla.
+• `transition` (token): cómo entra al plano siguiente.
 
-**`sfx`** — efectos de sonido de la acción:
-• Solo los que suman información narrativa o dramatismo.
-• Un plano con alguien abriendo una caja: "cartón rasgándose, crujido de tapa".
-• Un plano de paisaje estático sin acción específica: null.
-• No repitas el ambience acá.
+**ENCADENADO** — los planos de una escena se generan EDITANDO al anterior: comparten set, props,
+personajes y look. Escribí cada plano como CONTINUACIÓN (qué cambia: encuadre, acción, foco), no
+como una escena nueva. Alterná tamaños de plano entre cortes para dar contraste.
 
-**`shots`** — la gramática visual:
-• Vocabulario: PG (plano general), PM (plano medio), PP (primer plano), PD (plano detalle), PE (plano entero).
-• Movimientos: paneo, travelling, zoom in/out, cámara fija, handheld (cámara al hombro), drone.
-• Cada plano tiene una razón dramática: no listés planos por listar.
+**`visual_intensity`** (1-5) — el arco de intensidad: `hero`/clímax alto (4-5), aperturas/respiros
+bajo (1-2). Construí tensión hacia el clímax; no dejes todo plano en la misma intensidad (Block).
 
-**`voiceover`** — narración:
-• Solo cuando el video tiene un narrador explícito (documental, publicitario con voz en off).
-• No uses voiceover para describir lo que ya se ve.
-
-**`caption`** — texto en pantalla:
-• Úsalo para datos que refuerzan la narrativa: nombre de lugar, fecha, estadísticas, citas.
-• También para subtítulos si hay diálogo que conviene ver escrito.
+**Sonido** — `dialogue` [ES] (líneas literales; si hay diálogo significativo → needs_audio: true;
+needs_lipsync: true solo si hay un primer plano de cara hablando). `voiceover` [ES] (solo si hay
+narrador explícito; no narres lo que ya se ve). `ambience` [EN] (room tone, siempre presente).
+`sfx` [EN] (solo si suma; no repitas el ambience).
 
 ━━━ REGLAS DE ESTRUCTURA ━━━
-• Mínimo 3 escenas, máximo 8 (para un video de 30-90 segundos).
-• duration_s de la escena = suma de sus planos (2 a 6 segundos por plano).
-• La progresión de beats debe tener arco: apertura → nudo → clímax → cierre.
+• 3 a 8 escenas (video de 30-90s). duration_s de la escena = suma de sus planos (2-6s por plano).
+• Arco de beats: apertura → nudo → clímax → cierre.
 • Si el texto no nombra personajes recurrentes → "characters": {{}}.
-• needs_lipsync: true SOLO si hay diálogo en close-up de cara hablando.
 
 Texto a convertir:
 {text}
@@ -156,17 +186,83 @@ class ProjectDraft(BaseModel):
         )
 
 
+_CAM_ENUMS = {
+    "size": set(get_args(ShotSize)), "angle": set(get_args(CameraAngle)),
+    "move": set(get_args(CameraMove)), "focus": set(get_args(FocusDepth)),
+}
+_TONES = set(get_args(ToneKey))
+_TRANSITIONS = set(get_args(Transition))
+
+
+def _coerce_camera(raw) -> dict | None:
+    """Mantiene solo los enums VÁLIDOS de camera (D-047); descarta valores inventados
+    por el LLM para que la validación nunca reviente el borrador entero."""
+    if not isinstance(raw, dict):
+        return None
+    out = {k: raw[k] for k, allowed in _CAM_ENUMS.items()
+           if isinstance(raw.get(k), str) and raw[k] in allowed}
+    if isinstance(raw.get("lens_mm"), (int, float)):
+        out["lens_mm"] = int(raw["lens_mm"])
+    return out or None
+
+
+def _coerce_visual(raw) -> dict | None:
+    """Sanea el bloque visual (Block): tono enum válido, palette lista, resto strings."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict = {}
+    if isinstance(raw.get("tone"), str) and raw["tone"] in _TONES:
+        out["tone"] = raw["tone"]
+    if isinstance(raw.get("palette"), list):
+        pal = [str(x).strip() for x in raw["palette"] if str(x).strip()]
+        if pal:
+            out["palette"] = pal
+    for k in ("foreground", "midground", "background", "focal_point", "line", "rhythm", "graphics"):
+        v = raw.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    return out or None
+
+
+def _sanitize_shot(sh: dict) -> dict:
+    """Normaliza un plano del LLM: enums controlados de camera/visual/transition (D-047)."""
+    sh = dict(sh)
+    cam = _coerce_camera(sh.get("camera"))
+    sh["camera"] = cam if cam else None
+    if sh["camera"] is None:
+        sh.pop("camera")
+    vis = _coerce_visual(sh.get("visual"))
+    sh["visual"] = vis if vis else None
+    if sh["visual"] is None:
+        sh.pop("visual")
+    if not (isinstance(sh.get("transition"), str) and sh["transition"] in _TRANSITIONS):
+        sh.pop("transition", None)
+    return sh
+
+
 def _scene_from_raw(raw: dict, idx: int) -> Scene:
     """Normaliza una escena del LLM en un Scene válido (rellena lo que falte)."""
     s = dict(raw)
     s.setdefault("id", f"s{idx + 1}")
+    if s.get("shots"):  # D-047: sanear enums de cada plano antes de validar
+        s["shots"] = [_sanitize_shot(sh) for sh in s["shots"]]
+    # visual_intensity: clamp 1-5 o descartar.
+    vi = s.get("visual_intensity")
+    if isinstance(vi, (int, float)):
+        s["visual_intensity"] = max(1, min(5, int(vi)))
+    else:
+        s.pop("visual_intensity", None)
     # duration_s obligatorio (>0): derivar de los planos o caer a un default.
     if not s.get("duration_s"):
         shots = s.get("shots") or []
         total = sum(float(sh.get("duration_s") or 0) for sh in shots)
         s["duration_s"] = total or 5
     # Usar model_validate para manejar el alias "class" -> class_ correctamente.
-    return Scene.model_validate(s)
+    scene = Scene.model_validate(s)
+    # D-046: el prompt del draft nace DE la narrativa propuesta -> sellar como
+    # en-sintonia para que el storyboard no aparezca todo "desactualizado".
+    scene.prompt_src_hash = scene.narrative_hash()
+    return scene
 
 
 def _character_from_raw(name: str, raw) -> Character:
@@ -178,7 +274,14 @@ def _character_from_raw(name: str, raw) -> Character:
     if isinstance(cd, str) and cd.strip():
         design = CharacterDesign(prompt=cd.strip(), refs=[])
     elif isinstance(cd, dict) and cd.get("prompt"):
-        design = CharacterDesign(prompt=cd["prompt"], refs=[])
+        # D-049/B2: artefacto de personaje (campos opcionales, tolerante).
+        design = CharacterDesign(
+            prompt=cd["prompt"], refs=[],
+            physical=cd.get("physical") or None,
+            wardrobe=cd.get("wardrobe") or None,
+            palette=[str(x).strip() for x in (cd.get("palette") or []) if str(x).strip()],
+            expression=cd.get("expression") or None,
+        )
     return Character(name=name, design=design)
 
 

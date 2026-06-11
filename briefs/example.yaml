@@ -1,21 +1,46 @@
 # Brief de ejemplo (LEGO). Escenas explicitas para un smoke run deterministico.
-# Alternativa: poner 'script: |' con prosa y dejar que Claude las descomponga.
+# Idioma (D-050): lo que la audiencia VE/OYE va en ESPAÑOL (beat, intention, dialogue,
+#   voiceover, caption, graphics); lo que alimenta a los modelos de IA va en INGLES
+#   (prompt, action, visual.*, ambience, sfx). camera/tone/transition son tokens.
+# El plano es un artefacto (D-047): camera (size/angle/move/focus) + visual (Block).
+# Alternativa: poner 'script: |' con prosa y dejar que Claude las descomponga (author.py).
 scenes:
   - id: s1
-    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacias"
+    beat: "apertura"
+    class: volume
+    prompt: "wide shot of a LEGO city at dawn, empty streets"   # [EN] base de escena (imagen)
     duration_s: 4
     characters: []
-    class: volume
+    visual_intensity: 2
+    shots:
+      - intention: "establecer el mundo en calma"               # [ES] funcion dramatica
+        action: "empty LEGO streets at dawn, long golden shadows"  # [EN] que se VE (imagen fija)
+        duration_s: 4
+        camera: { size: LS, angle: high, move: pan }            # move -> video (el keyframe es fijo)
+        visual: { tone: high_key, palette: ["amber", "cream"] }
 
   - id: s2
-    prompt: "Dos minifiguras LEGO conversan en una cafeteria, plano medio"
+    beat: "presentacion"
+    class: standard
+    prompt: "two LEGO minifigures talking in a cafe, medium shot"  # [EN]
     duration_s: 5
     characters: [alex, robin]
-    dialogue: "Hoy lanzamos el producto."
+    dialogue: "Hoy lanzamos el producto."                      # [ES] guion (TTS / lipsync)
     requirements:
       needs_audio: true
+    shots:
+      - action: "two LEGO minifigs at a cafe table, talking, warm interior"  # [EN]
+        duration_s: 5
+        camera: { size: MS, angle: ots }
+        voiceover: null
 
   - id: s3
-    prompt: "Minifigura LEGO camina por el parque, seguimiento lateral"
+    beat: "cierre"
+    class: volume
+    prompt: "a LEGO minifigure walks through the park, lateral tracking"  # [EN]
     duration_s: 4
     characters: [alex]
+    shots:
+      - action: "LEGO minifigure walking along a sunny park path"  # [EN]
+        duration_s: 4
+        camera: { size: MLS, move: track }

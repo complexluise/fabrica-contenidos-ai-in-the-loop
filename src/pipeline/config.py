@@ -2,6 +2,10 @@
 
 Toda la parametrizacion vive en YAML para poder enrutar/cambiar estilo sin tocar
 codigo. Aqui se valida y se convierte a objetos tipados.
+
+Dos secciones independientes en routing.yaml (D-053):
+  storyboard_backends  -> StoryboardConfig  (imagen + LLM narrativo)
+  profiles             -> ProfileConfig      (video + gate)
 """
 
 from __future__ import annotations
@@ -47,17 +51,65 @@ class RoutingConfig(BaseModel):
     enforce: bool = False  # gate suave por defecto (puntúa pero no bloquea)
 
 
+# --- D-052/D-053: configuracion de roles AI ----------------------------------
+
+class GateProfileConfig(BaseModel):
+    """Control del gate por perfil de render: habilitado/deshabilitado + modelo VLM."""
+    enabled: bool = True
+    vlm_model: str | None = None  # None -> haiku; "gemini-*" -> Google VLM
+
+
+class ProfileConfig(BaseModel):
+    """Configuracion de la fase de PRODUCCION (render, run) — D-052.
+
+    Solo habla de video: estrategia, gate y costo estimado por escena.
+    El backend de imagen y el LLM narrativo viven en StoryboardConfig (D-053).
+    """
+    gate: GateProfileConfig = Field(default_factory=GateProfileConfig)
+    est_cost_per_scene_usd: float = 0.05
+
+
+class StoryboardKeyframeConfig(BaseModel):
+    """Backend e modelo de imagen para el storyboard backend activo."""
+    backend: str = "fal"
+    model: str | None = None  # None -> usa el del estilo
+
+
+class StoryboardLLMConfig(BaseModel):
+    """LLM narrativo (naming, describe, classify, compile) para el backend activo."""
+    backend: str = "anthropic"
+    model: str = "claude-haiku-4-5-20251001"
+
+
+class StoryboardConfig(BaseModel):
+    """Configuracion de la fase CREATIVA (cast, keyframes, prompts) — D-053.
+
+    Persiste en project.yaml como `storyboard_backend: fal`. Controla el backend
+    de imagen y el LLM narrativo; independiente del perfil de render.
+    """
+    name: str = "fal"
+    keyframe: StoryboardKeyframeConfig = Field(default_factory=StoryboardKeyframeConfig)
+    llm: StoryboardLLMConfig = Field(default_factory=StoryboardLLMConfig)
+    est_cost_per_image_usd: float = 0.003
+
+
+# --- Config raiz -------------------------------------------------------------
+
 class Config(BaseModel):
     """Config raiz del pipeline."""
 
     providers: dict[str, ProviderConfig]
     routing: RoutingConfig
     style: StyleConfig
-    # Post de audio (D-034): modelos que NO compiten en el routing (p.ej. el paso
-    # video-to-audio MMAudio). Viven aparte de `providers:` para no entrar al
-    # router/cascade/ensemble. Vacio si no hay bloque `audio:`.
+    # Post de audio (D-034): modelos que NO compiten en el routing.
     audio: dict[str, ProviderConfig] = Field(default_factory=dict)
+    # Fase de produccion (D-052): gate + costo por escena.
+    profile: ProfileConfig = Field(default_factory=ProfileConfig)
+    # Fase creativa (D-053): backend de imagen + LLM narrativo.
+    storyboard: StoryboardConfig = Field(default_factory=StoryboardConfig)
 
+
+# --- Loaders -----------------------------------------------------------------
 
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
@@ -77,8 +129,12 @@ def load_audio(path: Path) -> dict[str, ProviderConfig]:
     return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
 
 
-def load_routing(path: Path, profile: str = "prod") -> RoutingConfig:
-    """Carga el routing resolviendo el perfil solicitado (D-038).
+# Claves de perfil de render que NO son reglas de routing (D-052/D-053).
+_PROFILE_ROLE_KEYS = {"gate", "est_cost_per_scene_usd"}
+
+
+def load_routing(path: Path, profile: str = "fal-ultra-cheap") -> RoutingConfig:
+    """Carga el routing resolviendo el perfil de render solicitado (D-038/D-052).
 
     Formato nuevo: `profiles.<profile>` en el YAML.
     Compat: si no hay `profiles:`, se asume bloque `hybrid:` como perfil prod.
@@ -86,21 +142,68 @@ def load_routing(path: Path, profile: str = "prod") -> RoutingConfig:
     raw = _load_yaml(path)
     if "profiles" in raw:
         profiles = raw.pop("profiles")
-        rules = profiles.get(profile) or profiles["prod"]
+        raw.pop("storyboard_backends", None)  # no forma parte del routing
+        chosen = profiles.get(profile) or profiles.get("fal-ultra-cheap") or profiles.get("prod") or {}
+        rules = {k: v for k, v in chosen.items() if k not in _PROFILE_ROLE_KEYS and k != "_meta"}
     else:
         rules = raw.pop("hybrid", {})
     raw["rules"] = rules
     return RoutingConfig(**raw)
 
 
+def load_profile_config(path: Path, profile: str = "fal-ultra-cheap") -> ProfileConfig:
+    """Extrae la configuracion de la fase de render del perfil activo (D-052).
+
+    Perfiles sin secciones 'gate' usan los defaults de ProfileConfig (backward-compat).
+    """
+    raw = _load_yaml(path)
+    profiles = raw.get("profiles", {})
+    entry = profiles.get(profile) or profiles.get("fal-ultra-cheap") or {}
+
+    gt_raw = entry.get("gate") or {}
+    gt = GateProfileConfig(**gt_raw) if gt_raw else GateProfileConfig()
+
+    return ProfileConfig(
+        gate=gt,
+        est_cost_per_scene_usd=entry.get("est_cost_per_scene_usd", 0.05),
+    )
+
+
+def load_storyboard_config(path: Path, backend: str = "fal") -> StoryboardConfig:
+    """Extrae la configuracion del storyboard backend activo (D-053).
+
+    Backends no encontrados caen a 'fal' (mas compatible).
+    """
+    raw = _load_yaml(path)
+    backends = raw.get("storyboard_backends", {})
+    entry = backends.get(backend) or backends.get("fal") or {}
+
+    kf_raw = entry.get("keyframe") or {}
+    lm_raw = entry.get("llm") or {}
+
+    kf = StoryboardKeyframeConfig(**{k: v for k, v in kf_raw.items() if v is not None}) if kf_raw else StoryboardKeyframeConfig()
+    lm = StoryboardLLMConfig(**{k: v for k, v in lm_raw.items() if v is not None}) if lm_raw else StoryboardLLMConfig()
+
+    return StoryboardConfig(
+        name=backend,
+        keyframe=kf,
+        llm=lm,
+        est_cost_per_image_usd=entry.get("est_cost_per_image_usd", 0.003),
+    )
+
+
 def load_style(path: Path) -> StyleConfig:
     return StyleConfig(**_load_yaml(path))
 
 
-def load_config(config_dir: Path, style: str, profile: str = "prod") -> Config:
-    """Carga la config completa para un estilo y perfil dados (D-038)."""
+def load_config(config_dir: Path, style: str, profile: str = "fal-ultra-cheap",
+                backend: str = "fal") -> Config:
+    """Carga la config completa para un estilo, perfil de render y storyboard backend (D-052/D-053)."""
     providers = load_providers(config_dir / "providers.yaml")
     audio = load_audio(config_dir / "providers.yaml")
     routing = load_routing(config_dir / "routing.yaml", profile=profile)
     style_cfg = load_style(config_dir / "styles" / f"{style}.yaml")
-    return Config(providers=providers, routing=routing, style=style_cfg, audio=audio)
+    profile_cfg = load_profile_config(config_dir / "routing.yaml", profile=profile)
+    storyboard_cfg = load_storyboard_config(config_dir / "routing.yaml", backend=backend)
+    return Config(providers=providers, routing=routing, style=style_cfg, audio=audio,
+                  profile=profile_cfg, storyboard=storyboard_cfg)

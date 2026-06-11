@@ -1,23 +1,25 @@
-"""L4 - Adapter directo de Veo 3.1 (Google) via google-genai.
+"""L4 - Adapter Veo (Google) via google-genai.
 
-Único modelo con audio+diálogo sincronizado nativo -> tier hero. Auth/billing
-propios de Google (no fal). La llamada real está aislada en `_submit_veo` para
-poder mockearla; requiere GOOGLE_API_KEY (via pipeline.settings) y el extra
-google-genai. Pendiente de validar contra la API real en el primer smoke con key
-(igual que pasó con el adapter de fal).
+Fallback de proto cuando fal.ai no tiene credito. Auth propia de Google
+(GOOGLE_API_KEY). El video se descarga como bytes desde Google Files API
+(no es una URL publica — requiere el cliente autenticado).
+
+Validado contra veo-2.0-generate-001. Si el modelo cambia, actualizar
+providers.yaml.
 """
 
 from __future__ import annotations
 
-import time
+import asyncio
 from pathlib import Path
-
-import httpx
 
 from ..config import ProviderConfig
 from ..contracts import GenRequest
 from ..settings import get_settings
 from .base import BaseProvider
+
+POLL_INTERVAL = 15   # segundos entre polls
+TIMEOUT_S     = 600  # 10 min max
 
 
 class GoogleVeoProvider(BaseProvider):
@@ -26,43 +28,57 @@ class GoogleVeoProvider(BaseProvider):
         self.model = cfg.model
 
     async def _call(self, req: GenRequest):
-        url = await self._submit_veo(req)
-        out_path = await self._download(url, req)
-        return out_path, {"backend": "google", "model": self.model, "remote_url": url}
+        out_path = await asyncio.wait_for(
+            self._generate(req),
+            timeout=TIMEOUT_S,
+        )
+        return out_path, {"backend": "google", "model": self.model}
 
-    async def _submit_veo(self, req: GenRequest) -> str:
-        """Genera el video con Veo y devuelve la URL/archivo. Mockeable en tests."""
+    async def _generate(self, req: GenRequest) -> Path:
         try:
             from google import genai
             from google.genai import types
-        except ImportError as exc:  # pragma: no cover
+        except ImportError as exc:
             raise RuntimeError(
-                "Instala google-genai para usar Veo: uv add google-genai"
+                "Instala google-genai: uv add google-genai"
             ) from exc
 
-        key = get_settings().require("google_api_key", "generación de video con Veo")
+        key = get_settings().require("google_api_key", "generacion de video con Veo")
         client = genai.Client(api_key=key)
 
-        config = types.GenerateVideosConfig(aspect_ratio=req.aspect_ratio)
-        kwargs = {"model": self.model, "prompt": req.prompt, "config": config}
+        config = types.GenerateVideosConfig(
+            aspect_ratio=req.aspect_ratio or "9:16",
+            number_of_videos=1,
+            duration_seconds=min(int(req.duration_s or 5), 8),
+        )
+        kwargs: dict = {"model": self.model, "prompt": req.prompt, "config": config}
         if req.init_image is not None:
             kwargs["image"] = types.Image.from_file(location=str(req.init_image))
 
-        operation = client.models.generate_videos(**kwargs)
-        # Veo es asíncrono: poll hasta completar.
+        # submit — sincrono (SDK no ofrece async aqui); rapido, solo encola
+        operation = await asyncio.to_thread(
+            client.models.generate_videos, **kwargs
+        )
+
+        # poll — asyncio.sleep para no bloquear el event loop
+        elapsed = 0
         while not operation.done:
-            time.sleep(10)
-            operation = client.operations.get(operation)
+            await asyncio.sleep(POLL_INTERVAL)
+            elapsed += POLL_INTERVAL
+            operation = await asyncio.to_thread(client.operations.get, operation)
 
-        video = operation.response.generated_videos[0].video
-        return getattr(video, "uri", None) or getattr(video, "url", "")
+        videos = operation.response.generated_videos
+        if not videos:
+            raise RuntimeError("Veo: la operacion termino sin videos")
 
-    async def _download(self, url: str, req: GenRequest) -> Path:
+        video = videos[0].video
+
+        # Descargar — Google Files devuelve bytes autenticados, no URL publica
+        video_bytes = await asyncio.to_thread(client.files.download, file=video)
+
         out_dir = Path("out/clips")
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{self.name}_{abs(hash((url, req.prompt))) & 0xFFFFFF:06x}.mp4"
-        async with httpx.AsyncClient(timeout=600) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            out_path.write_bytes(resp.content)
+        slug = abs(hash(req.prompt)) & 0xFFFFFF
+        out_path = out_dir / f"veo_{slug:06x}.mp4"
+        out_path.write_bytes(video_bytes)
         return out_path

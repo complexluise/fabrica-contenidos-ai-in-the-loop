@@ -115,31 +115,57 @@ class SceneRequirements(BaseModel):
     needs_camera_control: bool = False
     needs_hdr: bool = False
 
-class Shot(BaseModel):                          # plano (D-028): unidad atómica keyframe+clip+audio
-    framing: str                               # encuadre/acción que EXTIENDE el prompt de la escena
+class Camera(BaseModel):                        # gramática del shot-list (D-047)
+    size: "ECU|CU|MCU|MS|MLS|LS|ELS|insert" = "MS"
+    angle: "eye|high|low|overhead|worm|dutch|ots" = "eye"
+    move: "static|pan|tilt|push_in|pull_out|track|crane|handheld|zoom" = "static"  # MOVIMIENTO → video
+    focus: "deep|shallow|rack" = "deep"
+    lens_mm: int | None = None
+
+class Visual(BaseModel):                         # estructura visual (Bruce Block, D-047) — [EN]
+    tone: "high_key|low_key|neutral|silhouette" | None = None
+    palette: list[str] = []
+    foreground: str | None = None; midground: str | None = None; background: str | None = None
+    focal_point: str | None = None; line: str | None = None; rhythm: str | None = None
+    graphics: str | None = None                # texto en pantalla / lower-third — [ES] (lo lee la audiencia)
+
+class Shot(BaseModel):                          # plano = ARTEFACTO audiovisual (D-028/D-047)
+    intention: str | None = None               # función dramática — [ES] (solo la lee el humano)
+    action: str | None = None                  # qué SE VE (imagen fija) — [EN]; visual primario
     duration_s: float
+    camera: Camera = Camera()                  # gramática (size/angle/focus → keyframe; move → video)
+    visual: Visual = Visual()                  # estructura de Block — [EN]
+    transition: "cut|match_cut|dissolve|smash_cut|wipe" | None = None
     seed: int = 0                              # reroll del plano (cache miss solo en este plano)
-    voiceover: str | None = None               # audio del plano (TTS)
-    caption: str | None = None                 # texto en pantalla del plano
-    sfx: str | None = None                     # efectos de sonido de la acción (V2A MMAudio, D-034)
+    voiceover: str | None = None               # narración — [ES] (TTS)
+    caption: str | None = None                 # texto en pantalla — [ES]
+    sfx: str | None = None                     # sonido de la acción — [EN] (V2A MMAudio, D-034)
+    framing: str = ""                          # LEGACY: fallback de `action` (compat D-028)
     keyframe: Path | None = None               # rellenado por L3
 
 class Scene(BaseModel):                         # beat (D-028): agrupa planos; comparte prompt+personajes
     id: str
-    prompt: str                                # BASE (setting+personajes); el plano le suma el framing
+    prompt: str                                # BASE (setting+personajes) — [EN]; el plano suma su artefacto
     duration_s: float
     characters: list[str] = []                 # para consistencia entre tomas
-    dialogue: str | None = None
+    dialogue: str | None = None                # guion — [ES]
     class_: Literal["hero", "standard", "volume"] | None = None
     requirements: SceneRequirements = SceneRequirements()
     shots: list[Shot] = []                      # planos (D-028); vacío = 1 plano implícito (compat)
-    keyframe: Path | None = None               # rellenado por L3 (plano 1 = keyframe elegido)
+    beat: str | None = None                    # etiqueta narrativa — [ES]
+    visual_intensity: int | None = None        # 1-5: curva de intensidad del video (D-047, Block)
+    prompt_manual: bool = False                # D-046: el humano sobrescribió el prompt
+    prompt_src_hash: str | None = None         # D-046: hash de la narrativa al compilar
+    keyframe: Path | None = None               # rellenado por L3 (plano 1 = ancla elegida)
     seed: int = 0                              # reroll: subirlo regenera SOLO esta escena
-    ambience: str | None = None                # sonido del lugar (V2A MMAudio, por escena, D-034)
+    ambience: str | None = None                # room tone del lugar — [EN] (V2A MMAudio, D-034)
     character_refs: list[Path] = []            # transitorio: refs resueltas por el runner
 
-# Plano 1 = el keyframe que elige el humano (best-of-N, por escena); planos 2+ se autogeneran
-# en el render (n=1, sin validación). El flujo interactivo sigue scene-addressed. Ver D-028.
+# Plano 1 = el ANCLA que elige el humano (best-of-N, por escena). Planos 2+ se ENCADENAN: cada uno
+# edita (i2i) el keyframe del plano previo + su delta → coherencia visual (D-048). El KEYFRAME es
+# una imagen FIJA (sin `move`); el MOVIMIENTO va al prompt de video. El prompt visual se DERIVA de
+# la narrativa (D-046, `prompt_compile`). IDIOMA (D-050): lo que ve/oye la audiencia → [ES]; lo que
+# alimenta a los modelos de IA → [EN]. Ver D-046/D-047/D-048/D-050.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):
@@ -210,6 +236,8 @@ trade-offs):
 | Filosofía de deps | APIs antes que libs pesadas | [D-017](docs/decisiones/0011-0020.md) |
 | Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](docs/decisiones/0011-0020.md) |
 | Tooling | uv · pydantic-settings · TDD selectivo | [D-010](docs/decisiones/0001-0010.md), [D-011](docs/decisiones/0011-0020.md), [D-012](docs/decisiones/0011-0020.md) |
+| Render profile | Estrategia de video + gate VLM; default ultra-cheap (lo más barato) | [D-052](docs/decisiones/0051-0060.md) |
+| Storyboard backend | Backend de imagen + LLM narrativo; persiste en `project.yaml` | [D-053](docs/decisiones/0051-0060.md) |
 
 ---
 
@@ -229,6 +257,7 @@ Genera **N candidatos en paralelo** entre varios modelos, los puntúa y elige el
 calidad, el más caro. Reservado a un % bajo de escenas.
 
 ### 4.4 Híbrido por defecto (recomendado)
+
 | Importancia | % aprox. | Estrategia |
 |---|---|---|
 | Hero / marca | 5–10% | Ensemble |
@@ -236,6 +265,35 @@ calidad, el más caro. Reservado a un % bajo de escenas.
 | Volumen / relleno | 20–30% | Cascade desde Kling |
 
 Una **sola capa de Quality Gate y de post** para todas; lo que cambia es la estrategia.
+
+### 4.5 Dos configuraciones para dos fases ([D-052], [D-053])
+
+El pipeline tiene dos fases con naturalezas distintas; cada una tiene su propia configuración:
+
+**Storyboard backend** (`--backend`, D-053) — fase creativa: `cast`, `keyframes`, `prompts`.
+Persiste en `project.yaml` como `storyboard_backend: fal`. Controla:
+
+| Campo | Qué controla |
+|---|---|
+| `keyframe.backend` | Motor de imagen: `fal` (Flux + nano-banana) o `google` (Gemini imagen) |
+| `llm.backend` / `llm.model` | LLM narrativo: naming, describe, classify, compile |
+| `est_cost_per_image_usd` | Estimado de costo por imagen generada |
+
+**Render profile** (`--profile`, D-052) — fase de producción: `render`, `run`.
+Default `fal-ultra-cheap` (lo más barato, gate deshabilitado). Controla:
+
+| Campo | Qué controla |
+|---|---|
+| `hero`/`standard`/`volume` | Estrategia + providers de video ([D-038]) |
+| `gate.enabled` / `gate.vlm_model` | Gate VLM: habilitado/deshabilitado + modelo ([D-007]) |
+| `est_cost_per_scene_usd` | Estimado de costo por escena de video |
+
+El switch de backend/perfil es **siempre manual**. Un HTTP 402 falla con un mensaje que sugiere
+la alternativa; el pipeline no cambia de proveedor sin consentimiento del operador.
+
+El backend activo se configura de forma **discreta en el Storyboard** (chip en la cabecera de la
+UI, no intrusivo) y se persiste en `project.yaml`. La lista de backends disponibles se expone vía
+`GET /api/storyboard-backends` (mismo patrón dinámico que `GET /api/profiles`, [D-044]).
 
 ```mermaid
 flowchart TD
@@ -262,7 +320,7 @@ Arquitectura de **señales enchufables** (`gate/`): cada señal puntúa un frame
 
 | Señal | Tecnología | Estado |
 |---|---|---|
-| Adherencia semántica + artefactos + "¿se ve LEGO?" | **VLM-judge (Claude visión, multimodal)** | ✅ **default** |
+| Adherencia semántica + artefactos + "¿se ve LEGO?" | **VLM-judge (modelo del perfil activo, [D-052])** | ✅ **default** |
 | Adherencia prompt↔frame numérica | CLIP (open_clip) | implementada, **dormida** (extra `[vision]`) |
 | Score estético | Aesthetic scorer (LAION) | implementada, **dormida** (extra `[vision]`) |
 | Consistencia de personaje (embedding) | insightface / ArcFace | Sprint 4 |
@@ -330,23 +388,48 @@ internalización (8).
 El proyecto ES su spec versionado en git. El pipeline es una **función pura del spec**: mismo
 spec → mismos hashes → mismos artefactos (de caché). `project.yaml` es la **entrada única**:
 
+El plano es un **artefacto audiovisual** (D-047) y el idioma sigue la regla **[ES] audiencia /
+[EN] modelos de IA** (D-050):
+
 ```yaml
 project: lego_demo
 style: lego                 # referencia a config/styles/<style>.yaml
 format: "9:16"
-overrides:                  # opcional: pisar config global para este proyecto
-  providers: {}
 scenes:
   - id: s1
-    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacias"
+    beat: "apertura"                                   # [ES] etiqueta narrativa
+    class: hero
+    prompt: "wide shot of a LEGO city at dawn, empty streets"   # [EN] base de escena (imagen)
     duration_s: 5
-    seed: 0                 # subir el seed = "reroll" (nueva variante de ESTA escena)
+    visual_intensity: 2                                # 1-5: curva de intensidad (Block)
+    seed: 0                                            # subir el seed = "reroll" de ESTA escena
+    shots:
+      - intention: "establecer el mundo, calma antes del relato"  # [ES] función dramática (humano)
+        action: "empty LEGO streets at dawn, long shadows, soft golden light"  # [EN] qué se VE (fijo)
+        duration_s: 5
+        camera: { size: LS, angle: eye, move: push_in, focus: deep }  # move → video; el keyframe es fijo
+        visual:
+          tone: high_key
+          palette: ["amber", "cream"]                  # [EN]
+          focal_point: "the empty main avenue"         # [EN]
+          graphics: "Amanece en la ciudad"             # [ES] texto en pantalla
+        transition: cut
+        voiceover: "Una ciudad que despierta."         # [ES] narración (TTS)
+        ambience: "distant morning birds, faint city hum"  # [EN] room tone (audio model)
   - id: s2
-    prompt: "Dos minifiguras LEGO conversan en una cafeteria, plano medio"
+    beat: "presentación"
+    prompt: "two LEGO minifigures talking in a cafe, medium shot"  # [EN]
     duration_s: 5
-    dialogue: "Hoy lanzamos el producto."
-    seed: 0
+    dialogue: "Hoy lanzamos el producto."             # [ES] guion (TTS/lipsync)
+    requirements: { needs_audio: true }
+    shots:
+      - action: "two LEGO minifigs at a cafe table, talking, warm interior"  # [EN]
+        duration_s: 5
+        camera: { size: MS, angle: ots }
 ```
+
+Los planos 2+ de una escena se **encadenan** desde el ancla (i2i, D-048); el prompt visual se
+**deriva** de la narrativa y puede recompilarse (D-046).
 
 ### 7.2 Caché content-addressed (lo que corta el costo de iterar)
 

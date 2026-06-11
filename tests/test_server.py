@@ -38,7 +38,8 @@ def test_project_detail_404_when_missing(tmp_path):
 
 def test_settings_status_shape(tmp_path):
     body = _client(tmp_path).get("/api/settings").json()
-    assert set(body) == {"fal_key", "anthropic_api_key", "elevenlabs_api_key"}
+    # D-051: google_api_key se expone para gatear el toggle de keyframe Google.
+    assert set(body) == {"fal_key", "anthropic_api_key", "elevenlabs_api_key", "google_api_key"}
     assert all(isinstance(v, bool) for v in body.values())
 
 

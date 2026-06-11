@@ -144,14 +144,14 @@ async def test_ensemble_filters_by_capability():
 # --- T2.4 Dispatcher híbrido ------------------------------------------------
 
 def test_select_rule_maps_class_to_strategy():
-    routing = load_routing(Path("config") / "routing.yaml")
+    routing = load_routing(Path("config") / "routing.yaml", profile="prod")
     assert select_rule("hero", routing).strategy == "ensemble"
     assert select_rule("standard", routing).strategy == "router"
     assert select_rule("volume", routing).strategy == "cascade"
 
 
 def test_select_rule_providers_from_yaml():
-    routing = load_routing(Path("config") / "routing.yaml")
+    routing = load_routing(Path("config") / "routing.yaml", profile="prod")
     assert select_rule("hero", routing).providers == ["veo", "seedance", "kling"]
 
 

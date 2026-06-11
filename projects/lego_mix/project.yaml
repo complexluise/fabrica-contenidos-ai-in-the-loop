@@ -6,37 +6,89 @@ style: lego
 format: '9:16'
 scenes:
 - id: s1
-  prompt: Ciudad LEGO al amanecer, calles vacias con luz dorada entre los edificios
-    de bloques
+  prompt: a LEGO city at dawn, empty streets with golden light between the block buildings
   duration_s: 6
   beat: apertura
-  ambience: ambiente de ciudad al amanecer, calma, pajaros lejanos, brisa suave
+  class: volume
+  ambience: calm dawn city ambience, distant birds, soft breeze
+  visual_intensity: 2
   shots:
-  - framing: plano general amplio de la ciudad al amanecer
+  - intention: establecer el mundo, la calma antes del movimiento
+    action: wide establishing shot of the LEGO city at dawn, long shadows over empty
+      avenues
     duration_s: 3
+    camera:
+      size: LS
+      angle: high
+      move: pan
+    visual:
+      tone: high_key
+      focal_point: the empty main avenue
+      palette:
+      - amber
+      - cream
+    transition: cut
     voiceover: Al amanecer, la ciudad aun duerme.
-  - framing: plano detalle de una farola LEGO apagandose
+  - intention: un detalle intimo que marca el paso de la noche al dia
+    action: insert of a LEGO streetlamp switching off as the morning light grows
     duration_s: 3
+    camera:
+      size: insert
+      focus: shallow
+    visual:
+      tone: high_key
+      focal_point: the streetlamp bulb
+    transition: match_cut
     caption: Amanece
 - id: s2
-  prompt: Las calles de la ciudad LEGO se llenan de minifiguras caminando hacia el
-    trabajo
+  prompt: the LEGO city streets fill with minifigures walking to work
   duration_s: 6
   beat: despertar
-  ambience: murmullo urbano creciente, pasos de multitud en la calle
+  class: standard
+  ambience: rising urban murmur, footsteps of a crowd on the street
+  visual_intensity: 3
   shots:
-  - framing: plano medio de minifiguras saliendo de sus casas
+  - intention: mostrar la ciudad cobrando vida
+    action: medium shot of LEGO minifigures stepping out of their houses into the
+      street
     duration_s: 3
+    camera:
+      move: push_in
+    visual:
+      palette:
+      - primary-red
+      - yellow
+      - blue
+    transition: cut
     voiceover: Poco a poco, las minifiguras llenan las calles.
-  - framing: travelling lateral siguiendo el flujo por la avenida
+  - intention: dar energia y flujo al movimiento colectivo
+    action: lateral tracking shot following the flow of minifigures down the avenue
     duration_s: 3
+    camera:
+      size: MLS
+      move: track
+    visual:
+      rhythm: brisk, repetitive crowd movement
 - id: s3
-  prompt: El sol esta alto sobre la ciudad LEGO en plena actividad, vehiculos y minifiguras
-    por todas partes
+  prompt: the sun is high over the busy LEGO city, vehicles and minifigures everywhere
   duration_s: 5
   beat: clima
-  ambience: trafico intenso de ciudad, bocinas lejanas, bullicio
+  class: hero
+  ambience: heavy city traffic, distant horns, midday bustle
+  visual_intensity: 5
   shots:
-  - framing: plano general dinamico del trafico bajo el sol del mediodi
+  - intention: el clima del dia, la ciudad a pleno ritmo
+    action: dynamic wide shot of midday traffic under the high sun, crowded streets
+      and vehicles
     duration_s: 5
+    camera:
+      size: LS
+      angle: low
+      move: crane
+    visual:
+      tone: high_key
+      rhythm: fast and busy
+      palette:
+      - bright primary colors
+    transition: cut
     voiceover: Con el sol en lo alto, la ciudad late a pleno ritmo.

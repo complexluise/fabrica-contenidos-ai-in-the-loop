@@ -496,21 +496,25 @@ proveedor más económico, rápido) y `--profile prod` sea la producción final;
 `--concurrency N` varias escenas corran en vuelo simultáneo recortando el tiempo total de render.
 
 ### Acceptance Criteria
-- [ ] AC1 — `routing.yaml` tiene perfiles `prod` y `proto`; `--profile proto` aplica la tabla barata sin tocar otros archivos.
-- [ ] AC2 — `--profile prod` reproduce exactamente el comportamiento actual (ensemble/router/cascade). 🔬
-- [ ] AC3 — `pipeline run <slug> --profile proto --concurrency 3` genera las escenas en vuelo simultáneo con el mismo orden de clips que en serie.
-- [ ] AC4 — Una escena que falla con `concurrency > 1` no aborta el resto del run. 🔬
-- [ ] AC5 — El endpoint `POST /api/projects/{slug}/render` acepta `profile` y `concurrency` en el body.
+- [x] AC1 — `routing.yaml` tiene perfiles `prod` y `proto`; `--profile proto` aplica la tabla barata sin tocar otros archivos.
+- [x] AC2 — `--profile prod` reproduce exactamente el comportamiento actual (ensemble/router/cascade). 🔬
+- [x] AC3 — `pipeline run <slug> --profile proto --concurrency 3` genera las escenas en vuelo simultáneo con el mismo orden de clips que en serie.
+- [x] AC4 — Una escena que falla con `concurrency > 1` no aborta el resto del run. 🔬
+- [x] AC5 — El endpoint `POST /api/projects/{slug}/render` acepta `profile` y `concurrency` en el body.
 
 ### Tasks (orden test-first)
 - [x] T6.11.1 — ADRs D-038 y D-039 en `docs/decisiones/`.
-- [ ] T6.11.2 — `routing.yaml`: sección `profiles:` con `prod` y `proto`. 🔬 *core*
-- [ ] T6.11.3 — `config.py`: `RoutingConfig.hybrid` → `rules`; `load_routing(path, profile)`. 🔬 *core*
-- [ ] T6.11.4 — `dispatch.py` + tests. *core*
-- [ ] T6.11.5 — `runner.py`: `run_project(concurrency=1)` + `asyncio.gather` con semáforo. 🔬 *core*
-- [ ] T6.11.6 — `cli.py`: `--profile prod` y `--concurrency 1` en `run`; `--concurrency` en `render`.
-- [ ] T6.11.7 — `app.py`: endpoint render acepta `profile`/`concurrency`.
-- [ ] T6.11.8 — Smoke: `pipeline run lego_mix --profile proto --concurrency 2`.
+- [x] T6.11.2 — `routing.yaml`: sección `profiles:` con `prod` y `proto`. 🔬 *core*
+- [x] T6.11.3 — `config.py`: `RoutingConfig.hybrid` → `rules`; `load_routing(path, profile)`. 🔬 *core*
+- [x] T6.11.4 — `dispatch.py` + tests. *core*
+- [x] T6.11.5 — `runner.py`: `run_project(concurrency=1)` + `asyncio.gather` con semáforo. 🔬 *core*
+- [x] T6.11.6 — `cli.py`: `--profile prod` y `--concurrency 1` en `run`; `--concurrency` en `render`.
+- [x] T6.11.7 — `app.py`: endpoint render acepta `profile`/`concurrency`.
+- [x] T6.11.8 — Smoke: `pipeline run lego_mix --profile proto --concurrency 2`.
+
+> **✅ Sprint 6.11 CERRADO** (2026-06-07). Perfiles `prod`/`proto` seleccionables desde CLI y UI;
+> `RoutingConfig.rules` (antes `hybrid`); `run_project(concurrency=N)` con semáforo; endpoint
+> render acepta `profile`/`concurrency`; selector de velocidad en `Produccion.svelte`.
 
 ---
 
@@ -532,7 +536,7 @@ para varios planos) y que los planos sean **cortos por default (~2s)**. Refina [
 
 ---
 
-## Sprint 6.12 — Edición autónoma: describe + movis + mcp-video (D-041, D-042) ⭐ SIGUIENTE
+## Sprint 6.12 — Edición autónoma: describe + movis + mcp-video (D-041, D-042)
 
 **Objetivo:** cerrar el bucle **sin editora humana**. Un agente (Opus) monta el corte final
 priorizando **el mensaje sobre el pulido**, con tres piezas de roles separados: **`describe`** (los
@@ -540,22 +544,284 @@ ojos: Haiku evalúa cada plano), **`graphics`** (el artista: movis genera motion
 **mcp-video** (el ingeniero: servidor MCP guardrailed para el montaje). Ver [D-041]/[D-042].
 
 ### Acceptance Criteria
-- [ ] AC1 — `pipeline describe <slug>` genera `projects/<slug>/descriptions.yaml` con `{usable, on_message, issues, description}` por plano, leyendo del último run. 🔬 *(prompt/parseo)*
-- [ ] AC2 — Sin `ANTHROPIC_API_KEY`, `describe` emite warning y sale 0 con salida vacía (no rompe). 🔬
-- [ ] AC3 — `pipeline graphics <slug>` produce `export/graphics/` (lower-thirds por plano con `caption`, `title.mp4`, `end.mp4`) de forma determinista. 🔬 *(selección desde el manifest)*
-- [ ] AC4 — Si falta el extra `[edit]`, `graphics` falla con un mensaje claro que dice cómo instalarlo (`uv sync --extra edit`).
-- [ ] AC5 — `.mcp.json` registra `mcp-video` vía `uvx`; el agente lo ve como servidor MCP y no es dependencia del proyecto.
-- [ ] AC6 — La skill `narrative-cut` documenta el bucle `export → describe → graphics → (agente vía mcp-video) → final_cut.mp4` y pasa el smoke de contrato (`pipeline describe --help`, `pipeline graphics --help`).
+- [x] AC1 — `pipeline describe <slug>` genera `projects/<slug>/descriptions.yaml` con `{usable, on_message, issues, description}` por plano, leyendo del último run. 🔬 *(prompt/parseo)*
+- [x] AC2 — Sin `ANTHROPIC_API_KEY`, `describe` emite warning y sale 0 con salida vacía (no rompe). 🔬
+- [x] AC3 — `pipeline graphics <slug>` produce `export/graphics/` (lower-thirds por plano con `caption`, `title.mp4`, `end.mp4`) de forma determinista. 🔬 *(selección desde el manifest)*
+- [x] AC4 — Si falta el extra `[edit]`, `graphics` falla con un mensaje claro que dice cómo instalarlo (`uv sync --extra edit`).
+- [x] AC5 — `.mcp.json` registra `mcp-video` vía `uvx`; el agente lo ve como servidor MCP y no es dependencia del proyecto.
+- [x] AC6 — La skill `narrative-cut` documenta el bucle `export → describe → graphics → (agente vía mcp-video) → final_cut.mp4` y pasa el smoke de contrato (`pipeline describe --help`, `pipeline graphics --help`).
 
 ### Tasks (orden test-first)
 - [x] T6.12.1 — ADRs D-041 y D-042 en `docs/decisiones/`; SPEC (L10) y ROADMAP.
-- [ ] T6.12.2 — `describe.py`: `describe_prompt` + `parse_description`. 🔬 *core*
-- [ ] T6.12.3 — `gate/frames.py::extract_frame` incluye `at_seconds` en el nombre (evita colisión). 🔬 *core*
-- [ ] T6.12.4 — `describe.py::describe_bundle` (Haiku + frames) y subcomando `describe` en `cli.py`.
-- [ ] T6.12.5 — `graphics.py`: `lower_thirds`/`title_spec`/`end_spec`. 🔬 *core*
-- [ ] T6.12.6 — `graphics.py::render_graphics` (movis) + subcomando `graphics` en `cli.py` + extra `[edit]`.
-- [ ] T6.12.7 — `.mcp.json` (mcp-video por `uvx`) + `skills/narrative-cut/SKILL.md` + fila en `skills/README.md`.
-- [ ] T6.12.8 — Smoke real: `export → describe → graphics` sobre `lego_mix`; corte final vía mcp-video.
+- [x] T6.12.2 — `describe.py`: `describe_prompt` + `parse_description`. 🔬 *core*
+- [x] T6.12.3 — `gate/frames.py::extract_frame` incluye `at_seconds` en el nombre (evita colisión). 🔬 *core*
+- [x] T6.12.4 — `describe.py::describe_bundle` (Haiku + frames) y subcomando `describe` en `cli.py`.
+- [x] T6.12.5 — `graphics.py`: `lower_thirds`/`title_spec`/`end_spec`. 🔬 *core*
+- [x] T6.12.6 — `graphics.py::render_graphics` (movis) + subcomando `graphics` en `cli.py` + extra `[edit]`.
+- [x] T6.12.7 — `.mcp.json` (mcp-video por `uvx`) + `skills/narrative-cut/SKILL.md` + fila en `skills/README.md`.
+- [~] T6.12.8 — Smoke real: `export → describe → graphics` sobre `lego_mix`; corte final vía mcp-video. **Pendiente** del render pago.
+
+> **✅ Sprint 6.12 CERRADO** (2026-06-08). `describe` (Haiku analiza cada plano → `descriptions.yaml`)
+> + `graphics` (movis genera lower-thirds/placas deterministas → `export/graphics/`) + `.mcp.json`
+> (mcp-video por uvx) + skill `narrative-cut`. Core en verde. Pendiente: smoke pago end-to-end.
+
+---
+
+## Sprint 6.13 — Veo explícito + perfiles dinámicos en UI (D-043, D-044)
+
+**Objetivo:** cuando los créditos de fal.ai se agotan, poder usar Google Veo **sin fallback
+automático**; y que la UI descubra los perfiles del YAML **sin recompilarse**.
+
+### Acceptance Criteria
+- [x] AC1 — `proto_veo` es un perfil independiente en `routing.yaml`; elegirlo envía todo a Veo sin tocar `proto`. (D-043)
+- [x] AC2 — Cada perfil tiene un bloque `_meta` (label/desc/badge/color); el config loader lo elimina antes del parse. (D-044)
+- [x] AC3 — `GET /api/profiles` devuelve la lista de perfiles con su metadata desde el YAML en runtime.
+- [x] AC4 — `Produccion.svelte` carga los perfiles dinámicamente con `onMount → fetch /api/profiles`; fallback estático si el servidor no responde.
+- [x] AC5 — `providers/google_veo.py` usa polling asíncrono (`asyncio.to_thread` + `asyncio.sleep`) y descarga autenticada vía `client.files.download`.
+
+### Tasks
+- [x] T6.13.1 — ADRs D-043 y D-044 en `docs/decisiones/`.
+- [x] T6.13.2 — Perfil `proto_veo` + bloque `_meta` en los tres perfiles de `routing.yaml`.
+- [x] T6.13.3 — `config.load_routing` hace `rules.pop("_meta", None)`.
+- [x] T6.13.4 — `server/app.py`: endpoint `GET /api/profiles`.
+- [x] T6.13.5 — `Produccion.svelte`: `onMount → fetch`, `COLOR_MAP`, `badgeStyle`, fallback estático.
+- [x] T6.13.6 — `providers/google_veo.py` reescrito; `providers.yaml` ajusta veo a `veo-2.0-generate-001`; `pyproject.toml` añade `google-genai>=0.8`.
+
+> **✅ Sprint 6.13 CERRADO** (2026-06-08). Veo disponible como perfil explícito (`proto_veo`);
+> UI descubre perfiles dinámicamente desde routing.yaml; el proveedor Google corre sin fallback.
+
+---
+
+## Sprint 6.14 — Storyboard centrado en la historia: UX humano-first (D-045)
+
+**Objetivo:** que el Storyboard (paso 2) muestre la **historia** que el humano firma, no los
+prompts que la IA consume. Los prompts se desplazan a **Elegir** (paso 3) donde se revisan antes
+de generar. Ver [D-045].
+
+### Acceptance Criteria
+- [ ] AC1 — Modo lectura colapsado del Storyboard muestra: `beat` + chips de VO + duración; **no `s.prompt`**.
+- [ ] AC2 — Modo lectura expandido muestra: beat, diálogo, voiceover, caption, ambience. Sin `prompt` ni `framing` visibles en modo lectura.
+- [ ] AC3 — Modo edición del Storyboard: prompt visual y framing agrupados en un panel **"Para la IA"** colapsable (editable pero subordinado).
+- [ ] AC4 — Elegir (paso 3) tiene una sección **"Prompts para la IA"** (colapsable, por escena) que muestra/edita `s.prompt` y `shot.framing`; guardar usa `PUT /api/projects/{slug}` (sin cambio de API).
+- [ ] AC5 — El flujo `cast → keyframes → pick` **no se rompe**: los prompts siguen fluyendo al pipeline.
+
+### Tasks
+- [x] T6.14.1 — ADR D-045 en `docs/decisiones/`.
+- [x] T6.14.2 — `Storyboard.svelte`: read-compact muestra dialogo/vo/ambience; read-full muestra dialogo/vo/caption sin `s.prompt`; edit mode pone prompt en panel "Para la IA" colapsable.
+- [x] T6.14.3 — `Picker.svelte`: sección "Para la IA" colapsable por escena (prompt + framings), editable + `PUT /api/projects/{slug}` al guardar.
+- [x] T6.14.4 — Build limpio (0 errores, warnings CSS resueltos).
+
+---
+
+## Sprint 6.15 — Prompt derivado de la narrativa: compilable + sincronizable (D-046)
+
+**Objetivo:** cerrar el hueco de D-045. El Storyboard es la fuente de verdad; `scene.prompt` pasa
+a ser un artefacto **derivado-pero-sobrescribible**: se **compila** desde la narrativa (Haiku), se
+detecta cuando quedó **desactualizado** y se resincroniza de un clic. Ver [D-046].
+
+### Acceptance Criteria
+- [x] AC1 — `Scene` lleva `prompt_manual` + `prompt_src_hash`; `narrative_hash()` y `prompt_stale` derivan el estado (en sintonía / desactualizado / manual).
+- [x] AC2 — `prompt_compile.compile_prompt` arma el prompt desde beat+ambience+diálogo+personajes vía Haiku; sin `ANTHROPIC_API_KEY` cae a concatenación determinista (no rompe).
+- [x] AC3 — `POST /api/projects/{slug}/prompts/compile` y `pipeline prompts <slug> [--scene] [--force]` compilan los prompts desactualizados (D-023).
+- [x] AC4 — El draft de `author.py` sella el hash al nacer; el `PUT` marca `prompt_manual` solo cuando el prompt entrante difiere del base.
+- [x] AC5 — Elegir muestra el badge de estado por escena + botón "Compilar desde la narrativa"; los campos nuevos hacen round-trip idempotente en el YAML.
+
+### Tasks
+- [x] T6.15.1 — ADR D-046 en `docs/decisiones/`.
+- [x] T6.15.2 — `contracts.py` (campos + `narrative_hash`/`prompt_stale`); `prompt_compile.py` (+ tests core).
+- [x] T6.15.3 — `author.py` (sella hash), `project.py::_scene_to_dict` (persistencia), subcomando `prompts` en `cli.py`.
+- [x] T6.15.4 — `server/app.py` (endpoint compile + serialización + manual en PUT); `Picker.svelte` (badge + botón compilar).
+
+---
+
+## Sprint 6.16 — El plano como artefacto audiovisual: gramática + Block (D-047)
+
+**Objetivo:** elevar el `Shot` de un blob de `framing` a un **artefacto de producción**: intención,
+gramática de cámara (shot-list), estructura visual (Bruce Block) y transición, más la **curva de
+intensidad** por escena. El artista piensa en gramática; `compose_shot_visual` la ensambla en el
+prompt. Aditivo y retrocompatible. Ver [D-047].
+
+### Acceptance Criteria
+- [x] AC1 — `Camera`/`Visual` + enums controlados; `Shot` con intention/action/camera/visual/transition; `Scene.visual_intensity`. Defaults omitidos en el YAML, round-trip idempotente.
+- [x] AC2 — `compose_shot_visual` ensambla action + cámara + visual en lenguaje natural (fallback a `framing`); `runner`/`studio` generan desde ahí.
+- [x] AC3 — `author.py` propone el artefacto enriquecido; sanitizador de enums tolera valores inválidos del LLM sin romper el borrador.
+- [x] AC4 — Storyboard: shot-card editable (cámara como selects + diseño visual de Block), lectura muestra la descripción por plano, y gráfico de la curva de intensidad. PUT mergea shots por índice.
+- [x] AC5 — Proyecto `desmintiendo_fracking_sostenible` enriquecido (19 planos) listo para re-generar.
+
+### Tasks
+- [x] T6.16.1 — ADR D-047 + referencias (StudioBinder, Bruce Block, Mascelli).
+- [x] T6.16.2 — F1 contrato + `prompt_compile` + persistencia + `tests/test_shot_artifact.py`.
+- [x] T6.16.3 — F2 `author.py` (artefacto + sanitizador) + tests; F3 wiring `runner`/`studio`.
+- [x] T6.16.4 — F4 UI `Storyboard.svelte` (shot-card + curva) + `server/app.py` (serialización + merge); build limpio.
+- [x] T6.16.5 — F5 enriquecer el proyecto fracking (`scripts/_enrich_fracking.py`).
+
+---
+
+## Sprint 6.17 — Coherencia de planos + flujo guiado + casting artefacto (D-048, D-049)
+
+**Objetivo:** que el video sea coherente plano a plano y que el flujo guíe al humano con un solo
+foco por pantalla. Ver [D-048], [D-049].
+
+### Acceptance Criteria
+- [x] AC1 — Keyframe (imagen fija) ≠ video (movimiento): `compose_keyframe_prompt` sin `move`; `compose_video_prompt` con el movimiento.
+- [x] AC2 — Planos 2+ encadenan (i2i) desde el ancla de la escena; el cache encadena por `kf_key` del plano previo.
+- [x] AC3 — Previsualización de planos por escena (`/shots`, `shot_previews.yaml`) con reroll en Elegir.
+- [x] AC4 — Foco guiado (`.cta`): Storyboard firmar→siguiente; Elegir casting→encuadres (gated); PUT mergea shots por índice.
+- [x] AC5 — Storyboard colapsado muestra la descripción visual (B1); `CharacterDesign` enriquecido (physical/wardrobe/palette/expression) y compuesto en casting (D-049).
+
+### Tasks
+- [x] T6.17.1 — A1 separar keyframe/video; A2/A3 encadenado en runner/studio; tests.
+- [x] T6.17.2 — A4 `preview_shot_keyframes` + endpoint + tira en Elegir.
+- [x] T6.17.3 — C1 `.cta`; C2 foco Storyboard; C3 reorden Elegir + gating casting→encuadres; C4 (plegado).
+- [x] T6.17.4 — B1 descripción visual colapsada; B2 `CharacterDesign` artefacto + `compose_character_prompt`.
+- [x] T6.17.5 — ADRs D-048/D-049; build limpio; suite verde (1 fallo pre-existente ajeno: veo).
+
+---
+
+## Sprint 6.18 — Keyframe por Google + acciones masivas (D-051)
+
+**Objetivo:** que el keyframe también se pueda generar por Google (Gemini 2.5 Flash Image), para un
+camino completo sin fal; y botones para operar en lote (compilar prompts, generar planos). Ver [D-051].
+
+### Acceptance Criteria
+- [x] AC1 — `KeyframeGenerator` soporta `backend=google` (genera y edita/encadena vía google-genai).
+- [x] AC2 — Toggle fal/Google en Elegir, gateado por `GOOGLE_API_KEY`, pasado por endpoints → studio.
+- [x] AC3 — Acciones masivas: "Compilar prompts desactualizados / Recompilar todos" y "Generar todos los planos".
+- [x] AC4 — `GOOGLE_API_KEY` expuesta en `/api/settings` + campo en Ajustes; test de veo alineado a `i2v`.
+
+### Tasks
+- [x] T6.18.1 — `keyframe.py` backend Google (`_submit_google`, `_extract_image_bytes`).
+- [x] T6.18.2 — Thread `backend` por studio + 4 endpoints; `google_api_key` en `_KEYS`.
+- [x] T6.18.3 — UI: toggle + barra de acciones masivas (Picker), campo Google (Ajustes).
+- [x] T6.18.4 — ADR D-051; fix test veo; build limpio.
+
+---
+
+## Sprint 6.19 — Split storyboard/render + visibilidad de costos (D-052, D-053)
+
+**Objetivo:** dos configuraciones para dos fases — `--backend` para la fase creativa (imágenes +
+LLM), `--profile` para la fase de producción (video + gate). El backend activo se persiste en
+`project.yaml`. El usuario ve lo que gasta al final de cada paso.
+
+### Acceptance Criteria
+- [x] AC1 — `routing.yaml` define `storyboard_backends` (fal, google) y perfiles de render limpios
+  (`fal-ultra-cheap` default, sin `keyframe`/`llm`). Gate VLM configurable por perfil. 🔬
+- [x] AC2 — El gate VLM lee `vlm_model` del perfil activo; perfil sin gate → señales vacías (permisivo). Soporta Anthropic y Gemini como backends de VLM. 🔬
+- [x] AC3 — `project.yaml` persiste `storyboard_backend: fal`; `spec_from_dict`/`spec_to_dict` hacen round-trip. 🔬
+- [x] AC4 — `--backend google` en `cast`/`keyframes`/`prompts` usa el backend de storyboard; `--profile prod` en `render`/`run` usa el perfil de render. El flag del spec se usa si no se pasa `--backend` explícito.
+- [x] AC5 — Al final de cada subcomando se imprime una línea de costo (est + actual). HTTP 402 → mensaje con alternativa sugerida.
+- [x] AC6 — `GET /api/storyboard-backends` devuelve la lista con `_meta`; UI Storyboard tiene chip discreto que persiste la elección vía PUT.
+
+### Tasks (orden test-first)
+- [x] T6.19.1 — ADRs D-052 y D-053 + SPEC + ROADMAP. ✅
+- [x] T6.19.2 — `routing.yaml` (storyboard_backends + perfiles limpios) + `config.py` (ProfileConfig gate-only, StoryboardConfig, loaders). 🔬 *core* ✅
+- [x] T6.19.3 — `gate/vlm.py` + `gate/fused.py`: vlm_model del perfil, señales vacías si disabled, soporte Gemini VLM. ✅
+- [x] T6.19.4 — `runner.py`: keyframer backend desde `cfg.storyboard`. ✅
+- [x] T6.19.5 — `cli.py`: cost summary + 402 (parcial — `--backend` queda para T6.19.6). ✅
+- [x] T6.19.6 — `project.py` (`storyboard_backend` en spec); `cli.py` (`--backend` en storyboard cmds, lee del spec). 🔬 *core* ✅
+- [x] T6.19.7 — `server/app.py`: `GET /api/storyboard-backends`; PUT persiste `storyboard_backend`. ✅
+- [x] T6.19.8 — UI `Storyboard.svelte`: chip selector de backend (discreto, carga desde `/api/storyboard-backends`). ✅
+- [ ] T6.19.9 — Smoke: `pipeline keyframes lego_demo --backend google`; `pipeline run lego_demo --profile fal-ultra-cheap` (cost summary visible).
+
+---
+
+## Sprint 6.20 — Endurecimiento post-review Sprint 1 (D-054)
+
+**Objetivo:** cerrar los **tres bugs latentes** que sobrevivían de la revisión externa del Sprint 1
+(`docs/notas/feedback-sprint-1.md`) — los del tipo "no muerde hoy, muerde cuando mezcles providers o
+falle ffmpeg", justo los escenarios que el roadmap multi-provider habilita. Los otros 7 puntos del
+review ya estaban cerrados o son deudas asumidas (ver [D-054]). Aditivo, sin cambiar el camino feliz.
+
+### Acceptance Criteria
+- [x] AC1 — `SceneRequirements.required_capabilities()` exige **siempre `i2v`** (los flags suman sobre
+  esa base); un provider sin `i2v` queda descartado del routing por construcción (#8). 🔬
+- [x] AC2 — El tail del runner (`concat_clips`/`reframe`/`_write_manifest`) corre en `try/finally`:
+  `write_report` + `close` + `remove_handler` ocurren **siempre**, aun si ffmpeg revienta; la rama
+  "todas fallaron" escribe el reporte **antes** de lanzar (#10).
+- [x] AC3 — `concat_clips` conforma el **video** a una resolución canónica (libx264 + letterbox) solo
+  cuando los clips son **heterogéneos** (codec/resolución distintos); con clips uniformes mantiene el
+  `-c copy` rápido. La decisión es lógica pura testeada (#4). 🔬
+- [ ] AC4 — Smoke real: render que **mezcla providers** (p.ej. hero→ensemble seedance + std→router
+  kling) produce un `final.mp4` reproducible sin video roto. **Pendiente** del render pago.
+
+### Tasks (orden test-first)
+- [x] T6.20.1 — `contracts.py`: `required_capabilities()` parte de `{"i2v"}`; `tests/test_contracts.py` alineado. 🔬 ✅
+- [x] T6.20.2 — `runner.py`: tail en `try/finally`; reporte en la rama de fallo total (compatible con `test_runner_concurrency`). ✅
+- [x] T6.20.3 — `assemble.py`: `_video_sig`/`_uniform`/`_canonical_size` + `_ensure_audio`→`_normalize(video_size)`; `concat_clips` conforma si hay heterogeneidad. ✅
+- [x] T6.20.4 — `tests/test_assemble.py` (decisión de uniformidad + resolución canónica). 🔬 ✅
+- [x] T6.20.5 — ADR D-054 + índice del README de decisiones. ✅
+- [ ] T6.20.6 — Smoke pago: render multi-provider (junto con los smokes pendientes de 6.6/6.19).
+
+> **Estado:** core en verde (**270 tests**, +7 de `test_assemble`; `test_contracts` ajustado al
+> contrato i2v). Los tres bugs latentes cerrados sin tocar el camino de 1 provider. **Pendiente:**
+> el smoke pago multi-provider (AC4) para **cerrar**. Deudas asumidas del review (LoRA placeholder
+> #5, costo estimado vs facturado #9) quedan registradas en [D-054], no resueltas.
+
+---
+
+## Sprint 6.21 — Endurecimiento del flujo keyframes/UI (D-055)
+
+**Objetivo:** cerrar las tensiones del diagnóstico de UI (`docs/notas/feedback-keyframes-ui.md`) que
+**rompen en silencio** o esconden incompletitud/costo, priorizando el ciclo de vida de los artefactos
+(`selections.yaml`/`casting.yaml`/`shot_previews.yaml`) y la honestidad de la UI. Backend testeado
+(core); UI por build + smoke. Ver [D-055].
+
+### Acceptance Criteria
+- [x] AC1 — Integridad (T5/T10/T14): `verify_selections`/`verify_casting` detectan referencias a
+  archivos borrados; `render()` falla claro si el ancla no está en disco; el status expone `integrity`
+  y la UI lo muestra como banner. 🔬
+- [x] AC2 — Previews coherentes (T9/T2): `record_picks` invalida `shot_previews` de la escena al
+  reelegir el ancla; la UI recarga tras guardar y rotula la tira como previa (el render regenera). 🔬
+- [x] AC3 — Avisos al firmar (T7/T13): `signing_advisories` reporta escena sin planos + clase fuera del
+  perfil; `select_rule` loguea el fallback a `standard`; PUT y status devuelven `advisories`. 🔬
+- [x] AC4 — Costo + velocidad (T15/T6): `estimate_image_cost` + status `est_cost_per_image_usd`; el
+  Picker muestra el costo estimado antes de generar y un dial de concurrencia. 🔬
+- [x] AC5 — Pool de candidatos (T3/T11): `delete_candidate` descarta y reconcilia la selección por
+  path; `is_upload` marca el origen; UI con ✕ por miniatura y badge "tu foto". 🔬
+- [x] AC6 — `GLOSARIO` vivo (T8): cableado como tooltips en los encabezados (antes código muerto).
+- [~] AC7 — Deuda asumida (T1/T4): par backend-imagen × perfil-video como contrato visual persistido y
+  rediseño de granularidad global/escena/plano. **Parcial**: rótulos + dial + costo hechos; el contrato
+  persistido y el rediseño completo quedan para su propia iteración.
+
+### Tasks (orden test-first)
+- [x] T6.21.1 — `studio.py`: `verify_selections`/`verify_casting`/`invalidate_shot_previews`/
+  `delete_candidate`/`is_upload`; `record_picks` invalida previews; `render` valida disco. 🔬 ✅
+- [x] T6.21.2 — `state.py`: `signing_advisories` + `estimate_image_cost`; `dispatch.select_rule` loguea fallback. 🔬 ✅
+- [x] T6.21.3 — `tests/test_keyframes_integrity.py` (15 casos de core). 🔬 ✅
+- [x] T6.21.4 — `server/app.py`: status (`integrity`/`advisories`/`est_cost`), `/candidates`
+  (`keyframe_sources`), PUT (`advisories`), `DELETE /candidates/{scene}/{idx}`. ✅
+- [x] T6.21.5 — `Picker.svelte`: banners, dial de velocidad, costo, ✕ de descarte, badge origen, tooltips; build limpio. ✅
+- [x] T6.21.6 — ADR D-055 + índice del README. ✅
+- [ ] T6.21.7 — Smoke real (UI): abrir Elegir con una selección rota → banner; descartar candidato →
+  reconciliación; generar con dial → concurrencia. **Pendiente** de correr el Studio.
+
+> **Estado:** core en verde (**285 tests**, +15 en `test_keyframes_integrity`); build de UI limpio.
+> Las 15 tensiones del diagnóstico atacadas: 13 cerradas (backend + UI), 2 (T1/T4) parcialmente con la
+> deuda explícita en [D-055]. **Pendiente:** smoke del Studio corriendo (AC7 / T6.21.7).
+
+---
+
+## Sprint 6.22 — `render()` valida casting (D-056)
+
+**Objetivo:** cerrar el hueco simétrico que dejó [D-055]: `render()` validaba selecciones rotas pero no
+el casting, aunque el detector (`verify_casting`) ya existía. Disparado por un `casting.yaml` real
+apuntando a otro proyecto (fork). Backend testeado (core); ver [D-056].
+
+### Acceptance Criteria
+- [x] AC1 — `render()` interseca `verify_casting` con los personajes referenciados por las escenas y
+  **falla claro y temprano** (antes de tocar el provider) si una cara usada no está en disco. 🔬
+- [x] AC2 — Una entrada de casting vieja de un personaje **no usado** no aborta el render. 🔬
+- [x] AC3 — Alineación de datos del proyecto fracking: `casting.yaml` relativo local +
+  `storyboard_backend: fal` explícito ([D-053]).
+
+### Tasks (orden test-first)
+- [x] T6.22.1 — `tests/test_keyframes_integrity.py`: `test_render_raises_on_broken_casting` (red) +
+  `test_render_ignores_broken_casting_of_unused_character`. 🔬 ✅
+- [x] T6.22.2 — `studio.py`: `render` valida casting de personajes usados (green). 🔬 ✅
+- [x] T6.22.3 — ADR D-056 + índice del README. ✅
+- [x] T6.22.4 — Datos: `desmintiendo_fracking_sostenible/{casting.yaml,project.yaml}`. ✅
+
+> **Estado:** core en verde (**287 tests**, +2 en `test_keyframes_integrity`).
 
 ---
 

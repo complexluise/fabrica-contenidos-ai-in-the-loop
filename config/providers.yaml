@@ -13,9 +13,9 @@ providers:
     capabilities: [i2v, multishot]
   veo:
     backend: google
-    model: "veo-3.1"
-    cost_per_second: 0.50
-    capabilities: [audio, lipsync, i2v]
+    model: "veo-2.0-generate-001"
+    cost_per_second: 0.35
+    capabilities: [i2v]
 
 # Post de audio (D-034): NO entra al routing (no compite con los de arriba). Es el
 # paso video-to-audio que agrega SFX + ambiente sincronizados al clip ya generado.
