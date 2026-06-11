@@ -168,13 +168,23 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
 # una imagen FIJA (sin `move`); el MOVIMIENTO va al prompt de video. El prompt visual se DERIVA de
 # la narrativa (D-046, `prompt_compile`). IDIOMA (D-050): lo que ve/oye la audiencia → [ES]; lo que
 # alimenta a los modelos de IA → [EN]. Ver D-046/D-047/D-048/D-050.
+#
+# CINTA PIXEL-REAL (D-059): el keyframe es el frame-DESTINO del plano (donde el clip ATERRIZA),
+# no el frame-0. El runner aplana (escena, plano) en una cinta que CRUZA escenas: cada plano
+# encadenado arranca del último frame REAL del clip anterior (`extract_last_frame`, post-trim y
+# pre-caption) e interpola hacia su destino (Kling `image_url` + `end_image_url`). La `transition`
+# gobierna: cut/smash_cut/wipe ROMPEN la cadena (el destino entra como init, clásico);
+# match_cut/dissolve/continuo ENCADENAN. La fase de video es SECUENCIAL (revisa D-039); la key del
+# clip incluye `chain_from` → cambiar un plano upstream cascadea. UX en 4 etapas (D-059):
+# Casting → Keyframe (escena/storyboard) → Planos (destinos granulares) → Producción.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):
     prompt: str
     duration_s: float
     aspect_ratio: str = "9:16"
-    init_image: Path | None = None             # keyframe de estilo (image-to-video)
+    init_image: Path | None = None             # frame inicial (image-to-video)
+    end_image: Path | None = None              # frame final/DESTINO (D-059); interpola start→end
     ref_images: list[Path] = []                # consistencia de personaje
     seed: int | None = None
 

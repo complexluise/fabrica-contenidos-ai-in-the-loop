@@ -91,3 +91,4 @@ es continua entre archivos.
 | D-056 | `render()` valida casting además de selections (cierra el hueco simétrico de integridad) | Vigente |
 | D-057 | Cerrar el ciclo guion→spec: voz por `voiceover`, `needs_audio` no abusado, advisories + guard de routing | Vigente |
 | D-058 | Backend de voz seleccionable (ElevenLabs prod / Kokoro proto) como eje independiente persistido | Vigente |
+| D-059 | Cinta de planos pixel-real: el keyframe es el DESTINO del plano, no el frame-0 (revisa D-039/D-048) | Vigente |

@@ -879,6 +879,37 @@ ElevenLabs (prod). Mantiene los dos motores existentes. Core testeado; ver [D-05
 
 ---
 
+## Sprint 6.25 — Cinta de planos pixel-real (D-059)
+
+**Objetivo:** el keyframe entraba como frame-0 pero lo escribimos como el clímax → el video se
+alejaba del pico, y no había continuidad entre escenas. Separar imagen-clave (keyframe = DESTINO)
+del frame condicionante, y encadenar los clips pixel-real (start = último frame real del clip
+anterior, end = destino; Kling `end_image_url`). La `transition` gobierna cut/continuo. Ver [D-059].
+
+### Acceptance Criteria
+- [x] AC1 — `GenRequest.end_image` + Kling `end_image_url` (Veo lo ignora, degrada a init-only). 🔬
+- [x] AC2 — `plan_ribbon` aplana (escena, plano) en la cinta cruzando escenas; `chain_continues`:
+  cut/smash_cut/wipe rompen, match_cut/dissolve/None encadenan. 🔬
+- [x] AC3 — `run_project` = cinta SECUENCIAL (revisa D-039); `extract_last_frame` (post-trim,
+  pre-caption) cacheado; un plano fallido corta la cadena sin abortar el run. 🔬
+- [x] AC4 — Cascada de cache: `chain_from` en la key del video (cambiar upstream invalida abajo). 🔬
+- [x] AC5 — UX canónica 4 etapas (Casting → Keyframe → Planos → Producción) registrada en D-059;
+  la página **Planos** del Studio queda como su propia iteración (el motor ya la soporta).
+- [ ] AC6 — Smoke real sobre `esquiva_conversemos`: junciones match_cut/dissolve con continuidad
+  pixel-real; el clip aterriza en su destino (s2 termina en el bullet-time, no arranca ahí).
+
+### Tasks (orden test-first)
+- [x] T6.25.1 — `tests/test_film_ribbon.py` (red): chain_continues, plan_ribbon, scene_to_request
+  start→end, video_arguments end_image_url, cascada de cache, last_frame_cmd. 🔬 ✅
+- [x] T6.25.2 — `contracts.py` (`end_image`, `start_frame`), `strategies/common.py`, `fal_kling.py`. 🔬 ✅
+- [x] T6.25.3 — `assemble.py` (`extract_last_frame`); `runner.py` (cinta secuencial). 🔬 ✅
+- [x] T6.25.4 — ADR D-059 + índice + SPEC (cinta pixel-real). ✅
+- [ ] T6.25.5 — Smoke `esquiva_conversemos` (AC6) + página Planos (iteración siguiente).
+
+> **Estado:** core en verde (**312 tests**, +10 en `test_film_ribbon`). Pendiente: smoke real (AC6).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
