@@ -290,6 +290,18 @@ Default `fal-ultra-cheap` (lo más barato, gate deshabilitado). Controla:
 | `gate.enabled` / `gate.vlm_model` | Gate VLM: habilitado/deshabilitado + modelo ([D-007]) |
 | `est_cost_per_scene_usd` | Estimado de costo por escena de video |
 
+**Voice backend** (`--voice`, D-058) — **eje independiente** del perfil (igual que el storyboard
+backend): elige el motor de **TTS**. Persiste en `project.yaml` como `voice_backend: kokoro`.
+
+| Backend | Cuándo |
+|---|---|
+| `kokoro` (`fal-ai/kokoro`) | **Default** — prototipo, barato |
+| `elevenlabs` | Producción — voz premium |
+
+Se elige aparte del video (video barato + voz de producción es válido). Si falta la credencial del
+motor pedido, **degrada** al disponible (voz best-effort, nunca bloquea el render). Lista vía
+`GET /api/voice-backends`.
+
 El switch de backend/perfil es **siempre manual**. Un HTTP 402 falla con un mensaje que sugiere
 la alternativa; el pipeline no cambia de proveedor sin consentimiento del operador.
 

@@ -124,6 +124,24 @@ def create_app(projects_dir: Path = Path("projects"),
             })
         return out
 
+    @app.get("/api/voice-backends")
+    def list_voice_backends():
+        """Backends de voz/TTS disponibles (kokoro/elevenlabs) — D-058."""
+        raw = yaml.safe_load((config_dir / "routing.yaml").read_text(encoding="utf-8")) or {}
+        backends = raw.get("voice_backends", {})
+        out = []
+        for key, entry in backends.items():
+            meta = entry.get("_meta", {})
+            out.append({
+                "key":   key,
+                "label": meta.get("label", key),
+                "desc":  meta.get("desc", ""),
+                "badge": meta.get("badge", key),
+                "color": meta.get("color", "gray"),
+                "cost_per_char": entry.get("cost_per_char", 0.0),
+            })
+        return out
+
     @app.get("/api/projects")
     def list_projects():
         from ..project import load_project_spec
@@ -270,6 +288,9 @@ def create_app(projects_dir: Path = Path("projects"),
         # D-053: backend del storyboard persiste en project.yaml
         if "storyboard_backend" in body and body["storyboard_backend"]:
             spec.storyboard_backend = body["storyboard_backend"]
+        # D-058: backend de voz persiste en project.yaml
+        if "voice_backend" in body and body["voice_backend"]:
+            spec.voice_backend = body["voice_backend"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
         # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
@@ -322,6 +343,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
                 "style": spec.style, "format": spec.format, "music": music_url,
                 "storyboard_backend": spec.storyboard_backend,  # D-053
+                "voice_backend": spec.voice_backend,            # D-058
                 "characters": characters, "scenes": scenes}
 
     @app.post("/api/projects/{slug}/prompts/compile")

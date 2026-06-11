@@ -208,7 +208,7 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     tts_cost = 0.0
     if plano.voiceover and tts is not None:
         try:
-            voice_id = resolve_voice(plano, spec)
+            voice_id = resolve_voice(plano, spec, default=cfg.voice.default_voice)
             vo_key = cache_key("voiceover", vo_inputs(plano.voiceover, voice_id, tts.model))
             vo_file = project.cache_lookup("voiceover", vo_key, ".mp3")
             if vo_file is None:
@@ -293,14 +293,25 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     tts = None
     if any_vo:
         settings = get_settings()
-        vo_key_env = settings.elevenlabs_api_key
-        if vo_key_env:
-            tts = ElevenLabsTTS(vo_key_env, model=DEFAULT_VOICE_MODEL)
-            logger.info("TTS: ElevenLabs (%s)", DEFAULT_VOICE_MODEL)
-        elif settings.fal_key:
+        # D-058: el motor de voz lo elige el backend configurado (cfg.voice), no la
+        # mera presencia de key. select_tts_backend degrada al motor disponible si
+        # falta la credencial del pedido (voz best-effort, nunca bloquea el render).
+        from .audio import select_tts_backend
+        engine = select_tts_backend(cfg.voice.backend,
+                                    has_elevenlabs=bool(settings.elevenlabs_api_key),
+                                    has_fal=bool(settings.fal_key))
+        if engine == "elevenlabs":
+            tts = ElevenLabsTTS(settings.elevenlabs_api_key, model=cfg.voice.model or DEFAULT_VOICE_MODEL)
+        elif engine == "kokoro":
             from .providers.fal_tts import FalTTS
-            tts = FalTTS(settings.fal_key)
-            logger.info("TTS: fal-ai/kokoro (fallback; sin ELEVENLABS_API_KEY)")
+            tts = FalTTS(settings.fal_key, model=cfg.voice.model)
+        if engine and engine != cfg.voice.backend:
+            logger.warning("TTS: '%s' pedido sin credencial; se usa '%s' (voz best-effort).",
+                           cfg.voice.backend, engine)
+        elif engine:
+            logger.info("TTS: %s (backend de voz '%s')", engine, cfg.voice.backend)
+        else:
+            logger.warning("TTS: sin credenciales (ELEVENLABS/FAL); el video saldrá sin voz.")
 
     # Audio diegético (Sprint 6.9, D-034): SFX + ambiente vía MMAudio (fal). Solo
     # si algún plano trae un cue y hay FAL_KEY. Best-effort.

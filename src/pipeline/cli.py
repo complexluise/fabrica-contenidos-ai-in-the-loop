@@ -127,13 +127,15 @@ async def _run_async(
 
 
 async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
-                            profile: str = _DEFAULT_PROFILE, concurrency: int = 1) -> Path:
+                            profile: str = _DEFAULT_PROFILE, concurrency: int = 1,
+                            voice: str | None = None) -> Path:
     from .project import Project, load_project_spec
     from .runner import run_project
 
     project = Project(slug, root=projects_root)
     spec = load_project_spec(project.spec_path)
-    cfg = load_config(config_dir, spec.style, profile=profile)
+    cfg = load_config(config_dir, spec.style, profile=profile,
+                      voice_backend=voice or spec.voice_backend)  # D-058
     console.print(
         f"[bold]Proyecto {slug}[/] - {len(spec.scenes)} escenas"
         f" - estilo {spec.style} - perfil {profile} - concurrencia {concurrency}"
@@ -153,15 +155,18 @@ async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
 
 
 def _load_project(slug: str, projects_root: Path, config_dir: Path,
-                  profile: str = _DEFAULT_PROFILE, backend: str | None = None):
+                  profile: str = _DEFAULT_PROFILE, backend: str | None = None,
+                  voice: str | None = None):
     from .project import Project, load_project_spec
     from .studio import apply_casting, load_casting
 
     project = Project(slug, root=projects_root)
     spec = load_project_spec(project.spec_path)
-    # D-053: backend del spec si no se pasa explícito por CLI
+    # D-053/D-058: backend de imagen y de voz del spec si no se pasan explícitos por CLI
     resolved_backend = backend or spec.storyboard_backend
-    cfg = load_config(config_dir, spec.style, profile=profile, backend=resolved_backend)
+    resolved_voice = voice or spec.voice_backend
+    cfg = load_config(config_dir, spec.style, profile=profile, backend=resolved_backend,
+                      voice_backend=resolved_voice)
     apply_casting(spec.characters, load_casting(project))  # caras elegidas en casting
     return project, spec, cfg
 
@@ -282,6 +287,7 @@ def render(
         help="Keyframe directo escena=ruta (repetible). Gana sobre selections.yaml (D-025).",
     ),
     profile: str = typer.Option(_DEFAULT_PROFILE, "--profile", help="Perfil de IA (D-052)."),
+    voice: str = typer.Option(None, "--voice", help="Backend de voz: kokoro (default) o elevenlabs (D-058)."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
@@ -289,7 +295,7 @@ def render(
     from .studio import parse_overrides, render as render_project
 
     try:
-        proj, spec, cfg = _load_project(project, projects_dir, config_dir, profile)
+        proj, spec, cfg = _load_project(project, projects_dir, config_dir, profile, voice=voice)
         overrides = parse_overrides(keyframe) if keyframe else {}
         if overrides:
             console.print(f"[bold]{project}[/] - render - perfil {profile} - keyframes directos: {list(overrides)}")
@@ -435,6 +441,7 @@ def run(
     style: str = typer.Option("lego", help="Style slot (solo modo --brief)."),
     fmt: str = typer.Option("9:16", "--format", help="Formato de salida (solo modo --brief)."),
     profile: str = typer.Option(_DEFAULT_PROFILE, "--profile", help="Perfil de IA: fal-ultra-cheap (default), fal-standard, prod, gemini-budget... (D-052)."),
+    voice: str = typer.Option(None, "--voice", help="Backend de voz: kokoro (default) o elevenlabs (D-058)."),
     concurrency: int = typer.Option(1, "--concurrency", help="Escenas en vuelo simultaneo (D-039). Default 1 = serial."),
     config_dir: Path = typer.Option(Path("config"), help="Directorio de config."),
     projects_dir: Path = typer.Option(Path("projects"), help="Raiz de proyectos."),
@@ -446,7 +453,7 @@ def run(
             asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir))
         else:
             asyncio.run(_run_project_async(project, projects_dir, config_dir,
-                                           profile=profile, concurrency=concurrency))
+                                           profile=profile, concurrency=concurrency, voice=voice))
     except Exception as exc:
         if _is_balance_error(exc):
             console.print(_balance_tip_render(profile))

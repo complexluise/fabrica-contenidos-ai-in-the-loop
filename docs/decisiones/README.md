@@ -90,3 +90,4 @@ es continua entre archivos.
 | D-055 | Endurecimiento keyframes/UI: integridad de artefactos + avisos no bloqueantes + costo visible | Vigente |
 | D-056 | `render()` valida casting además de selections (cierra el hueco simétrico de integridad) | Vigente |
 | D-057 | Cerrar el ciclo guion→spec: voz por `voiceover`, `needs_audio` no abusado, advisories + guard de routing | Vigente |
+| D-058 | Backend de voz seleccionable (ElevenLabs prod / Kokoro proto) como eje independiente persistido | Vigente |

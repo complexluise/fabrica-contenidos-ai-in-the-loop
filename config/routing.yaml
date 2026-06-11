@@ -42,6 +42,32 @@ storyboard_backends:
       model: "gemini-2.0-flash"
     est_cost_per_image_usd: 0.002
 
+# Backend de VOZ (TTS) — eje independiente del perfil de render (D-058).
+# Se activa con --voice <nombre> en el CLI o desde el chip de la UI.
+# Persiste en project.yaml como `voice_backend: kokoro`. Default kokoro (lo mas barato).
+voice_backends:
+  kokoro:
+    _meta:
+      label: "Kokoro (fal)"
+      desc: "Voz por fal-ai/kokoro. Barata, para prototipar."
+      badge: "fal.ai"
+      color: "yellow"
+    backend: kokoro
+    model: "fal-ai/kokoro"
+    default_voice: "em_alex"   # voz español; el voice_id de escena/proyecto manda si esta
+    cost_per_char: 0.0001
+
+  elevenlabs:
+    _meta:
+      label: "ElevenLabs"
+      desc: "Voz premium ElevenLabs. Para entrega final."
+      badge: "calidad"
+      color: "green"
+    backend: elevenlabs
+    model: "eleven_turbo_v2_5"
+    default_voice: "21m00Tcm4TlvDq8ikWAM"
+    cost_per_char: 0.00024
+
 profiles:
   fal-ultra-cheap:
     _meta:

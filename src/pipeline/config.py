@@ -93,6 +93,21 @@ class StoryboardConfig(BaseModel):
     est_cost_per_image_usd: float = 0.003
 
 
+class VoiceConfig(BaseModel):
+    """Backend de TTS seleccionable (D-058) — eje independiente, patrón D-053.
+
+    Persiste en project.yaml como `voice_backend: kokoro`. Default kokoro
+    (fal-ai/kokoro, lo más barato para prototipar, D-052); elevenlabs para
+    producción. Independiente del perfil de render: video barato + voz premium
+    es una combinación válida.
+    """
+    name: str = "kokoro"
+    backend: str = "kokoro"  # motor de TTS: "kokoro" (fal) | "elevenlabs"
+    model: str = "fal-ai/kokoro"
+    default_voice: str | None = "em_alex"  # voz si la escena/proyecto no fija voice_id
+    cost_per_char: float = 0.0001
+
+
 # --- Config raiz -------------------------------------------------------------
 
 class Config(BaseModel):
@@ -107,6 +122,8 @@ class Config(BaseModel):
     profile: ProfileConfig = Field(default_factory=ProfileConfig)
     # Fase creativa (D-053): backend de imagen + LLM narrativo.
     storyboard: StoryboardConfig = Field(default_factory=StoryboardConfig)
+    # Voz (D-058): backend de TTS seleccionable (kokoro/elevenlabs), eje independiente.
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
 
 
 # --- Loaders -----------------------------------------------------------------
@@ -192,18 +209,32 @@ def load_storyboard_config(path: Path, backend: str = "fal") -> StoryboardConfig
     )
 
 
+def load_voice_config(path: Path, backend: str = "kokoro") -> VoiceConfig:
+    """Extrae el backend de voz activo de `voice_backends` (D-058).
+
+    Backends no encontrados caen a 'kokoro' (el más barato; D-052)."""
+    raw = _load_yaml(path)
+    backends = raw.get("voice_backends", {})
+    entry = backends.get(backend) or backends.get("kokoro") or {}
+    name = backend if backend in backends else "kokoro"
+    fields = {k: v for k, v in entry.items() if k != "_meta" and v is not None}
+    return VoiceConfig(name=name, **fields)
+
+
 def load_style(path: Path) -> StyleConfig:
     return StyleConfig(**_load_yaml(path))
 
 
 def load_config(config_dir: Path, style: str, profile: str = "fal-ultra-cheap",
-                backend: str = "fal") -> Config:
-    """Carga la config completa para un estilo, perfil de render y storyboard backend (D-052/D-053)."""
+                backend: str = "fal", voice_backend: str = "kokoro") -> Config:
+    """Carga la config completa para un estilo, perfil de render, storyboard backend
+    y backend de voz (D-052/D-053/D-058)."""
     providers = load_providers(config_dir / "providers.yaml")
     audio = load_audio(config_dir / "providers.yaml")
     routing = load_routing(config_dir / "routing.yaml", profile=profile)
     style_cfg = load_style(config_dir / "styles" / f"{style}.yaml")
     profile_cfg = load_profile_config(config_dir / "routing.yaml", profile=profile)
     storyboard_cfg = load_storyboard_config(config_dir / "routing.yaml", backend=backend)
+    voice_cfg = load_voice_config(config_dir / "routing.yaml", backend=voice_backend)
     return Config(providers=providers, routing=routing, style=style_cfg, audio=audio,
-                  profile=profile_cfg, storyboard=storyboard_cfg)
+                  profile=profile_cfg, storyboard=storyboard_cfg, voice=voice_cfg)

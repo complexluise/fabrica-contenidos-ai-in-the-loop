@@ -29,9 +29,22 @@ DEFAULT_VOICE_MODEL = "eleven_turbo_v2_5"
 DIEGETIC_DUCK = 0.6
 
 
-def resolve_voice(scene: Scene, spec) -> str:
-    """Voz efectiva: override por escena > default del proyecto > default del sistema."""
-    return scene.voice_id or getattr(spec, "voice_id", None) or DEFAULT_VOICE_ID
+def resolve_voice(scene: Scene, spec, default: str | None = None) -> str:
+    """Voz efectiva: override por escena > default del proyecto > default del motor
+    de voz activo (D-058) > default del sistema."""
+    return scene.voice_id or getattr(spec, "voice_id", None) or default or DEFAULT_VOICE_ID
+
+
+def select_tts_backend(name: str, *, has_elevenlabs: bool, has_fal: bool) -> str | None:
+    """Motor de TTS efectivo (D-058): formaliza la elección antes implícita por key.
+
+    Devuelve el backend pedido (`name`) si su credencial está; si no, **degrada** al
+    otro motor disponible (la voz es best-effort: nunca bloquea el render). Si no hay
+    ninguna credencial, `None` (se renderiza sin voz). Lógica pura, testeable."""
+    available = {"elevenlabs": has_elevenlabs, "kokoro": has_fal}
+    if available.get(name):
+        return name
+    return next((engine for engine, ok in available.items() if ok), None)
 
 
 def effective_caption(scene: Scene) -> str | None:
