@@ -169,14 +169,16 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
 # la narrativa (D-046, `prompt_compile`). IDIOMA (D-050): lo que ve/oye la audiencia → [ES]; lo que
 # alimenta a los modelos de IA → [EN]. Ver D-046/D-047/D-048/D-050.
 #
-# CINTA PIXEL-REAL (D-059): el keyframe es el frame-DESTINO del plano (donde el clip ATERRIZA),
-# no el frame-0. El runner aplana (escena, plano) en una cinta que CRUZA escenas: cada plano
-# encadenado arranca del último frame REAL del clip anterior (`extract_last_frame`, post-trim y
-# pre-caption) e interpola hacia su destino (Kling `image_url` + `end_image_url`). La `transition`
-# gobierna: cut/smash_cut/wipe ROMPEN la cadena (el destino entra como init, clásico);
-# match_cut/dissolve/continuo ENCADENAN. La fase de video es SECUENCIAL (revisa D-039); la key del
-# clip incluye `chain_from` → cambiar un plano upstream cascadea. UX en 4 etapas (D-059):
-# Casting → Keyframe (escena/storyboard) → Planos (destinos granulares) → Producción.
+# ANIMATIC DE POSES FRONTERA (D-060, revisa D-059): el keyframe es el frame-DESTINO del plano
+# (donde el clip ATERRIZA), no el frame-0. Cada plano queda definido por DOS poses generadas:
+# el START-STILL (la apertura — derivado editando el destino del plano ANTERIOR del film, cruzando
+# escenas → continuidad de ELEMENTOS incluso en cortes; la `transition` de entrada modula el
+# reencuadre) y el DESTINO (el ancla elegida / cadena D-048). El video es puro INTERCALADO
+# start→destino (Kling `image_url` + `end_image_url`) y corre EN PARALELO (D-039): Fase A stills
+# (centavos, secuencial) + Fase B clips (paralelo). El trim conserva la COLA (el aterrizaje vive
+# en el último frame). La key del clip incluye la key de su start-still → la cascada de cache se
+# acota al nivel barato. Checkpoint `pipeline animatic`: la película en poses ANTES de pagar video.
+# UX en 4 etapas: Casting → Keyframe (escena/storyboard) → Planos/Animatic → Producción.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):

@@ -909,9 +909,43 @@ anterior, end = destino; Kling `end_image_url`). La `transition` gobierna cut/co
 - [x] T6.25.5 — Smoke `esquiva_conversemos` (AC6). ✅ La página Planos queda para su iteración.
 
 > **Estado:** core en verde (**312 tests**, +10 en `test_film_ribbon`). Smoke real OK: 11/11 planos,
-> $0.97, continuidad pixel verificada en la junción s2→s2.2. **En evaluación (conversación abierta):**
-> elevar el "esqueleto de stills/animatic" (poses frontera inicio+fin generadas y curables, video =
-> intercalado paralelo) como paradigma, con la cadena pixel como refinamiento opt-in — posible D-060.
+> $0.97, continuidad pixel verificada en la junción s2→s2.2. **Revisado por [D-060]**: un A/B
+> (~$0.15) destapó que el trim tiraba el aterrizaje y que la cadena pixel hereda improvisaciones
+> del video → el paradigma pasó al animatic de poses frontera (Sprint 6.26).
+
+---
+
+## Sprint 6.26 — Animatic de poses frontera (D-060, revisa D-059)
+
+**Objetivo:** la continuidad donde corresponde — elementos por edición de stills, arco por el
+destino, flujo por el montaje. Cada plano = dos poses generadas (apertura → destino); el video es
+puro intercalado **en paralelo** (vuelve D-039); el trim conserva el **aterrizaje**; y nace el
+checkpoint **Animatic**: la película en stills antes de pagar video. Ver [D-060].
+
+### Acceptance Criteria
+- [x] AC1 — `compose_start_pose_prompt` (pura): pose de APERTURA, no el pico; la `transition` de
+  entrada modula el reencuadre (cut libre / match cercano). 🔬
+- [x] AC2 — `ensure_boundary_stills` (Fase A): destino (ancla/cadena D-048) + start-still derivado
+  del destino anterior DEL FILM (cruza escenas, incluso en cortes); todo cacheado; un still fallido
+  no aborta el run. 🔬
+- [x] AC3 — Fase B paralela: `run_project` interpola start→destino con semáforo por plano
+  (restaura D-039); cascada de cache acotada al nivel stills. 🔬
+- [x] AC4 — `trim_to_tail`/`tail_start`: clips anclados a destino conservan la COLA (el
+  aterrizaje) — cierra el hallazgo del A/B. 🔬
+- [x] AC5 — Checkpoint `pipeline animatic <slug>`: hoja de contactos apertura→destino por plano,
+  con las mismas cache keys del render.
+- [ ] AC6 — Smoke real (**pendiente por decisión del usuario**: no correr smoke en esta iteración).
+
+### Tasks (orden test-first)
+- [x] T6.26.1 — `tests/test_film_ribbon.py` reescrito (red): transition_in, start-pose prompt,
+  tail_start, cascada por start_key. 🔬 ✅
+- [x] T6.26.2 — `assemble.py` (`tail_start`/`trim_to_tail`); `prompt_compile.py` (start pose). 🔬 ✅
+- [x] T6.26.3 — `runner.py`: Fase A (`ensure_boundary_stills`) + Fase B paralela. 🔬 ✅
+- [x] T6.26.4 — `studio.animatic` + CLI `animatic`. ✅
+- [x] T6.26.5 — ADR D-060 + índice + SPEC + CLAUDE/AGENTS. ✅
+
+> **Estado:** core en verde (**311 tests**). Smoke pendiente (AC6). La página Planos/Animatic del
+> Studio sigue siendo su propia iteración (el backend ya la soporta).
 
 ---
 
