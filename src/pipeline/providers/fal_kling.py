@@ -38,12 +38,16 @@ class FalProvider(BaseProvider):
         key = get_settings().require("fal_key", "generacion de video via fal.ai")
         client = fal_client.AsyncClient(key=key)
 
-        arguments: dict = {"prompt": req.prompt}
+        init_url = None
+        end_url = None
         if req.init_image is not None:
-            # i2v necesita URL; subimos el keyframe local a fal.
-            arguments["image_url"] = await client.upload_file(str(req.init_image))
-        if req.seed is not None:
-            arguments["seed"] = req.seed
+            # i2v necesita URL; subimos el frame local a fal.
+            init_url = await client.upload_file(str(req.init_image))
+        if req.end_image is not None:
+            # D-059: frame final/destino -> Kling 2.1 interpola start→end.
+            end_url = await client.upload_file(str(req.end_image))
+        arguments = video_arguments(req.prompt, seed=req.seed,
+                                    init_url=init_url, end_url=end_url)
 
         result = await asyncio.wait_for(
             client.subscribe(self.model, arguments=arguments),
@@ -60,6 +64,22 @@ class FalProvider(BaseProvider):
             resp.raise_for_status()
             out_path.write_bytes(resp.content)
         return out_path
+
+
+def video_arguments(prompt: str, seed: int | None = None,
+                    init_url: str | None = None, end_url: str | None = None) -> dict:
+    """Argumentos del job de video para fal (pura, testeable).
+
+    `end_image_url` (D-059): Kling 2.1 interpola entre el frame inicial y el final
+    -> la cinta pixel-real encadena clips y aterriza en el destino del plano."""
+    args: dict = {"prompt": prompt}
+    if init_url:
+        args["image_url"] = init_url
+    if end_url:
+        args["end_image_url"] = end_url
+    if seed is not None:
+        args["seed"] = seed
+    return args
 
 
 def _extract_video_url(result: dict) -> str:

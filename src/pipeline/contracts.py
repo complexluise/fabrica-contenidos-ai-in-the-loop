@@ -157,6 +157,7 @@ class Scene(BaseModel):
     requirements: SceneRequirements = Field(default_factory=SceneRequirements)
     shots: list[Shot] = Field(default_factory=list)  # planos (D-028); vacio = 1 plano implicito
     keyframe: Optional[Path] = None  # rellenado por L3 (plano 1 = keyframe elegido)
+    start_frame: Optional[Path] = None  # transitorio (D-059): frame de la cinta (último frame real del clip previo)
     seed: int = 0  # knob de reroll: subirlo regenera SOLO esta escena (cache miss)
     caption: Optional[str] = None  # texto en pantalla (lower-third), opcional
     voiceover: Optional[str] = None  # texto narrado (TTS ElevenLabs), opcional
@@ -200,7 +201,8 @@ class GenRequest(BaseModel):
     prompt: str
     duration_s: float = Field(gt=0)
     aspect_ratio: str = "9:16"
-    init_image: Optional[Path] = None  # keyframe de estilo (image-to-video)
+    init_image: Optional[Path] = None  # frame inicial (image-to-video)
+    end_image: Optional[Path] = None  # frame final/destino (D-059): el provider interpola start→end
     ref_images: list[Path] = Field(default_factory=list)
     seed: Optional[int] = None
 

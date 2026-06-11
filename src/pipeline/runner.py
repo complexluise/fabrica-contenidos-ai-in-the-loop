@@ -10,12 +10,11 @@ Aquí viven las llamadas reales a API (no unit-test; se valida con smoke run).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 import yaml
 
-from .assemble import _has_audio, concat_clips, trim_to
+from .assemble import _has_audio, concat_clips, extract_last_frame, trim_to
 from .audio import (
     DEFAULT_VOICE_MODEL,
     effective_audio_cue,
@@ -67,7 +66,8 @@ def _keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str]) -> dic
 
 
 def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
-                  scene_prompt: str, duration_s: float, aspect: str, seed: int) -> dict:
+                  scene_prompt: str, duration_s: float, aspect: str, seed: int,
+                  chain_from: str | None = None) -> dict:
     return {
         "keyframe_key": keyframe_key,  # encadena: cambiar keyframe invalida el video
         "strategy": strategy,          # cambiar de estrategia invalida el clip
@@ -76,20 +76,60 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
         "duration_s": duration_s,
         "aspect_ratio": aspect,
         "seed": seed,
+        # D-059: identidad del frame-inicio = la key del clip anterior. Cambiar un
+        # plano upstream invalida este (cascada de la cinta pixel-real).
+        "chain_from": chain_from,
     }
+
+
+# Transiciones que ROMPEN la cinta pixel-real (D-059): un corte ES un corte; el
+# plano siguiente arranca de su propio destino, no del frame previo.
+_HARD_TRANSITIONS = {"cut", "smash_cut", "wipe"}
+
+
+def chain_continues(transition: str | None) -> bool:
+    """True si la cinta sigue pixel-real hacia el plano siguiente (D-059).
+
+    `match_cut`/`dissolve`/continuo (None) encadenan; cut/smash_cut/wipe rompen."""
+    return transition not in _HARD_TRANSITIONS
+
+
+def plan_ribbon(spec: ProjectSpec) -> list[dict]:
+    """Aplana (escena, plano) en la CINTA del film, con el estado de encadenado.
+
+    Los planos son parte de las escenas (heredan prompt base/clase/refs/voz) pero
+    la cadena los recorre como secuencia única, CRUZANDO los límites de escena.
+    `chained=False` en el primer plano del film y tras una transición dura."""
+    out: list[dict] = []
+    chained = False  # el primer plano del film no tiene clip previo
+    for scene in spec.scenes:
+        for idx, shot in enumerate(effective_shots(scene)):
+            shot_id = scene.id if idx == 0 else f"{scene.id}.{idx + 1}"
+            out.append({"scene": scene, "shot": shot, "idx": idx,
+                        "shot_id": shot_id, "chained": chained})
+            chained = chain_continues(shot.transition)
+    return out
 
 
 async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
                        scene, shot, shot_id, idx, refs, ref_sig,
                        rule, subset, strategy, provider_sig, keyframe_overrides,
-                       prev_keyframe=None, prev_kf_key=None):
+                       prev_keyframe=None, prev_kf_key=None,
+                       start_frame=None, chain_key=None):
     """Renderiza UN plano (D-028): keyframe -> video -> recorte -> sfx -> caption -> vo.
 
     Plano 1 (idx 0) puede traer el keyframe **elegido** por el humano (el ancla de
     la escena). Los planos 2+ se **encadenan** desde el keyframe del plano previo
     (i2i) para coherencia visual (D-048/A2). Keyframe = imagen FIJA (sin
     movimiento); el movimiento va al prompt de VIDEO (D-048/A1).
-    Devuelve (clip_path, SceneRecord, manifest_entry, audio_applied, keyframe, kf_key).
+
+    D-059 (cinta pixel-real): el keyframe es el frame-DESTINO del plano, no el
+    frame-0. Si llega `start_frame` (último frame real del clip anterior en la
+    cinta), el video interpola start→destino; `chain_key` (la vid_key previa)
+    entra a la cache key para que un cambio upstream cascadee. Sin cadena (corte
+    o primer plano del film), el destino entra como init (clásico).
+    Devuelve (clip_path, record, manifest_entry, audio_applied, keyframe, kf_key,
+    last_frame, vid_key).
     """
     # Refs project-relative -> absolutas SOLO para I/O (keyframer + gate). El cache
     # key sigue con `ref_sig` (relativo, estable). Mismo criterio que studio (D-034).
@@ -133,13 +173,14 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
     eff_prompt = scene.prompt if not video_ext else f"{scene.prompt}, {video_ext}"
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
-        "keyframe": keyframe, "seed": shot.seed,
+        "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
         "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
     })
 
     # --- L5 video (cacheado) ---
     vid_key = cache_key("video", _video_inputs(
-        kf_key, rule.strategy, provider_sig, eff_prompt, shot.duration_s, spec.format, shot.seed))
+        kf_key, rule.strategy, provider_sig, eff_prompt, shot.duration_s, spec.format,
+        shot.seed, chain_from=chain_key))
     vid_hit = project.cache_lookup("clips", vid_key, ".mp4")
     if vid_hit is not None:
         meta = project.sidecar_lookup("clips", vid_key) or {}
@@ -166,6 +207,18 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
 
     # --- recorte a la duración del plano (conservador: solo si el clip es más largo) ---
     clip_path = trim_to(result.video_path, run.dir / "_trim" / f"{shot_id}.mp4", shot.duration_s)
+
+    # --- D-059: último frame REAL del clip = frame-inicio del plano siguiente ---
+    # Se extrae del clip recortado y SIN caption/voz (un caption quemado se colaría
+    # al inicio del clip siguiente). Cacheado por vid_key (cache hit = cero ffmpeg).
+    last_frame = project.cache_lookup("frames", vid_key, ".png")
+    if last_frame is None:
+        try:
+            scratch_frame = run.dir / "_frames" / f"{shot_id}.png"
+            extract_last_frame(clip_path, scratch_frame)
+            last_frame = project.cache_store("frames", vid_key, scratch_frame, ".png")
+        except Exception:
+            last_frame = None  # sin frame antes que perder el plano; la cadena se corta
 
     # --- L7 audio diegético: SFX (acción) + ambiente (lugar) vía V2A (D-034) ---
     # Best-effort y cacheado. Si el clip YA trae audio (modelo nativo tipo Veo),
@@ -241,7 +294,8 @@ async def _render_shot(*, project, spec, cfg, run, keyframer, gate, tts, mm,
         "voiceover": plano.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
         "sfx": shot.sfx or "", "ambience": scene.ambience or "", "sfx_key": sfx_key,
         "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {})}
-    return clip_path, record, manifest_entry, (vo_applied or diegetic_applied), keyframe, kf_key
+    return (clip_path, record, manifest_entry, (vo_applied or diegetic_applied),
+            keyframe, kf_key, last_frame, vid_key)
 
 
 async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
@@ -323,69 +377,71 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
         if fal_key_env:
             mm = MMAudioV2(fal_key_env, audio_cfg)
 
-    # --- loop de escenas con semaforo de concurrencia (D-039) ----------------
-    sem = asyncio.Semaphore(concurrency)
+    # --- la CINTA de planos (D-059): secuencial, cruza escenas -----------------
+    # El video es secuencial por construcción: cada plano encadenado necesita el
+    # último frame REAL del clip anterior. `concurrency` (D-039) deja de aplicar
+    # a la fase de video; sigue valiendo en la generación de candidatos (studio).
+    ribbon = plan_ribbon(spec)
+    if concurrency > 1:
+        logger.info("cinta pixel-real (D-059): el video corre secuencial; "
+                    "concurrency=%d no aplica a esta fase", concurrency)
 
-    async def _process_scene(scene):
-        """Todos los planos de una escena, en serie. Devuelve (clips, records, manifests, audio)."""
-        async with sem:
-            scene.class_ = scene.class_ or classify(scene)
-            refs = character_refs(scene, spec.characters)
-            scene.character_refs = refs
-            ref_sig = sorted(str(r) for r in refs)
-            rule = select_rule(scene.class_, cfg.routing)
-            subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]
-            strategy = build_strategy(rule.strategy)
-            provider_sig = {p.name: getattr(p, "model", p.name) for p in subset}
-
-            shots = effective_shots(scene)  # D-028: planos reales o 1 implícito (compat)
-            if len(shots) > 1:
-                logger.info("[%s] %s | %d planos", scene.id, scene.class_, len(shots))
-
-            s_clips, s_records, s_manifests, s_audio = [], [], [], False
-            prev_keyframe = None  # D-048/A2: encadena los planos de ESTA escena
-            prev_kf_key = None
-            for idx, shot in enumerate(shots):
-                shot_id = scene.id if idx == 0 else f"{scene.id}.{idx + 1}"
-                try:  # robustez: un plano que falla no aborta el run
-                    clip_path, record, mentry, audio, kf_path, kf_key = await _render_shot(
-                        project=project, spec=spec, cfg=cfg, run=run, keyframer=keyframer,
-                        gate=gate, tts=tts, mm=mm, scene=scene, shot=shot, shot_id=shot_id,
-                        idx=idx, refs=refs, ref_sig=ref_sig, rule=rule, subset=subset,
-                        strategy=strategy, provider_sig=provider_sig,
-                        keyframe_overrides=keyframe_overrides,
-                        prev_keyframe=prev_keyframe, prev_kf_key=prev_kf_key)
-                    s_clips.append(clip_path)
-                    s_records.append(record)
-                    s_manifests.append(mentry)
-                    s_audio = s_audio or audio
-                    prev_keyframe, prev_kf_key = kf_path, kf_key  # encadena al siguiente plano
-                except Exception as exc:  # noqa: BLE001 — robustez: registra y sigue
-                    telemetry.record_failure(shot_id, str(exc))
-                    logger.error("[%s] FALLO: %s", shot_id, exc)
-                    logger.debug("[%s] traceback", shot_id, exc_info=True)
-            return s_clips, s_records, s_manifests, s_audio
-
-    # asyncio.gather preserva el orden de las corutinas -> clips en orden de escenas.
-    scene_results = await asyncio.gather(
-        *[_process_scene(s) for s in spec.scenes],
-        return_exceptions=True,
-    )
+    # Contexto por escena (clasificación, refs, regla), calculado una sola vez.
+    scene_ctx: dict[str, tuple] = {}
+    for scene in spec.scenes:
+        scene.class_ = scene.class_ or classify(scene)
+        refs = character_refs(scene, spec.characters)
+        scene.character_refs = refs
+        ref_sig = sorted(str(r) for r in refs)
+        rule = select_rule(scene.class_, cfg.routing)
+        subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]
+        strategy = build_strategy(rule.strategy)
+        provider_sig = {p.name: getattr(p, "model", p.name) for p in subset}
+        scene_ctx[scene.id] = (refs, ref_sig, rule, subset, strategy, provider_sig)
+        shots = effective_shots(scene)
+        if len(shots) > 1:
+            logger.info("[%s] %s | %d planos", scene.id, scene.class_, len(shots))
 
     manifest_scenes: list[dict] = []
-    clips = []
+    clips: list = []
     audio_applied = False
-    for scene, result in zip(spec.scenes, scene_results):
-        if isinstance(result, Exception):
-            telemetry.record_failure(scene.id, str(result))
-            logger.error("[%s] escena fallo: %s", scene.id, result)
-        else:
-            s_clips, s_records, s_manifests, s_audio = result
-            clips.extend(s_clips)
-            for r in s_records:
-                telemetry.record(r)
-            manifest_scenes.extend(s_manifests)
-            audio_applied = audio_applied or s_audio
+    prev_last_frame = None  # último frame real del clip anterior (la cinta)
+    prev_vid_key = None     # su key de video (cascada de cache)
+    prev_keyframe = None    # D-048/A2: still-chain de los destinos, POR escena
+    prev_kf_key = None
+    current_scene_id = None
+    for entry in ribbon:
+        scene, shot = entry["scene"], entry["shot"]
+        idx, shot_id = entry["idx"], entry["shot_id"]
+        if scene.id != current_scene_id:  # el still-chain de destinos ancla por escena
+            current_scene_id = scene.id
+            prev_keyframe, prev_kf_key = None, None
+        refs, ref_sig, rule, subset, strategy, provider_sig = scene_ctx[scene.id]
+        # Encadena solo si la transición lo permite Y hay frame previo (un plano
+        # fallido corta la cadena: mejor un corte que un init incoherente).
+        chained = entry["chained"] and prev_last_frame is not None
+        try:  # robustez: un plano que falla no aborta el run
+            (clip_path, record, mentry, audio, kf_path, kf_key,
+             last_frame, vid_key) = await _render_shot(
+                project=project, spec=spec, cfg=cfg, run=run, keyframer=keyframer,
+                gate=gate, tts=tts, mm=mm, scene=scene, shot=shot, shot_id=shot_id,
+                idx=idx, refs=refs, ref_sig=ref_sig, rule=rule, subset=subset,
+                strategy=strategy, provider_sig=provider_sig,
+                keyframe_overrides=keyframe_overrides,
+                prev_keyframe=prev_keyframe, prev_kf_key=prev_kf_key,
+                start_frame=prev_last_frame if chained else None,
+                chain_key=prev_vid_key if chained else None)
+            clips.append(clip_path)
+            telemetry.record(record)
+            manifest_scenes.append(mentry)
+            audio_applied = audio_applied or audio
+            prev_keyframe, prev_kf_key = kf_path, kf_key  # still-chain (D-048)
+            prev_last_frame, prev_vid_key = last_frame, vid_key  # la cinta (D-059)
+        except Exception as exc:  # noqa: BLE001 — robustez: registra y sigue
+            telemetry.record_failure(shot_id, str(exc))
+            logger.error("[%s] FALLO: %s", shot_id, exc)
+            logger.debug("[%s] traceback", shot_id, exc_info=True)
+            prev_last_frame, prev_vid_key = None, None  # la cadena se corta
 
     if not clips:
         # El reporte se escribe aun en el peor caso: el mensaje promete failures
