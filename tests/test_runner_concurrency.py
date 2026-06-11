@@ -39,7 +39,7 @@ def _make_cfg(routing_rules: dict | None = None):
         "standard": {"aesthetic": 0.5, "char_consistency": 0.5, "clip_adherence": 0.5},
     })
     provider = ProviderConfig(name="fake", backend="fal", model="fake/model",
-                              cost_per_second=0.0)
+                              cost_per_second=0.0, capabilities={"i2v"})
     style = StyleConfig(
         style="lego",
         keyframe=KeyframeConfig(backend="fal", model="fake/kf"),

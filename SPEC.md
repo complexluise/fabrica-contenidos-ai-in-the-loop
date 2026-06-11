@@ -109,7 +109,8 @@ from typing import Literal, Protocol
 
 # --- Requisitos y escena ---------------------------------------------------
 class SceneRequirements(BaseModel):
-    needs_audio: bool = False        # diálogo sincronizado → dispara Veo
+    needs_audio: bool = False        # provider de audio NATIVO sincronizado (raro; Veo 3). NO es como se
+                                     # obtiene diálogo/SFX. Sin provider con cap `audio` → rompe el routing (D-057)
     needs_lipsync: bool = False
     needs_4k: bool = False
     needs_camera_control: bool = False
@@ -137,7 +138,7 @@ class Shot(BaseModel):                          # plano = ARTEFACTO audiovisual 
     visual: Visual = Visual()                  # estructura de Block — [EN]
     transition: "cut|match_cut|dissolve|smash_cut|wipe" | None = None
     seed: int = 0                              # reroll del plano (cache miss solo en este plano)
-    voiceover: str | None = None               # narración — [ES] (TTS)
+    voiceover: str | None = None               # lo que SE OYE: narración o la línea hablada — [ES] (TTS+mux, D-057)
     caption: str | None = None                 # texto en pantalla — [ES]
     sfx: str | None = None                     # sonido de la acción — [EN] (V2A MMAudio, D-034)
     framing: str = ""                          # LEGACY: fallback de `action` (compat D-028)
@@ -148,7 +149,8 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
     prompt: str                                # BASE (setting+personajes) — [EN]; el plano suma su artefacto
     duration_s: float
     characters: list[str] = []                 # para consistencia entre tomas
-    dialogue: str | None = None                # guion — [ES]
+    dialogue: str | None = None                # guion de export — [ES]; la línea hablada va TAMBIÉN en el
+                                               # `voiceover` del plano para que se OIGA (si no, queda muda, D-057)
     class_: Literal["hero", "standard", "volume"] | None = None
     requirements: SceneRequirements = SceneRequirements()
     shots: list[Shot] = []                      # planos (D-028); vacío = 1 plano implícito (compat)
@@ -420,12 +422,13 @@ scenes:
     beat: "presentación"
     prompt: "two LEGO minifigures talking in a cafe, medium shot"  # [EN]
     duration_s: 5
-    dialogue: "Hoy lanzamos el producto."             # [ES] guion (TTS/lipsync)
-    requirements: { needs_audio: true }
+    dialogue: "Personaje: Hoy lanzamos el producto."  # [ES] guion de export (NO se oye por sí solo)
     shots:
       - action: "two LEGO minifigs at a cafe table, talking, warm interior"  # [EN]
         duration_s: 5
         camera: { size: MS, angle: ots }
+        voiceover: "Hoy lanzamos el producto."        # [ES] la línea que SE OYE (TTS+mux) — D-057
+        caption: "Hoy lanzamos el producto."          # [ES] la línea que se VE
 ```
 
 Los planos 2+ de una escena se **encadenan** desde el ancla (i2i, D-048); el prompt visual se

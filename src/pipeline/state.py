@@ -105,15 +105,23 @@ def compute_stage(*, has_fal_key: bool, storyboard_signed: bool,
     return Stage.COMPLETO
 
 
-def signing_advisories(spec: ProjectSpec, routing_classes: set[str]) -> list[dict]:
-    """Avisos NO bloqueantes sobre incompletitudes al firmar el storyboard (T7/T13/D-055).
+def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict]:
+    """Avisos NO bloqueantes sobre incompletitudes al firmar el storyboard (D-055/D-057).
 
     No invalida (coherente con D-046, "advertir, no invalidar"): solo nombra lo que
     de otro modo el humano descubre recién en el render. Cada aviso es
     `{scene, kind, msg}`:
       - `no_shots`: la escena no define planos -> se sintetiza 1 implícito.
       - `unknown_class`: la `class_` no existe en el perfil -> cae a 'standard'.
-    """
+      - `dialogue_no_voice` (D-057): hay `dialogue` pero ningún `voiceover` -> el TTS
+        solo dobla `voiceover`, así que la línea se VE (caption) pero no se ESCUCHA.
+      - `unroutable` (D-057): ningún provider del perfil cumple las capabilities de la
+        escena (p.ej. `needs_audio` sin provider de audio) -> fallaría en el render.
+
+    `routing`/`providers` vienen del Config activo (perfil); la elegibilidad la decide
+    `routing_gaps` (misma lógica pura que el guard temprano del runner)."""
+    from .strategies.dispatch import routing_gaps  # local: evita ciclo de imports
+    routing_classes = set(routing.rules)
     out: list[dict] = []
     for s in spec.scenes:
         if not s.shots:
@@ -122,6 +130,14 @@ def signing_advisories(spec: ProjectSpec, routing_classes: set[str]) -> list[dic
         if s.class_ and s.class_ not in routing_classes:
             out.append({"scene": s.id, "kind": "unknown_class",
                         "msg": f"la clase '{s.class_}' no existe en el perfil; se enruta como 'standard'."})
+        if s.dialogue and not (s.voiceover or any(sh.voiceover for sh in s.shots)):
+            out.append({"scene": s.id, "kind": "dialogue_no_voice",
+                        "msg": "tiene diálogo pero ningún 'voiceover'; se verá como texto pero no se "
+                               "escuchará (el TTS solo dobla 'voiceover')."})
+    for gap in routing_gaps(spec, routing, providers):
+        out.append({"scene": gap["scene"], "kind": "unroutable",
+                    "msg": f"ninguna fuente del perfil puede generar esta escena (falta: "
+                           f"{', '.join(gap['missing'])}); quita el requisito o cambia de perfil."})
     return out
 
 

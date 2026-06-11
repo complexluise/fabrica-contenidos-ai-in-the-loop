@@ -286,7 +286,7 @@ def create_app(projects_dir: Path = Path("projects"),
             from ..config import load_config
             from ..state import signing_advisories
             cfg = load_config(config_dir, spec.style)
-            advisories = signing_advisories(spec, set(cfg.routing.rules))
+            advisories = signing_advisories(spec, cfg.routing, cfg.providers)
         except Exception:
             advisories = []
         return {"saved": str(project.spec_path), "scenes": len(ids),
@@ -417,7 +417,7 @@ def create_app(projects_dir: Path = Path("projects"),
         # D-055: reconciliacion disco<->estado + avisos no bloqueantes + costo unitario.
         out["integrity"] = {"selections": verify_selections(project),  # T5/T14
                             "casting": verify_casting(project)}          # T10
-        out["advisories"] = signing_advisories(spec, set(_cfg.routing.rules))  # T7/T13
+        out["advisories"] = signing_advisories(spec, _cfg.routing, _cfg.providers)  # T7/T13/D-057
         out["est_cost_per_image_usd"] = _cfg.storyboard.est_cost_per_image_usd  # T15
 
         final_url = None

@@ -146,10 +146,25 @@ como una escena nueva. Alterná tamaños de plano entre cortes para dar contrast
 **`visual_intensity`** (1-5) — el arco de intensidad: `hero`/clímax alto (4-5), aperturas/respiros
 bajo (1-2). Construí tensión hacia el clímax; no dejes todo plano en la misma intensidad (Block).
 
-**Sonido** — `dialogue` [ES] (líneas literales; si hay diálogo significativo → needs_audio: true;
-needs_lipsync: true solo si hay un primer plano de cara hablando). `voiceover` [ES] (solo si hay
-narrador explícito; no narres lo que ya se ve). `ambience` [EN] (room tone, siempre presente).
-`sfx` [EN] (solo si suma; no repitas el ambience).
+**Sonido** — cómo se OYE cada cosa en este pipeline (importa para que no quede mudo):
+• `dialogue` [ES] a nivel ESCENA: las líneas literales del guion ("Personaje: frase"). Alimenta el
+  guion de export; NO es lo que se escucha por sí solo.
+• `voiceover` [ES] en el PLANO que entrega la línea: es lo que el TTS DOBLA y se ESCUCHA. **Si un
+  personaje habla, esa misma línea va TAMBIÉN en el `voiceover` del plano** (sin el prefijo "Personaje:").
+  Una línea hablada que solo está en `dialogue` y no en ningún `voiceover` queda MUDA (solo texto).
+  Sirve igual para narrador en off. No narres lo que ya se ve.
+• `voice_id` [token] por escena: si hablan personajes distintos, asigná una voz por escena para
+  diferenciarlos (p.ej. uno sereno, otro áspero). Opcional pero recomendado en piezas de diálogo.
+• `ambience` [EN] (room tone, siempre presente) y `sfx` [EN] (solo si suma) — el sonido del lugar y
+  de la acción los agrega un paso de audio (V2A) sobre el clip; van SIEMPRE que correspondan.
+• `needs_audio`: dejalo en `false` (default). NO es como se obtiene diálogo/SFX acá: solo sirve para
+  un provider de audio NATIVO sincronizado (raro). Prenderlo sin un provider así HACE FALLAR la escena.
+• `needs_lipsync`: `false` salvo que de verdad quieras labios sincronizados; ten en cuenta que FIJA
+  el provider a uno con esa capacidad.
+
+Ejemplo de una línea hablada (se ve Y se escucha):
+  escena: `dialogue: "Cepeda: Conversemos."`
+  plano que la dice: `voiceover: "Conversemos."`, `caption: "Conversemos."`
 
 ━━━ REGLAS DE ESTRUCTURA ━━━
 • 3 a 8 escenas (video de 30-90s). duration_s de la escena = suma de sus planos (2-6s por plano).

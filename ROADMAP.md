@@ -825,6 +825,35 @@ apuntando a otro proyecto (fork). Backend testeado (core); ver [D-056].
 
 ---
 
+## Sprint 6.23 — Cerrar el ciclo guion→spec: voz + routing satisfacible (D-057)
+
+**Objetivo:** dos bugs que romperían el render (diálogo mudo porque el TTS solo lee `voiceover`;
+`needs_audio:true` sin provider de audio rompe el routing) **nacían en el prompt del autor**. Arreglar
+desde la fuente + dar visibilidad (advisories) + frenar antes de gastar (guard de routing). Disparado
+por la auditoría del `project.yaml` real de `esquiva_conversemos`. Core testeado; ver [D-057].
+
+### Acceptance Criteria
+- [x] AC1 — Fuente: `author.py` produce `voiceover` para líneas habladas y no abusa de
+  `needs_audio`/`needs_lipsync` (smoke LLM). 🔬(prompt)
+- [x] AC2 — Visibilidad: `signing_advisories` reporta `dialogue_no_voice` y `unroutable`; status/PUT/UI
+  y CLI (`keyframes`/`render`) los muestran antes de generar. 🔬
+- [x] AC3 — Guard temprano: `run_project` hace preflight de `routing_gaps` y **falla claro y temprano**
+  si una escena no tiene provider elegible — cubre interactivo y autónomo. 🔬
+- [x] AC4 — `SPEC.md` documenta el contrato de audio (dialogue/voiceover/needs_audio/ambience+sfx).
+
+### Tasks (orden test-first)
+- [x] T6.23.1 — `tests/test_spec_advisories.py` (red): `routing_gaps`, `dialogue_no_voice`, `unroutable`,
+  preflight de `run_project`. 🔬 ✅
+- [x] T6.23.2 — `strategies/dispatch.py::routing_gaps` (pura, green). 🔬 ✅
+- [x] T6.23.3 — `state.signing_advisories` nueva firma + 2 kinds; `runner.run_project` preflight. 🔬 ✅
+- [x] T6.23.4 — `author.py` (sección Sonido), `server/app.py` (call sites), `cli.py` (`_print_advisories`). ✅
+- [x] T6.23.5 — ADR D-057 + índice del README + `SPEC.md` (contrato de audio). ✅
+
+> **Estado:** core en verde (**294 tests**, +8 en `test_spec_advisories`). Verificado sobre el proyecto
+> real `esquiva_conversemos`: detecta sus 4 `unroutable` + 4 `dialogue_no_voice`.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
