@@ -17,6 +17,8 @@
   let musicBusy = $state(false);
   let musicErr = $state("");
   let showMusicGen = $state(false);
+  let backends = $state([]);         // D-053: backends disponibles
+  let activeBackend = $state("fal"); // D-053: backend activo del proyecto
 
   // --- D-047: vocabulario audiovisual (etiquetas legibles para el humano) ---
   const SIZE = { ECU:"PPP", CU:"PP", MCU:"PMC", MS:"PM", MLS:"PML", LS:"PG", ELS:"PGG", insert:"detalle" };
@@ -52,9 +54,15 @@
     cand = { keyframes: {}, cast: {}, selections: {} };
     editing = {}; expanded = {};
 
+    // D-053: cargar backends disponibles
+    get("/api/storyboard-backends")
+      .then((b) => { backends = b; })
+      .catch(() => {});
+
     get(`/api/projects/${slug}`)
       .then((d) => {
         music = d.music || null;
+        activeBackend = d.storyboard_backend || "fal";  // D-053
         doc = {
           title: d.title || "",
           brief: d.brief || "",
@@ -187,6 +195,13 @@
     }
   }
 
+  // D-053: cambiar backend persiste inmediatamente
+  async function switchBackend(key) {
+    if (key === activeBackend || !doc) return;
+    activeBackend = key;
+    await save(false);
+  }
+
   async function save(sign) {
     error = ""; msg = ""; saving = true;
     const cleanVisual = (v) => ({
@@ -197,6 +212,7 @@
     });
     const body = {
       sign: !!sign, title: doc.title, brief: doc.brief,
+      storyboard_backend: activeBackend,  // D-053
       scenes: doc.scenes.map((s) => ({
         id: s.id, beat: s.beat || null, prompt: s.prompt,
         dialogue: s.dialogue || null, ambience: s.ambience || null,
@@ -243,6 +259,20 @@
       {#if signed && !dirty}<span class="pill ok">✓ firmado</span>
       {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
     </div>
+    {#if backends.length > 1}
+      <div class="backend-row">
+        <span class="backend-lbl">Imagen AI</span>
+        <div class="backend-chips">
+          {#each backends as b}
+            <button class="bchip" class:active={activeBackend === b.key}
+                    data-color={b.color} title={b.desc}
+                    onclick={() => switchBackend(b.key)}>
+              {b.label}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
     {#if doc.scenes.some((s) => s.visual_intensity)}
       <div class="intensity-curve" title="Curva de intensidad visual (Bruce Block) a lo largo del video">
         <span class="ic-lbl">arco visual</span>
@@ -617,6 +647,26 @@
   .title-in:focus { border-bottom-color: var(--red); outline: none; box-shadow: none; }
   .lede { font-size: 15px; margin: 6px 0 10px; }
   .meta { display: flex; gap: 7px; }
+
+  /* D-053: selector de backend del storyboard */
+  .backend-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  }
+  .backend-lbl {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--ink-soft); flex-shrink: 0;
+  }
+  .backend-chips { display: flex; gap: 5px; }
+  .bchip {
+    font-size: 12px; padding: 3px 11px; border-radius: 999px;
+    border: 1.5px solid var(--line-2); background: var(--paper-2);
+    color: var(--ink-soft); cursor: pointer; transition: all 0.12s;
+    box-shadow: none;
+  }
+  .bchip:hover { border-color: var(--ink-soft); color: var(--ink); }
+  .bchip.active { border-color: var(--blue); background: var(--blue-wash); color: var(--blue-deep); font-weight: 600; }
+  .bchip[data-color="teal"].active { border-color: #0d9488; background: #f0fdfa; color: #0f766e; }
+  .bchip[data-color="yellow"].active { border-color: #d97706; background: #fffbeb; color: #b45309; }
 
   .card.pad { padding: 12px 16px; margin: 12px 0; }
   .lbl {

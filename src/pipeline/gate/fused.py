@@ -14,11 +14,14 @@ from .fusion import build_report, enforce_verdict, fuse_signals
 from .vlm import VLMSignal
 
 
-def _build_default_signals() -> list:
-    """VLM + identidad (Claude visión) siempre; CLIP/aesthetic si el extra [vision] está."""
+def _build_default_signals(vlm_model: str | None = None) -> list:
+    """VLM + identidad (Claude visión) siempre; CLIP/aesthetic si el extra [vision] está.
+
+    vlm_model=None deshabilita la señal VLM (perfil con gate.enabled=false).
+    """
     from .identity import IdentitySignal
 
-    signals: list = [VLMSignal(), IdentitySignal()]
+    signals: list = [VLMSignal(vlm_model=vlm_model), IdentitySignal()]
     try:
         from .clip import ClipSignal
 

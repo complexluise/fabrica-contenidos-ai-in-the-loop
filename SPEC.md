@@ -236,6 +236,8 @@ trade-offs):
 | Filosofía de deps | APIs antes que libs pesadas | [D-017](docs/decisiones/0011-0020.md) |
 | Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](docs/decisiones/0011-0020.md) |
 | Tooling | uv · pydantic-settings · TDD selectivo | [D-010](docs/decisiones/0001-0010.md), [D-011](docs/decisiones/0011-0020.md), [D-012](docs/decisiones/0011-0020.md) |
+| Render profile | Estrategia de video + gate VLM; default ultra-cheap (lo más barato) | [D-052](docs/decisiones/0051-0060.md) |
+| Storyboard backend | Backend de imagen + LLM narrativo; persiste en `project.yaml` | [D-053](docs/decisiones/0051-0060.md) |
 
 ---
 
@@ -255,6 +257,7 @@ Genera **N candidatos en paralelo** entre varios modelos, los puntúa y elige el
 calidad, el más caro. Reservado a un % bajo de escenas.
 
 ### 4.4 Híbrido por defecto (recomendado)
+
 | Importancia | % aprox. | Estrategia |
 |---|---|---|
 | Hero / marca | 5–10% | Ensemble |
@@ -262,6 +265,35 @@ calidad, el más caro. Reservado a un % bajo de escenas.
 | Volumen / relleno | 20–30% | Cascade desde Kling |
 
 Una **sola capa de Quality Gate y de post** para todas; lo que cambia es la estrategia.
+
+### 4.5 Dos configuraciones para dos fases ([D-052], [D-053])
+
+El pipeline tiene dos fases con naturalezas distintas; cada una tiene su propia configuración:
+
+**Storyboard backend** (`--backend`, D-053) — fase creativa: `cast`, `keyframes`, `prompts`.
+Persiste en `project.yaml` como `storyboard_backend: fal`. Controla:
+
+| Campo | Qué controla |
+|---|---|
+| `keyframe.backend` | Motor de imagen: `fal` (Flux + nano-banana) o `google` (Gemini imagen) |
+| `llm.backend` / `llm.model` | LLM narrativo: naming, describe, classify, compile |
+| `est_cost_per_image_usd` | Estimado de costo por imagen generada |
+
+**Render profile** (`--profile`, D-052) — fase de producción: `render`, `run`.
+Default `fal-ultra-cheap` (lo más barato, gate deshabilitado). Controla:
+
+| Campo | Qué controla |
+|---|---|
+| `hero`/`standard`/`volume` | Estrategia + providers de video ([D-038]) |
+| `gate.enabled` / `gate.vlm_model` | Gate VLM: habilitado/deshabilitado + modelo ([D-007]) |
+| `est_cost_per_scene_usd` | Estimado de costo por escena de video |
+
+El switch de backend/perfil es **siempre manual**. Un HTTP 402 falla con un mensaje que sugiere
+la alternativa; el pipeline no cambia de proveedor sin consentimiento del operador.
+
+El backend activo se configura de forma **discreta en el Storyboard** (chip en la cabecera de la
+UI, no intrusivo) y se persiste en `project.yaml`. La lista de backends disponibles se expone vía
+`GET /api/storyboard-backends` (mismo patrón dinámico que `GET /api/profiles`, [D-044]).
 
 ```mermaid
 flowchart TD
@@ -288,7 +320,7 @@ Arquitectura de **señales enchufables** (`gate/`): cada señal puntúa un frame
 
 | Señal | Tecnología | Estado |
 |---|---|---|
-| Adherencia semántica + artefactos + "¿se ve LEGO?" | **VLM-judge (Claude visión, multimodal)** | ✅ **default** |
+| Adherencia semántica + artefactos + "¿se ve LEGO?" | **VLM-judge (modelo del perfil activo, [D-052])** | ✅ **default** |
 | Adherencia prompt↔frame numérica | CLIP (open_clip) | implementada, **dormida** (extra `[vision]`) |
 | Score estético | Aesthetic scorer (LAION) | implementada, **dormida** (extra `[vision]`) |
 | Consistencia de personaje (embedding) | insightface / ArcFace | Sprint 4 |

@@ -3,13 +3,14 @@
 import pytest
 from pathlib import Path
 
-from pipeline.config import load_config, load_providers, load_routing
+from pipeline.config import load_config, load_profile_config, load_providers, load_routing
 
 CONFIG_DIR = Path("config")
 
 
 def test_load_config_real_files_typed():
-    cfg = load_config(CONFIG_DIR, "lego")
+    # Perfil prod explícito para validar que las reglas del perfil premium cargan
+    cfg = load_config(CONFIG_DIR, "lego", profile="prod")
     # providers con capabilities como set
     assert "kling" in cfg.providers
     assert cfg.providers["kling"].cost_per_second == 0.03
@@ -70,6 +71,80 @@ def test_profile_proto_todo_router_kling():
         assert routing.rules[clase].providers == ["kling"]
 
 
-def test_profile_desconocido_cae_a_prod():
+def test_profile_desconocido_cae_a_ultra_cheap():
+    # D-052: fallback al perfil mas barato, no al mas caro.
     routing = load_routing(CONFIG_DIR / "routing.yaml", profile="no_existe")
-    assert routing.rules["hero"].strategy == "ensemble"
+    assert routing.rules["hero"].strategy == "router"
+    assert routing.rules["hero"].providers == ["kling"]
+
+
+# --- D-052: perfiles multi-rol ------------------------------------------------
+
+def test_profile_fal_ultra_cheap_es_default():
+    cfg = load_config(CONFIG_DIR, "lego")  # sin profile= -> fal-ultra-cheap
+    assert cfg.profile.gate.enabled is False
+    assert cfg.profile.gate.vlm_model is None
+    assert cfg.profile.est_cost_per_scene_usd == 0.01
+    # D-053: storyboard config es independiente del perfil de render
+    assert cfg.storyboard.keyframe.backend == "fal"
+    assert cfg.storyboard.llm.backend == "anthropic"
+    assert cfg.storyboard.llm.model == "claude-haiku-4-5-20251001"
+
+
+def test_profile_prod_gate_habilitado():
+    cfg = load_config(CONFIG_DIR, "lego", profile="prod")
+    assert cfg.profile.gate.enabled is True
+    assert cfg.profile.gate.vlm_model == "claude-opus-4-8"
+    assert cfg.profile.est_cost_per_scene_usd == 0.15
+
+
+def test_profile_gemini_budget_google_first():
+    # gemini-budget activa Veo + gate Gemini; storyboard backend es independiente
+    cfg = load_config(CONFIG_DIR, "lego", profile="gemini-budget")
+    assert cfg.profile.gate.enabled is True
+    assert cfg.profile.gate.vlm_model == "gemini-2.0-flash"
+    assert cfg.profile.est_cost_per_scene_usd == 0.02
+    # Para storyboard 100% Google hay que pasar backend="google" explicitamente
+    assert cfg.storyboard.keyframe.backend == "fal"  # default sin --backend google
+
+
+def test_profile_routing_no_contiene_claves_de_rol():
+    # Las secciones 'keyframe'/'gate'/'llm' no deben aparecer como reglas de routing.
+    routing = load_routing(CONFIG_DIR / "routing.yaml", profile="fal-ultra-cheap")
+    assert "keyframe" not in routing.rules
+    assert "gate" not in routing.rules
+    assert "llm" not in routing.rules
+    assert set(routing.rules) == {"hero", "standard", "volume"}
+
+
+def test_profile_config_backward_compat(tmp_path):
+    # Perfil sin secciones de rol -> ProfileConfig con defaults (no rompe).
+    (tmp_path / "routing.yaml").write_text(
+        "profiles:\n"
+        "  simple:\n"
+        "    hero:\n"
+        "      strategy: router\n"
+        "      providers: [kling]\n"
+        "    standard:\n"
+        "      strategy: router\n"
+        "      providers: [kling]\n"
+        "    volume:\n"
+        "      strategy: router\n"
+        "      providers: [kling]\n"
+        "enforce: false\n"
+        "thresholds:\n"
+        "  hero: {aesthetic: 0.8, char_consistency: 0.85, clip_adherence: 0.75}\n"
+        "  standard: {aesthetic: 0.65, char_consistency: 0.7, clip_adherence: 0.65}\n"
+        "  volume: {aesthetic: 0.5, char_consistency: 0.55, clip_adherence: 0.55}\n",
+        encoding="utf-8",
+    )
+    profile_cfg = load_profile_config(tmp_path / "routing.yaml", profile="simple")
+    assert profile_cfg.gate.enabled is True   # default conservador
+    assert profile_cfg.est_cost_per_scene_usd == 0.05  # default
+
+
+def test_fal_standard_gate_con_haiku():
+    cfg = load_config(CONFIG_DIR, "lego", profile="fal-standard")
+    assert cfg.profile.gate.enabled is True
+    assert cfg.profile.gate.vlm_model == "claude-haiku-4-5-20251001"
+    assert cfg.profile.est_cost_per_scene_usd == 0.05

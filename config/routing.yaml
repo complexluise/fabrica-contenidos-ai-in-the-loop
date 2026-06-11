@@ -1,26 +1,67 @@
 # Tabla de orquestacion: clasificacion de escena -> estrategia + providers.
 # Cambiar aqui altera el ruteo sin tocar codigo (D-038).
 #
-# Perfiles disponibles (--profile en el CLI):
-#   prod  — calidad maxima: ensemble para hero, router/cascade para el resto.
-#   proto — iteracion barata: router + proveedor unico para todo. Un candidato,
-#           minimo costo, sin gate enforcement. Ideal para validar el storyboard.
-profiles:
-  prod:
+# DOS secciones independientes (D-053):
+#
+#   storyboard_backends  — fase creativa (cast, keyframes, prompts, describe)
+#     Controla: backend de imagen (fal/google) + LLM narrativo + costo/imagen.
+#     Se activa con --backend <nombre> en el CLI o desde el chip del Storyboard.
+#     Persiste en project.yaml como `storyboard_backend: fal`.
+#
+#   profiles             — fase de produccion (render, run)
+#     Controla: estrategia de video (router/cascade/ensemble), providers, gate VLM.
+#     Se activa con --profile <nombre> en el CLI.
+#     Default: fal-ultra-cheap (lo mas barato).
+
+storyboard_backends:
+  fal:
     _meta:
-      label: "Produccion"
-      desc: "Ensemble en hero, gate de calidad, modelos premium. Para entrega final."
-      badge: "calidad"
-      color: "green"
+      label: "fal.ai"
+      desc: "Flux + nano-banana para imagen; Claude Haiku para narrativa."
+      badge: "fal.ai"
+      color: "yellow"
+    keyframe:
+      backend: fal
+      model: null         # usa el del estilo (lego.yaml -> fal-ai/flux-lora)
+    llm:
+      backend: anthropic
+      model: "claude-haiku-4-5-20251001"
+    est_cost_per_image_usd: 0.003
+
+  google:
+    _meta:
+      label: "Google"
+      desc: "Gemini imagen para keyframes; Gemini Flash para narrativa. Cero fal."
+      badge: "google"
+      color: "teal"
+    keyframe:
+      backend: google
+      model: null         # usa GOOGLE_IMAGE_MODEL (gemini-2.5-flash-image)
+    llm:
+      backend: google
+      model: "gemini-2.0-flash"
+    est_cost_per_image_usd: 0.002
+
+profiles:
+  fal-ultra-cheap:
+    _meta:
+      label: "Ultra Cheap"
+      desc: "Kling + sin gate. Minimo costo para iterar. Default."
+      badge: "fal.ai"
+      color: "orange"
     hero:
-      strategy: ensemble
-      providers: [veo, seedance, kling]
+      strategy: router
+      providers: [kling]
     standard:
       strategy: router
-      providers: [seedance, kling]
+      providers: [kling]
     volume:
-      strategy: cascade
-      providers: [kling, seedance, veo]
+      strategy: router
+      providers: [kling]
+    gate:
+      enabled: false
+      vlm_model: null
+    est_cost_per_scene_usd: 0.01
 
   proto:
     _meta:
@@ -37,6 +78,50 @@ profiles:
     volume:
       strategy: router
       providers: [kling]
+    gate:
+      enabled: false
+      vlm_model: null
+    est_cost_per_scene_usd: 0.01
+
+  fal-standard:
+    _meta:
+      label: "fal Standard"
+      desc: "Calidad media. Router/cascade con Seedance+Kling; gate con Haiku."
+      badge: "fal.ai"
+      color: "cyan"
+    hero:
+      strategy: ensemble
+      providers: [seedance, kling]
+    standard:
+      strategy: router
+      providers: [kling, seedance]
+    volume:
+      strategy: cascade
+      providers: [kling, seedance]
+    gate:
+      enabled: true
+      vlm_model: "claude-haiku-4-5-20251001"
+    est_cost_per_scene_usd: 0.05
+
+  prod:
+    _meta:
+      label: "Produccion"
+      desc: "Ensemble en hero, gate de calidad, modelos premium. Para entrega final."
+      badge: "calidad"
+      color: "green"
+    hero:
+      strategy: ensemble
+      providers: [veo, seedance, kling]
+    standard:
+      strategy: router
+      providers: [seedance, kling]
+    volume:
+      strategy: cascade
+      providers: [kling, seedance, veo]
+    gate:
+      enabled: true
+      vlm_model: "claude-opus-4-8"
+    est_cost_per_scene_usd: 0.15
 
   proto_veo:
     _meta:
@@ -53,9 +138,32 @@ profiles:
     volume:
       strategy: router
       providers: [veo]
+    gate:
+      enabled: false
+      vlm_model: null
+    est_cost_per_scene_usd: 0.04
 
-# Gate suave por defecto: puntua y registra (Claude vision) pero NO bloquea ni
-# regenera mientras iteras. Poner true para endurecer (dispara reintento/escalado).
+  gemini-budget:
+    _meta:
+      label: "Gemini Budget"
+      desc: "100% Google video: Veo + gate Gemini Flash. Combina con --backend google para cero fal."
+      badge: "google"
+      color: "teal"
+    hero:
+      strategy: router
+      providers: [veo]
+    standard:
+      strategy: router
+      providers: [veo]
+    volume:
+      strategy: router
+      providers: [veo]
+    gate:
+      enabled: true
+      vlm_model: "gemini-2.0-flash"
+    est_cost_per_scene_usd: 0.02
+
+# Gate suave por defecto: puntua y registra pero NO bloquea ni regenera.
 enforce: false
 
 # Umbrales del Quality Gate por tipo de escena (hero mas estricto).

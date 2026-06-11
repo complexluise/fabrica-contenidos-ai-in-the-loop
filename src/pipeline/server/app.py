@@ -64,7 +64,9 @@ def create_app(projects_dir: Path = Path("projects"),
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
-        cfg = load_config(config_dir, spec.style, profile=profile)
+        # D-053: backend del storyboard persiste en project.yaml
+        cfg = load_config(config_dir, spec.style, profile=profile,
+                          backend=spec.storyboard_backend)
         apply_casting(spec.characters, load_casting(project))
         return project, spec, cfg
 
@@ -101,6 +103,24 @@ def create_app(projects_dir: Path = Path("projects"),
                 "badge": meta.get("badge", key),
                 "color": meta.get("color", "gray"),
                 "providers": hero_providers,
+            })
+        return out
+
+    @app.get("/api/storyboard-backends")
+    def list_storyboard_backends():
+        """Backends del storyboard (imagen + LLM) disponibles — D-053."""
+        raw = yaml.safe_load((config_dir / "routing.yaml").read_text(encoding="utf-8")) or {}
+        backends = raw.get("storyboard_backends", {})
+        out = []
+        for key, entry in backends.items():
+            meta = entry.get("_meta", {})
+            out.append({
+                "key":   key,
+                "label": meta.get("label", key),
+                "desc":  meta.get("desc", ""),
+                "badge": meta.get("badge", key),
+                "color": meta.get("color", "gray"),
+                "est_cost_per_image_usd": entry.get("est_cost_per_image_usd", 0.003),
             })
         return out
 
@@ -247,6 +267,9 @@ def create_app(projects_dir: Path = Path("projects"),
             spec.title = body["title"]
         if "brief" in body:
             spec.brief = body["brief"]
+        # D-053: backend del storyboard persiste en project.yaml
+        if "storyboard_backend" in body and body["storyboard_backend"]:
+            spec.storyboard_backend = body["storyboard_backend"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
         # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
@@ -287,6 +310,7 @@ def create_app(projects_dir: Path = Path("projects"),
         music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
         return {"slug": slug, "title": spec.title or slug, "brief": spec.brief,
                 "style": spec.style, "format": spec.format, "music": music_url,
+                "storyboard_backend": spec.storyboard_backend,  # D-053
                 "characters": characters, "scenes": scenes}
 
     @app.post("/api/projects/{slug}/prompts/compile")

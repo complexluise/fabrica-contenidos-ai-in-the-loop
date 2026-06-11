@@ -28,6 +28,27 @@ from .telemetry import SceneRecord, Telemetry
 app = typer.Typer(add_completion=False, help="Pipeline de video IA multi-modelo.")
 console = Console()
 
+_DEFAULT_PROFILE = "fal-ultra-cheap"
+
+
+def _cost_summary(label: str, n: int, est_per_scene: float, actual_usd: float | None = None) -> str:
+    """Linea de costo no intrusiva al final de cada subcomando (D-052)."""
+    est = est_per_scene * n
+    parts = [f"[cost] {label} {n}  est ${est:.3f}"]
+    if actual_usd is not None:
+        parts.append(f"actual ${actual_usd:.3f}")
+    return "  |  ".join(parts)
+
+
+def _is_balance_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(k in msg for k in ("402", "payment required", "insufficient", "balance", "credits"))
+
+
+def _balance_tip_render(profile: str) -> str:
+    alt = "gemini-budget" if not profile.startswith("gemini") else "fal-ultra-cheap"
+    return f"[yellow]Saldo agotado en render. Cambia con:[/] [cyan]--profile {alt}[/]"
+
 
 @app.callback()
 def _main(
@@ -98,7 +119,7 @@ async def _run_async(
 
 
 async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
-                            profile: str = "proto", concurrency: int = 1) -> Path:
+                            profile: str = _DEFAULT_PROFILE, concurrency: int = 1) -> Path:
     from .project import Project, load_project_spec
     from .runner import run_project
 
@@ -111,22 +132,28 @@ async def _run_project_async(slug: str, projects_root: Path, config_dir: Path,
     )
 
     run, final, totals = await run_project(project, spec, cfg, concurrency=concurrency)
+    actual = totals["total_cost_usd"]
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
-        f"  run {run.run_id} - costo: ${totals['total_cost_usd']:.3f}"
+        f"  run {run.run_id} - costo: ${actual:.3f}"
         f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
         f" - manifiesto: {run.manifest_path}"
     )
+    console.print(_cost_summary("escenas", len(spec.scenes),
+                                cfg.profile.est_cost_per_scene_usd, actual))
     return final
 
 
-def _load_project(slug: str, projects_root: Path, config_dir: Path):
+def _load_project(slug: str, projects_root: Path, config_dir: Path,
+                  profile: str = _DEFAULT_PROFILE, backend: str | None = None):
     from .project import Project, load_project_spec
     from .studio import apply_casting, load_casting
 
     project = Project(slug, root=projects_root)
     spec = load_project_spec(project.spec_path)
-    cfg = load_config(config_dir, spec.style)
+    # D-053: backend del spec si no se pasa explícito por CLI
+    resolved_backend = backend or spec.storyboard_backend
+    cfg = load_config(config_dir, spec.style, profile=profile, backend=resolved_backend)
     apply_casting(spec.characters, load_casting(project))  # caras elegidas en casting
     return project, spec, cfg
 
@@ -135,21 +162,30 @@ def _load_project(slug: str, projects_root: Path, config_dir: Path):
 def cast(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     n: int = typer.Option(4, "--n", help="Caras candidatas por personaje."),
+    backend: str = typer.Option(None, "--backend", help="Backend de imagen: fal (default) o google (D-053)."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
     """[AI-in-the-Loop] Diseña caras de personaje (multi-imagen + prompt) y abre la hoja de contactos."""
     from .studio import cast as cast_characters
 
-    proj, spec, cfg = _load_project(project, projects_dir, config_dir)
-    designed = [n for n, c in spec.characters.items() if c.design]
-    console.print(f"[bold]{project}[/] - casting de {designed} x {n} candidatos...")
-    sheet = asyncio.run(cast_characters(proj, spec, cfg, n))
-    console.print(
-        f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
-        f"  elige con: [cyan]pipeline pick-cast {project} "
-        + " ".join(f"{c}=N" for c in designed) + "[/]"
-    )
+    try:
+        proj, spec, cfg = _load_project(project, projects_dir, config_dir, backend=backend)
+        designed = [n for n, c in spec.characters.items() if c.design]
+        console.print(f"[bold]{project}[/] - casting de {designed} x {n} candidatos - backend {cfg.storyboard.name}...")
+        sheet = asyncio.run(cast_characters(proj, spec, cfg, n))
+        n_chars = len(designed)
+        console.print(
+            f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
+            f"  elige con: [cyan]pipeline pick-cast {project} "
+            + " ".join(f"{c}=N" for c in designed) + "[/]"
+        )
+        console.print(_cost_summary("caras", n_chars * n, cfg.storyboard.est_cost_per_image_usd))
+    except Exception as exc:
+        if _is_balance_error(exc):
+            alt = "google" if cfg.storyboard.name == "fal" else "fal"
+            console.print(f"[yellow]Saldo agotado. Cambia con:[/] [cyan]--backend {alt}[/]")
+        raise
 
 
 @app.command(name="pick-cast")
@@ -184,22 +220,33 @@ def pick_cast(
 def keyframes(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     n: int = typer.Option(4, "--n", help="Candidatos de keyframe por escena."),
-    concurrency: int = typer.Option(5, "--concurrency", "-c", help="Requests simultaneos a fal.ai (default 5, max recomendado 10)."),
+    concurrency: int = typer.Option(5, "--concurrency", "-c", help="Requests simultaneos (default 5)."),
+    backend: str = typer.Option(None, "--backend", help="Backend de imagen: fal (default) o google (D-053)."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
     """[AI-in-the-Loop] Genera N keyframes/escena en paralelo y abre la hoja de contactos."""
     from .studio import gen_keyframes
 
-    proj, spec, cfg = _load_project(project, projects_dir, config_dir)
-    total = len(spec.scenes) * n
-    console.print(f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos = {total} imagenes | concurrencia {concurrency}")
-    sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n, concurrency=concurrency))
-    console.print(
-        f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
-        f"  elige con: [cyan]pipeline pick {project} "
-        + " ".join(f"{s.id}=N" for s in spec.scenes) + "[/]"
-    )
+    try:
+        proj, spec, cfg = _load_project(project, projects_dir, config_dir, backend=backend)
+        total = len(spec.scenes) * n
+        console.print(
+            f"[bold]{project}[/] - {len(spec.scenes)} escenas x {n} candidatos = {total} imagenes"
+            f" | backend {cfg.storyboard.name} | concurrencia {concurrency}"
+        )
+        sheet = asyncio.run(gen_keyframes(proj, spec, cfg, n, concurrency=concurrency))
+        console.print(
+            f"\n[bold green]Listo[/] hoja de contactos: {sheet}\n"
+            f"  elige con: [cyan]pipeline pick {project} "
+            + " ".join(f"{s.id}=N" for s in spec.scenes) + "[/]"
+        )
+        console.print(_cost_summary("keyframes", total, cfg.storyboard.est_cost_per_image_usd))
+    except Exception as exc:
+        if _is_balance_error(exc):
+            alt = "google" if cfg.storyboard.name == "fal" else "fal"
+            console.print(f"[yellow]Saldo agotado. Cambia con:[/] [cyan]--backend {alt}[/]")
+        raise
 
 
 @app.command()
@@ -225,24 +272,33 @@ def render(
         None, "--keyframe",
         help="Keyframe directo escena=ruta (repetible). Gana sobre selections.yaml (D-025).",
     ),
+    profile: str = typer.Option(_DEFAULT_PROFILE, "--profile", help="Perfil de IA (D-052)."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
     """[AI-in-the-Loop] Genera el video con los keyframes elegidos (o inyectados con --keyframe)."""
     from .studio import parse_overrides, render as render_project
 
-    proj, spec, cfg = _load_project(project, projects_dir, config_dir)
-    overrides = parse_overrides(keyframe) if keyframe else {}
-    if overrides:
-        console.print(f"[bold]{project}[/] - render - keyframes directos: {list(overrides)}")
-    else:
-        console.print(f"[bold]{project}[/] - render con keyframes elegidos...")
-    run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides))
-    console.print(
-        f"\n[bold green]Listo[/] {final}\n"
-        f"  run {run.run_id} - costo: ${totals['total_cost_usd']:.3f}"
-        f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
-    )
+    try:
+        proj, spec, cfg = _load_project(project, projects_dir, config_dir, profile)
+        overrides = parse_overrides(keyframe) if keyframe else {}
+        if overrides:
+            console.print(f"[bold]{project}[/] - render - perfil {profile} - keyframes directos: {list(overrides)}")
+        else:
+            console.print(f"[bold]{project}[/] - render con keyframes elegidos - perfil {profile}...")
+        run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides))
+        actual = totals["total_cost_usd"]
+        console.print(
+            f"\n[bold green]Listo[/] {final}\n"
+            f"  run {run.run_id} - costo: ${actual:.3f}"
+            f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
+        )
+        console.print(_cost_summary("escenas", len(spec.scenes),
+                                    cfg.profile.est_cost_per_scene_usd, actual))
+    except Exception as exc:
+        if _is_balance_error(exc):
+            console.print(_balance_tip_render(profile))
+        raise
 
 
 @app.command()
@@ -349,8 +405,6 @@ def prompts(
         console.print(f"[red]Escena '{scene}' no encontrada.[/]")
         raise typer.Exit(1)
 
-    # Explicito (--scene) -> esa escena siempre. Bulk -> solo stale (que ya excluye
-    # las manual); --force incluye en-sintonia y manual.
     todo = [s for s in targets if (scene is not None or force or s.prompt_stale)]
     if not todo:
         console.print("[green]Todo en sintonia.[/] Nada que compilar.")
@@ -370,18 +424,23 @@ def run(
     brief: Path = typer.Option(None, "--brief", help="Modo smoke: corre un brief YAML suelto a out/ (sin proyecto/cache)."),
     style: str = typer.Option("lego", help="Style slot (solo modo --brief)."),
     fmt: str = typer.Option("9:16", "--format", help="Formato de salida (solo modo --brief)."),
-    profile: str = typer.Option("proto", "--profile", help="Perfil de calidad: proto (router/barato, default) o prod (ensemble/calidad). D-038."),
+    profile: str = typer.Option(_DEFAULT_PROFILE, "--profile", help="Perfil de IA: fal-ultra-cheap (default), fal-standard, prod, gemini-budget... (D-052)."),
     concurrency: int = typer.Option(1, "--concurrency", help="Escenas en vuelo simultaneo (D-039). Default 1 = serial."),
     config_dir: Path = typer.Option(Path("config"), help="Directorio de config."),
-    projects_dir: Path = typer.Option(Path("projects"), help="Raíz de proyectos."),
+    projects_dir: Path = typer.Option(Path("projects"), help="Raiz de proyectos."),
     out_dir: Path = typer.Option(Path("out"), help="Salida del modo --brief."),
 ):
-    """Genera un video one-shot. --profile proto para iterar barato; --profile prod para produccion final."""
-    if brief is not None:
-        asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir))
-    else:
-        asyncio.run(_run_project_async(project, projects_dir, config_dir,
-                                       profile=profile, concurrency=concurrency))
+    """Genera un video. Default: perfil ultra-cheap para iterar barato; --profile prod para produccion."""
+    try:
+        if brief is not None:
+            asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir))
+        else:
+            asyncio.run(_run_project_async(project, projects_dir, config_dir,
+                                           profile=profile, concurrency=concurrency))
+    except Exception as exc:
+        if _is_balance_error(exc):
+            console.print(_balance_tip_render(profile))
+        raise
 
 
 if __name__ == "__main__":

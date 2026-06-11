@@ -71,6 +71,7 @@ class ProjectSpec:
     voice_id: str | None = None  # voz por defecto del proyecto (ElevenLabs); override por escena
     title: str | None = None  # título legible (para el guion de export, D-029)
     brief: str | None = None  # brief del proyecto (para el guion de export, D-029)
+    storyboard_backend: str = "fal"  # backend de imagen activo (D-053): "fal" | "google"
 
 
 def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
@@ -113,6 +114,7 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
         voice_id=data.get("voice_id"),
         title=data.get("title"),
         brief=data.get("brief"),
+        storyboard_backend=data.get("storyboard_backend", "fal"),
     )
 
 
@@ -258,6 +260,8 @@ def spec_to_dict(spec: ProjectSpec) -> dict:
         data["brief"] = spec.brief
     data["style"] = spec.style
     data["format"] = spec.format
+    if spec.storyboard_backend and spec.storyboard_backend != "fal":
+        data["storyboard_backend"] = spec.storyboard_backend
     if spec.music:
         data["music"] = str(spec.music)
     if spec.voice_id:
