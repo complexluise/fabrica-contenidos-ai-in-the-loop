@@ -895,8 +895,10 @@ anterior, end = destino; Kling `end_image_url`). La `transition` gobierna cut/co
 - [x] AC4 — Cascada de cache: `chain_from` en la key del video (cambiar upstream invalida abajo). 🔬
 - [x] AC5 — UX canónica 4 etapas (Casting → Keyframe → Planos → Producción) registrada en D-059;
   la página **Planos** del Studio queda como su propia iteración (el motor ya la soporta).
-- [ ] AC6 — Smoke real sobre `esquiva_conversemos`: junciones match_cut/dissolve con continuidad
-  pixel-real; el clip aterriza en su destino (s2 termina en el bullet-time, no arranca ahí).
+- [x] AC6 — Smoke real sobre `esquiva_conversemos`: **11/11 planos, 0 fallos, $0.97**
+  (run 20260611-173151). Junción s2→s2.2 verificada frame a frame: el primer frame de s2.2 es
+  prácticamente idéntico al último frame real de s2 (continuidad pixel) y el clip aterriza en su
+  destino. `end_image_url` aceptado por Kling en las 3 junciones encadenadas. ✅
 
 ### Tasks (orden test-first)
 - [x] T6.25.1 — `tests/test_film_ribbon.py` (red): chain_continues, plan_ribbon, scene_to_request
@@ -904,9 +906,12 @@ anterior, end = destino; Kling `end_image_url`). La `transition` gobierna cut/co
 - [x] T6.25.2 — `contracts.py` (`end_image`, `start_frame`), `strategies/common.py`, `fal_kling.py`. 🔬 ✅
 - [x] T6.25.3 — `assemble.py` (`extract_last_frame`); `runner.py` (cinta secuencial). 🔬 ✅
 - [x] T6.25.4 — ADR D-059 + índice + SPEC (cinta pixel-real). ✅
-- [ ] T6.25.5 — Smoke `esquiva_conversemos` (AC6) + página Planos (iteración siguiente).
+- [x] T6.25.5 — Smoke `esquiva_conversemos` (AC6). ✅ La página Planos queda para su iteración.
 
-> **Estado:** core en verde (**312 tests**, +10 en `test_film_ribbon`). Pendiente: smoke real (AC6).
+> **Estado:** core en verde (**312 tests**, +10 en `test_film_ribbon`). Smoke real OK: 11/11 planos,
+> $0.97, continuidad pixel verificada en la junción s2→s2.2. **En evaluación (conversación abierta):**
+> elevar el "esqueleto de stills/animatic" (poses frontera inicio+fin generadas y curables, video =
+> intercalado paralelo) como paradigma, con la cadena pixel como refinamiento opt-in — posible D-060.
 
 ---
 
