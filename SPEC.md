@@ -168,13 +168,25 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
 # una imagen FIJA (sin `move`); el MOVIMIENTO va al prompt de video. El prompt visual se DERIVA de
 # la narrativa (D-046, `prompt_compile`). IDIOMA (D-050): lo que ve/oye la audiencia → [ES]; lo que
 # alimenta a los modelos de IA → [EN]. Ver D-046/D-047/D-048/D-050.
+#
+# ANIMATIC DE POSES FRONTERA (D-060, revisa D-059): el keyframe es el frame-DESTINO del plano
+# (donde el clip ATERRIZA), no el frame-0. Cada plano queda definido por DOS poses generadas:
+# el START-STILL (la apertura — derivado editando el destino del plano ANTERIOR del film, cruzando
+# escenas → continuidad de ELEMENTOS incluso en cortes; la `transition` de entrada modula el
+# reencuadre) y el DESTINO (el ancla elegida / cadena D-048). El video es puro INTERCALADO
+# start→destino (Kling `image_url` + `end_image_url`) y corre EN PARALELO (D-039): Fase A stills
+# (centavos, secuencial) + Fase B clips (paralelo). El trim conserva la COLA (el aterrizaje vive
+# en el último frame). La key del clip incluye la key de su start-still → la cascada de cache se
+# acota al nivel barato. Checkpoint `pipeline animatic`: la película en poses ANTES de pagar video.
+# UX en 4 etapas: Casting → Keyframe (escena/storyboard) → Planos/Animatic → Producción.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):
     prompt: str
     duration_s: float
     aspect_ratio: str = "9:16"
-    init_image: Path | None = None             # keyframe de estilo (image-to-video)
+    init_image: Path | None = None             # frame inicial (image-to-video)
+    end_image: Path | None = None              # frame final/DESTINO (D-059); interpola start→end
     ref_images: list[Path] = []                # consistencia de personaje
     seed: int | None = None
 

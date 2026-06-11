@@ -142,6 +142,52 @@ def trim_to(clip: Path, out: Path, duration_s: float) -> Path:
     return out
 
 
+def tail_start(total_s: float, want_s: float) -> float:
+    """Segundo donde empieza el recorte de COLA (pura): conservar los últimos
+    `want_s` segundos. El hallazgo del A/B (D-060): los clips anclados a destino
+    aterrizan al FINAL — recortar la cola tiraba el aterrizaje; se recorta la cabeza."""
+    return max(0.0, total_s - want_s)
+
+
+def trim_to_tail(clip: Path, out: Path, duration_s: float) -> Path:
+    """Recorta conservando la COLA del clip (el aterrizaje en el destino, D-060).
+
+    Para clips intercalados start→destino: el destino vive en el último frame, así
+    que se descarta la cabeza. Si el clip ya cabe (o no se puede medir), se devuelve
+    intacto (conservador, como `trim_to`)."""
+    dur = _probe_duration(clip)
+    if dur is None or dur <= duration_s + 0.1:
+        return clip
+    out.parent.mkdir(parents=True, exist_ok=True)
+    start = tail_start(dur, duration_s)
+    # -ss DESPUÉS de -i: seek exacto por decodificación (clips cortos, costo trivial).
+    cmd = [_ffmpeg(), "-y", "-i", str(clip), "-ss", f"{start:.3f}",
+           "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return out
+
+
+def last_frame_cmd(clip: Path, out: Path) -> list[str]:
+    """Comando ffmpeg para extraer el ÚLTIMO frame del clip (pura, testeable).
+
+    `-sseof -0.1` busca desde el final (rápido, sin decodificar todo); `-update 1`
+    sobreescribe hasta quedarse con el último frame decodificado de ese tramo."""
+    return [_ffmpeg(), "-y", "-sseof", "-0.1", "-i", str(clip),
+            "-frames:v", "1", "-update", "1", "-q:v", "2", str(out)]
+
+
+def extract_last_frame(clip: Path, out: Path) -> Path:
+    """Extrae el último frame real del clip (D-059): el frame-inicio del plano
+    siguiente en la cinta pixel-real. Fallback: si el seek desde el final no
+    produce salida (clip cortísimo), decodifica entero y se queda con el último."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(last_frame_cmd(clip, out), check=False, capture_output=True)
+    if not out.exists():
+        cmd = [_ffmpeg(), "-y", "-i", str(clip), "-update", "1", "-q:v", "2", str(out)]
+        subprocess.run(cmd, check=True, capture_output=True)
+    return out
+
+
 def concat_clips(clips: list[Path], out_path: Path, music: Path | None = None,
                  music_volume: float = 1.0) -> Path:
     """Concatena clips en orden. Opcionalmente mezcla musica de fondo (ducked).

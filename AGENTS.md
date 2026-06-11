@@ -85,7 +85,7 @@ uv run pipeline render <slug>                   # render video from picks
 ### Async
 
 - `async def` everywhere a function does I/O. CPU-only helpers stay sync.
-- Tolerate failure: `asyncio.gather(..., return_exceptions=True)` — one dead provider must never abort a scene (see `runner.py:run_project` and `strategies/ensemble.py`).
+- Tolerate failure: `asyncio.gather(..., return_exceptions=True)` — one dead provider must never abort a scene (see `strategies/ensemble.py`). The runner's video phase runs **per-shot in parallel** (semaphore, D-039/D-060) after the boundary stills phase; per-shot try/except — a failed shot never aborts the run.
 - `tests/` may use plain `async def test_…`; the `auto` mode picks it up.
 
 ### Error handling

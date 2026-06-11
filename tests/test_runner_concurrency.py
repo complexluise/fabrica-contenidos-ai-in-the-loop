@@ -58,11 +58,12 @@ def _fake_record(shot_id: str):
 async def _render_shot_ok(**kwargs):
     """Mock de _render_shot: devuelve un clip con el shot_id en el nombre.
 
-    Tupla de 6 (D-048/A2): clip, record, manifest, audio, keyframe, kf_key.
+    Tupla de 6 (D-060): clip, record, manifest, audio, keyframe, kf_key.
     """
     shot_id = kwargs["shot_id"]
     clip = Path(f"/fake/{shot_id}.mp4")
-    return clip, _fake_record(shot_id), {"shot_id": shot_id}, False, Path(f"/fake/{shot_id}.png"), f"kf_{shot_id}"
+    return (clip, _fake_record(shot_id), {"shot_id": shot_id}, False,
+            Path(f"/fake/{shot_id}.png"), f"kf_{shot_id}")
 
 
 async def _render_shot_fail_s1(**kwargs):
@@ -85,11 +86,20 @@ _MOCK_PATCHES = [
 ]
 
 
+async def _fake_boundaries(project, spec, cfg, keyframer, keyframe_overrides):
+    """Mock de la Fase A (D-060): poses frontera fake por cada plano de la cinta."""
+    import pipeline.runner as rmod
+    return [{"destino": Path(f"/fake/d_{e['shot_id']}.png"), "kf_key": f"kf_{e['shot_id']}",
+             "start": Path(f"/fake/s_{e['shot_id']}.png"), "start_key": f"st_{e['shot_id']}",
+             "cost": 0.0} for e in rmod.plan_ribbon(spec)]
+
+
 def _apply_patches(monkeypatch):
     for target in _MOCK_PATCHES:
         monkeypatch.setattr(target, MagicMock())
     # concat_clips y reframe devuelven un Path para que el runner no explote
     import pipeline.runner as rmod
+    monkeypatch.setattr("pipeline.runner.ensure_boundary_stills", _fake_boundaries)
     rmod.concat_clips.return_value = Path("/fake/stitched.mp4")
     rmod.reframe.return_value = Path("/fake/final_9x16.mp4")
     telemetry_inst = MagicMock()

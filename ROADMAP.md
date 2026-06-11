@@ -879,6 +879,76 @@ ElevenLabs (prod). Mantiene los dos motores existentes. Core testeado; ver [D-05
 
 ---
 
+## Sprint 6.25 — Cinta de planos pixel-real (D-059)
+
+**Objetivo:** el keyframe entraba como frame-0 pero lo escribimos como el clímax → el video se
+alejaba del pico, y no había continuidad entre escenas. Separar imagen-clave (keyframe = DESTINO)
+del frame condicionante, y encadenar los clips pixel-real (start = último frame real del clip
+anterior, end = destino; Kling `end_image_url`). La `transition` gobierna cut/continuo. Ver [D-059].
+
+### Acceptance Criteria
+- [x] AC1 — `GenRequest.end_image` + Kling `end_image_url` (Veo lo ignora, degrada a init-only). 🔬
+- [x] AC2 — `plan_ribbon` aplana (escena, plano) en la cinta cruzando escenas; `chain_continues`:
+  cut/smash_cut/wipe rompen, match_cut/dissolve/None encadenan. 🔬
+- [x] AC3 — `run_project` = cinta SECUENCIAL (revisa D-039); `extract_last_frame` (post-trim,
+  pre-caption) cacheado; un plano fallido corta la cadena sin abortar el run. 🔬
+- [x] AC4 — Cascada de cache: `chain_from` en la key del video (cambiar upstream invalida abajo). 🔬
+- [x] AC5 — UX canónica 4 etapas (Casting → Keyframe → Planos → Producción) registrada en D-059;
+  la página **Planos** del Studio queda como su propia iteración (el motor ya la soporta).
+- [x] AC6 — Smoke real sobre `esquiva_conversemos`: **11/11 planos, 0 fallos, $0.97**
+  (run 20260611-173151). Junción s2→s2.2 verificada frame a frame: el primer frame de s2.2 es
+  prácticamente idéntico al último frame real de s2 (continuidad pixel) y el clip aterriza en su
+  destino. `end_image_url` aceptado por Kling en las 3 junciones encadenadas. ✅
+
+### Tasks (orden test-first)
+- [x] T6.25.1 — `tests/test_film_ribbon.py` (red): chain_continues, plan_ribbon, scene_to_request
+  start→end, video_arguments end_image_url, cascada de cache, last_frame_cmd. 🔬 ✅
+- [x] T6.25.2 — `contracts.py` (`end_image`, `start_frame`), `strategies/common.py`, `fal_kling.py`. 🔬 ✅
+- [x] T6.25.3 — `assemble.py` (`extract_last_frame`); `runner.py` (cinta secuencial). 🔬 ✅
+- [x] T6.25.4 — ADR D-059 + índice + SPEC (cinta pixel-real). ✅
+- [x] T6.25.5 — Smoke `esquiva_conversemos` (AC6). ✅ La página Planos queda para su iteración.
+
+> **Estado:** core en verde (**312 tests**, +10 en `test_film_ribbon`). Smoke real OK: 11/11 planos,
+> $0.97, continuidad pixel verificada en la junción s2→s2.2. **Revisado por [D-060]**: un A/B
+> (~$0.15) destapó que el trim tiraba el aterrizaje y que la cadena pixel hereda improvisaciones
+> del video → el paradigma pasó al animatic de poses frontera (Sprint 6.26).
+
+---
+
+## Sprint 6.26 — Animatic de poses frontera (D-060, revisa D-059)
+
+**Objetivo:** la continuidad donde corresponde — elementos por edición de stills, arco por el
+destino, flujo por el montaje. Cada plano = dos poses generadas (apertura → destino); el video es
+puro intercalado **en paralelo** (vuelve D-039); el trim conserva el **aterrizaje**; y nace el
+checkpoint **Animatic**: la película en stills antes de pagar video. Ver [D-060].
+
+### Acceptance Criteria
+- [x] AC1 — `compose_start_pose_prompt` (pura): pose de APERTURA, no el pico; la `transition` de
+  entrada modula el reencuadre (cut libre / match cercano). 🔬
+- [x] AC2 — `ensure_boundary_stills` (Fase A): destino (ancla/cadena D-048) + start-still derivado
+  del destino anterior DEL FILM (cruza escenas, incluso en cortes); todo cacheado; un still fallido
+  no aborta el run. 🔬
+- [x] AC3 — Fase B paralela: `run_project` interpola start→destino con semáforo por plano
+  (restaura D-039); cascada de cache acotada al nivel stills. 🔬
+- [x] AC4 — `trim_to_tail`/`tail_start`: clips anclados a destino conservan la COLA (el
+  aterrizaje) — cierra el hallazgo del A/B. 🔬
+- [x] AC5 — Checkpoint `pipeline animatic <slug>`: hoja de contactos apertura→destino por plano,
+  con las mismas cache keys del render.
+- [ ] AC6 — Smoke real (**pendiente por decisión del usuario**: no correr smoke en esta iteración).
+
+### Tasks (orden test-first)
+- [x] T6.26.1 — `tests/test_film_ribbon.py` reescrito (red): transition_in, start-pose prompt,
+  tail_start, cascada por start_key. 🔬 ✅
+- [x] T6.26.2 — `assemble.py` (`tail_start`/`trim_to_tail`); `prompt_compile.py` (start pose). 🔬 ✅
+- [x] T6.26.3 — `runner.py`: Fase A (`ensure_boundary_stills`) + Fase B paralela. 🔬 ✅
+- [x] T6.26.4 — `studio.animatic` + CLI `animatic`. ✅
+- [x] T6.26.5 — ADR D-060 + índice + SPEC + CLAUDE/AGENTS. ✅
+
+> **Estado:** core en verde (**311 tests**). Smoke pendiente (AC6). La página Planos/Animatic del
+> Studio sigue siendo su propia iteración (el backend ya la soporta).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
