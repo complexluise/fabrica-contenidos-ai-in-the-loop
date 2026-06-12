@@ -42,6 +42,21 @@ storyboard_backends:
       model: "gemini-2.0-flash"
     est_cost_per_image_usd: 0.002
 
+  fal-max:
+    _meta:
+      label: "fal Máxima"
+      desc: "Kontext [max] para edición/identidad: poses y caras que conservan el rostro. Más caro."
+      badge: "calidad"
+      color: "green"
+    keyframe:
+      backend: fal
+      model: null                                      # generación: el del estilo
+      ref_model: "fal-ai/flux-pro/kontext/max/multi"   # edición/identidad premium (D-063)
+    llm:
+      backend: anthropic
+      model: "claude-sonnet-4-6"
+    est_cost_per_image_usd: 0.06
+
 # Backend de VOZ (TTS) — eje independiente del perfil de render (D-058).
 # Se activa con --voice <nombre> en el CLI o desde el chip de la UI.
 # Persiste en project.yaml como `voice_backend: kokoro`. Default kokoro (lo mas barato).

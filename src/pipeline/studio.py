@@ -684,6 +684,82 @@ async def animatic_strip(project: Project, spec: ProjectSpec, cfg: Config) -> li
             "intention": shot.intention or "",
             "start": str(b["start"]) if b and b["start"] else None,
             "destino": str(b["destino"]) if b and b["destino"] else None,
+            "start_key": b["start_key"] if b else None,   # D-063: identidad de la pose
+            "kf_key": b["kf_key"] if b else None,
             "ready": bool(b and b["start"] and b["destino"]),
         })
+    return out
+
+
+def record_pose_pick(project: Project, shot_id: str, which: str, variant: Path) -> Path:
+    """[D-063] Fija la VARIANTE elegida de una pose (pose_picks.yaml, portable D-044).
+
+    Mismo patrón que el ancla de Encuadres: la pose elegida entra al render con key
+    `picked:<nombre>` -> cambiarla invalida el clip aguas abajo (cascada correcta)."""
+    if which not in ("start", "destino"):
+        raise ValueError("which debe ser 'start' o 'destino'.")
+    resolved = _resolve_under(project.dir, variant)
+    if not resolved.exists():
+        raise RuntimeError(f"La variante elegida no existe: {resolved}")
+    path = project.dir / "pose_picks.yaml"
+    picks = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+    picks = picks or {}
+    picks[f"{shot_id}/{which}"] = relativize(project.dir, resolved)
+    path.write_text(yaml.safe_dump(picks, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+async def pose_variants(project: Project, spec: ProjectSpec, cfg: Config,
+                        shot_id: str, which: str, n: int = 3) -> list[Path]:
+    """[D-063] Genera N variantes de UNA pose del animatic (best-of-N, elegir no
+    solo regenerar). Reusa la derivación real de la pose (misma fuente y prompt
+    que `_shot_boundaries`) variando el seed; persiste el pool en
+    `pose_candidates.yaml` (portable). La elegida se fija con `record_pose_pick`."""
+    from .keyframe import KeyframeGenerator  # noqa: F401 (via _animatic_prep)
+    from .prompt_compile import compose_keyframe_prompt, compose_start_pose_prompt
+    from .runner import ensure_boundary_stills, plan_ribbon
+
+    if which not in ("start", "destino"):
+        raise ValueError("which debe ser 'start' o 'destino'.")
+    keyframer, overrides = _animatic_prep(project, spec, cfg)
+    ribbon = plan_ribbon(spec)
+    boundaries = await ensure_boundary_stills(project, spec, cfg, keyframer,
+                                              overrides, dry=True)
+    target = None
+    for i, entry in enumerate(ribbon):
+        if entry["shot_id"] == shot_id:
+            target = (i, entry)
+            break
+    if target is None:
+        raise ValueError(f"Plano '{shot_id}' no encontrado.")
+    i, entry = target
+    scene, shot = entry["scene"], entry["shot"]
+
+    # La MISMA fuente/prompt que usaría la derivación real de esa pose.
+    if which == "start":
+        ext = compose_start_pose_prompt(shot, entry["transition_in"])
+        prev = boundaries[i - 1] if i > 0 else None
+        source = (prev or {}).get("destino") or (boundaries[i] or {}).get("destino")
+    else:
+        ext = compose_keyframe_prompt(shot)
+        prev_same_scene = boundaries[i - 1] if entry["idx"] > 0 else None
+        source = (prev_same_scene or {}).get("destino")
+    refs = resolve_refs(project.dir, scene.character_refs)
+    ref_images = ([Path(source)] if source else []) + refs
+
+    from .project import cache_key
+    out: list[Path] = []
+    for k in range(n):
+        tmp = await keyframer.generate(scene, ref_images=ref_images, seed=1000 + k,
+                                       framing=ext)
+        vkey = cache_key("keyframe", {"variant_of": f"{shot_id}/{which}", "i": k,
+                                      "prompt": ext})
+        out.append(project.cache_store("keyframes", vkey, tmp, ".png"))
+
+    pool_path = project.dir / "pose_candidates.yaml"
+    pool = yaml.safe_load(pool_path.read_text(encoding="utf-8")) if pool_path.exists() else {}
+    pool = pool or {}
+    pool[f"{shot_id}/{which}"] = [relativize(project.dir, p) for p in out]
+    pool_path.write_text(yaml.safe_dump(pool, sort_keys=False, allow_unicode=True),
+                         encoding="utf-8")
     return out

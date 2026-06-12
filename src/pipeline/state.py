@@ -117,9 +117,18 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
         solo dobla `voiceover`, así que la línea se VE (caption) pero no se ESCUCHA.
       - `unroutable` (D-057): ningún provider del perfil cumple las capabilities de la
         escena (p.ej. `needs_audio` sin provider de audio) -> fallaría en el render.
+      - `hero_thin_coverage` (D-062): una escena hero con <3 planos desperdicia el
+        clímax (el oficio pide establecimiento/medio/detalle o reacción).
+      - `vo_too_long` (D-062): la locución estimada excede el plano -> la voz se
+        cortaría a mitad de palabra (el video manda la duración en el mux).
+      - `repeated_framing` (D-062): dos planos consecutivos con el MISMO encuadre
+        explícito (tamaño+ángulo) -> el corte "salta feo".
+      - `short_shot_billing` (D-062): el proveedor factura bloques (~5s); los planos
+        cortos pagan el bloque completo -> nombrar la plata que se tira.
 
     `routing`/`providers` vienen del Config activo (perfil); la elegibilidad la decide
     `routing_gaps` (misma lógica pura que el guard temprano del runner)."""
+    from .project import effective_shots
     from .strategies.dispatch import routing_gaps  # local: evita ciclo de imports
     routing_classes = set(routing.rules)
     out: list[dict] = []
@@ -134,11 +143,59 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
             out.append({"scene": s.id, "kind": "dialogue_no_voice",
                         "msg": "tiene diálogo pero ningún 'voiceover'; se verá como texto pero no se "
                                "escuchará (el TTS solo dobla 'voiceover')."})
+        # D-062: gramática de cobertura y plata, por escena.
+        shots = effective_shots(s)
+        if s.class_ == "hero" and len(shots) < 3:
+            out.append({"scene": s.id, "kind": "hero_thin_coverage",
+                        "msg": f"es hero con {len(shots)} plano(s); el clímax merece cobertura "
+                               "(establecimiento / medio / detalle o reacción)."})
+        for i, sh in enumerate(shots, start=1):
+            vo = sh.voiceover or ""
+            if vo and len(vo.split()) / WORDS_PER_SECOND > sh.duration_s + 0.5:
+                est = len(vo.split()) / WORDS_PER_SECOND
+                out.append({"scene": s.id, "kind": "vo_too_long",
+                            "msg": f"la voz del plano {i} dura ~{est:.1f}s y el plano {sh.duration_s:g}s; "
+                                   "se cortaría a mitad de palabra (alarga el plano o acorta la línea)."})
+        wasted = sum(_block_paid(sh.duration_s) - sh.duration_s for sh in shots)
+        if wasted >= 1.0:
+            out.append({"scene": s.id, "kind": "short_shot_billing",
+                        "msg": f"sus planos pagan bloques de ~{BILLING_BLOCK_S:g}s del proveedor: "
+                               f"~{wasted:g}s pagados que el corte no usa (planos de 4-5s aprovechan el bloque)."})
+    # D-062: encuadre repetido en cortes consecutivos, a través de TODO el film.
+    film = [(s.id, sh) for s in spec.scenes for sh in effective_shots(s)]
+    for (_, prev), (sid, cur) in zip(film, film[1:]):
+        same = (prev.camera.size == cur.camera.size and prev.camera.angle == cur.camera.angle)
+        if same and not (prev.camera.is_default() and cur.camera.is_default()):
+            out.append({"scene": sid, "kind": "repeated_framing",
+                        "msg": f"corte entre dos planos con el mismo encuadre ({cur.camera.size}/"
+                               f"{cur.camera.angle}); variá tamaño o ángulo para que el corte respire."})
     for gap in routing_gaps(spec, routing, providers):
         out.append({"scene": gap["scene"], "kind": "unroutable",
                     "msg": f"ninguna fuente del perfil puede generar esta escena (falta: "
                            f"{', '.join(gap['missing'])}); quita el requisito o cambia de perfil."})
     return out
+
+
+# D-062: constantes de oficio/facturación (puras, parametrizables en los helpers).
+WORDS_PER_SECOND = 2.5   # ritmo de locución conversacional estimado (es-LA)
+BILLING_BLOCK_S = 5.0    # bloque mínimo que factura el proveedor de video (Kling)
+
+
+def _block_paid(duration_s: float, block_s: float = BILLING_BLOCK_S) -> float:
+    """Segundos FACTURADOS por un plano: bloques completos del proveedor. Pura."""
+    import math
+    return math.ceil(max(duration_s, 0.0001) / block_s) * block_s
+
+
+def billing_summary(spec: ProjectSpec, block_s: float = BILLING_BLOCK_S) -> dict:
+    """Segundos pagados vs usados de todo el film (D-062): la plata visible.
+
+    `paid_s` = bloques del proveedor por plano; `used_s` = lo que queda en el corte."""
+    from .project import effective_shots
+    shots = [sh for s in spec.scenes for sh in effective_shots(s)]
+    used = sum(sh.duration_s for sh in shots)
+    paid = sum(_block_paid(sh.duration_s, block_s) for sh in shots)
+    return {"paid_s": paid, "used_s": used, "wasted_s": round(paid - used, 2)}
 
 
 def estimate_image_cost(n_scenes: int, n_per_scene: int, cost_per_image: float) -> float:

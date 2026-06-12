@@ -146,6 +146,24 @@ como una escena nueva. Alterná tamaños de plano entre cortes para dar contrast
 **`visual_intensity`** (1-5) — el arco de intensidad: `hero`/clímax alto (4-5), aperturas/respiros
 bajo (1-2). Construí tensión hacia el clímax; no dejes todo plano en la misma intensidad (Block).
 
+**COBERTURA (découpage)** — pensá la cobertura como un director de fotografía:
+• Una escena `hero` lleva 3-5 planos: establecimiento → medio/acción → detalle (insert) o REACCIÓN.
+  El clímax merece cobertura; un hero de 1 plano lo desperdicia.
+• DIÁLOGO entre dos personajes → plano/contraplano (alterná quién ocupa el cuadro; usa `ots`).
+• `standard` 2-3 planos; `volume` puede ser 1. Nunca repitas tamaño+ángulo en dos cortes seguidos.
+• DIRECCIÓN DE PANTALLA (eje/180°): si un personaje mira o se mueve hacia la derecha, mantené esa
+  dirección en los planos siguientes de la escena (no cruces el eje sin un plano neutro).
+
+**DURACIÓN (la plata)** — el proveedor de video factura BLOQUES de ~5s: un plano de 2s paga 5s.
+Preferí planos de 4-5s que aprovechan el bloque; usá planos cortos (<3s) solo cuando el ritmo lo
+exige de verdad (un insert, un golpe). La voz de un plano debe caber en su duración
+(~2.5 palabras/segundo): no escribas 20 palabras para un plano de 3s.
+
+**TRANSICIONES (semántica)** — la transición define cómo ARRANCA el plano siguiente:
+• `cut` (default): nueva composición libre. • `match_cut`: SOLO si los dos planos comparten
+  composición/forma (la promesa visual debe cumplirse). • `dissolve`: paso de tiempo o calma.
+• `smash_cut`: contraste violento (de quieto a caos). No uses match_cut/dissolve por decorar.
+
 **Sonido** — cómo se OYE cada cosa en este pipeline (importa para que no quede mudo):
 • `dialogue` [ES] a nivel ESCENA: las líneas literales del guion ("Personaje: frase"). Alimenta el
   guion de export; NO es lo que se escucha por sí solo.

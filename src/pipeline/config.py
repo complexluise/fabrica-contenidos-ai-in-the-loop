@@ -70,9 +70,14 @@ class ProfileConfig(BaseModel):
 
 
 class StoryboardKeyframeConfig(BaseModel):
-    """Backend e modelo de imagen para el storyboard backend activo."""
+    """Backend y modelos de imagen para el storyboard backend activo.
+
+    `model`/`ref_model` PISAN a los del estilo cuando el preset los define
+    (D-063: la palanca de calidad de imagen vive en el preset, no en el estilo;
+    la config `model` de D-053 estaba muerta hasta este cableado)."""
     backend: str = "fal"
     model: str | None = None  # None -> usa el del estilo
+    ref_model: str | None = None  # None -> usa el del estilo (edición/identidad)
 
 
 class StoryboardLLMConfig(BaseModel):
@@ -236,5 +241,11 @@ def load_config(config_dir: Path, style: str, profile: str = "fal-ultra-cheap",
     profile_cfg = load_profile_config(config_dir / "routing.yaml", profile=profile)
     storyboard_cfg = load_storyboard_config(config_dir / "routing.yaml", backend=backend)
     voice_cfg = load_voice_config(config_dir / "routing.yaml", backend=voice_backend)
+    # D-063: el preset de storyboard PISA los modelos de imagen del estilo (la
+    # palanca de calidad). Sin preset explícito, el estilo manda (como siempre).
+    if storyboard_cfg.keyframe.model:
+        style_cfg.keyframe.model = storyboard_cfg.keyframe.model
+    if storyboard_cfg.keyframe.ref_model:
+        style_cfg.keyframe.ref_model = storyboard_cfg.keyframe.ref_model
     return Config(providers=providers, routing=routing, style=style_cfg, audio=audio,
                   profile=profile_cfg, storyboard=storyboard_cfg, voice=voice_cfg)
