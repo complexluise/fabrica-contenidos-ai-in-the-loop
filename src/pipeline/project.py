@@ -183,6 +183,8 @@ def _shot_to_dict(sh: Shot) -> dict:
         d["transition"] = sh.transition
     if sh.voiceover:
         d["voiceover"] = sh.voiceover
+    if sh.voice_id:  # D-065: voz por plano (dos hablantes en una escena)
+        d["voice_id"] = sh.voice_id
     if sh.caption:
         d["caption"] = sh.caption
     if sh.sfx:

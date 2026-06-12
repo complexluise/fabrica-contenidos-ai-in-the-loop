@@ -171,8 +171,9 @@ exige de verdad (un insert, un golpe). La voz de un plano debe caber en su durac
   personaje habla, esa misma línea va TAMBIÉN en el `voiceover` del plano** (sin el prefijo "Personaje:").
   Una línea hablada que solo está en `dialogue` y no en ningún `voiceover` queda MUDA (solo texto).
   Sirve igual para narrador en off. No narres lo que ya se ve.
-• `voice_id` [token] por escena: si hablan personajes distintos, asigná una voz por escena para
-  diferenciarlos (p.ej. uno sereno, otro áspero). Opcional pero recomendado en piezas de diálogo.
+• `voice_id` [token]: por escena, y TAMBIÉN por plano (D-065) — si en una misma escena hablan dos
+  personajes (plano/contraplano), cada plano que habla lleva el `voice_id` de SU hablante. El humano
+  configura los ids de voz; vos dejá el campo presente con un placeholder del nombre del personaje.
 • `ambience` [EN] (room tone, siempre presente) y `sfx` [EN] (solo si suma) — el sonido del lugar y
   de la acción los agrega un paso de audio (V2A) sobre el clip; van SIEMPRE que correspondan.
 • `needs_audio`: dejalo en `false` (default). NO es como se obtiene diálogo/SFX acá: solo sirve para

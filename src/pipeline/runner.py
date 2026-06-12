@@ -87,6 +87,12 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
     }
 
 
+def effective_voice(scene, shot) -> str | None:
+    """Voz efectiva del plano (D-065): plano > escena. Dos hablantes pueden convivir
+    en una escena (plano/contraplano) con su propia voz cada uno. Pura."""
+    return shot.voice_id or scene.voice_id
+
+
 def plan_ribbon(spec: ProjectSpec) -> list[dict]:
     """Aplana (escena, plano) en la cinta ordenada del film (D-059/D-060).
 
@@ -142,27 +148,31 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
         if scene.id != current_scene_id:
             current_scene_id = scene.id
             scene_prev_kf, scene_prev_key = None, None
-        try:
-            boundary = await _shot_boundaries(
-                project=project, cfg=cfg, keyframer=keyframer, scene=scene, shot=shot,
-                shot_id=shot_id, idx=idx, transition_in=entry["transition_in"],
-                keyframe_overrides=keyframe_overrides, pose_picks=pose_picks,
-                prev_destino=prev_destino, prev_destino_key=prev_destino_key,
-                scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key, dry=dry)
-        except Exception as exc:  # noqa: BLE001 — un still fallido no aborta el run
-            logger.error("[%s] FALLO generando poses frontera: %s", shot_id, exc)
-            out.append(None)
-            continue
+            scene_anchor, scene_anchor_key = None, None  # D-064: el ancla de ESTA escena
+        boundary = await _shot_boundaries(
+            project=project, cfg=cfg, keyframer=keyframer, scene=scene, shot=shot,
+            shot_id=shot_id, idx=idx, transition_in=entry["transition_in"],
+            keyframe_overrides=keyframe_overrides, pose_picks=pose_picks,
+            prev_destino=prev_destino, prev_destino_key=prev_destino_key,
+            scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key,
+            scene_anchor=scene_anchor, scene_anchor_key=scene_anchor_key, dry=dry)
         out.append(boundary)
+        # Las KEYS avanzan SIEMPRE (identidad pura/posicional de la cadena): un fallo
+        # de generación deja el ARCHIVO en None pero no corre las keys aguas abajo —
+        # si no, lo ya cacheado queda inalcanzable y los re-runs pagan de nuevo.
         prev_destino, prev_destino_key = boundary["destino"], boundary["kf_key"]
         scene_prev_kf, scene_prev_key = boundary["destino"], boundary["kf_key"]
+        if idx == 0:  # D-064: el destino del plano 1 = el ancla de la escena
+            scene_anchor, scene_anchor_key = boundary["destino"], boundary["kf_key"]
     return out
 
 
 async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx,
                            transition_in, keyframe_overrides, pose_picks: dict | None = None,
                            prev_destino, prev_destino_key,
-                           scene_prev_kf, scene_prev_key, dry: bool = False) -> dict:
+                           scene_prev_kf, scene_prev_key,
+                           scene_anchor=None, scene_anchor_key=None,
+                           dry: bool = False) -> dict:
     """Las dos poses frontera de UN plano (destino + start). Cacheadas."""
     from .project import _resolve_under
     pose_picks = pose_picks or {}
@@ -171,32 +181,40 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     cost = 0.0
 
     # --- destino (la lógica de keyframe de siempre, D-048) ---
+    # Las KEYS se computan SIEMPRE (puras); la generación puede fallar y solo
+    # afecta al ARCHIVO (None) — la identidad de la cadena no depende del runtime.
     kf_ext = compose_keyframe_prompt(shot)
     styled = build_styled_prompt(scene, cfg.style, kf_ext)
     chain_refs: list = []
     kf_inputs = _keyframe_inputs(styled, cfg, ref_sig)
-    if idx > 0 and scene_prev_kf is not None and cfg.style.keyframe.ref_model:
-        chain_refs = [scene_prev_kf]
-        kf_inputs["chain_from"] = scene_prev_key
+    if idx > 0 and cfg.style.keyframe.ref_model:
+        kf_inputs["chain_from"] = scene_prev_key  # identidad posicional, archivo aparte
+        kf_inputs["anchor"] = scene_anchor_key    # D-064: cambiar el ancla regenera la escena
+        if scene_prev_kf is not None:
+            chain_refs = [scene_prev_kf]
+        # D-064 (coherencia extrema): el ANCLA de la escena entra como referencia en
+        # todas sus poses — el look elegido por el humano gobierna, no solo la cadena.
+        if scene_anchor is not None and scene_anchor not in chain_refs:
+            chain_refs = chain_refs + [scene_anchor]
     kf_key = cache_key("keyframe", kf_inputs)
     if idx == 0 and scene.id in keyframe_overrides:  # ancla elegida (D-022/D-025)
         destino = keyframe_overrides[scene.id]
         kf_key = f"picked:{destino.name}"
         logger.info("[%s] %s | destino directo (ancla): %s", shot_id, scene.class_, destino.name)
     else:
-        hit = project.cache_lookup("keyframes", kf_key, ".png")
-        if hit is not None:
-            destino = hit
-        elif dry:
-            destino = None  # solo lectura: falta esta pose (visible, sin gastar)
-        else:
-            logger.info("[%s] %s | generando destino%s...", shot_id, scene.class_,
-                        " (encadenado)" if chain_refs else "")
-            tmp = await keyframer.generate(
-                scene, ref_images=(chain_refs + refs_io) if chain_refs else refs_io,
-                framing=kf_ext)
-            destino = project.cache_store("keyframes", kf_key, tmp, ".png")
-            cost += cfg.style.keyframe.cost_per_image
+        destino = project.cache_lookup("keyframes", kf_key, ".png")
+        if destino is None and not dry:
+            try:
+                logger.info("[%s] %s | generando destino%s...", shot_id, scene.class_,
+                            " (encadenado)" if chain_refs else "")
+                tmp = await keyframer.generate(
+                    scene, ref_images=(chain_refs + refs_io) if chain_refs else refs_io,
+                    framing=kf_ext)
+                destino = project.cache_store("keyframes", kf_key, tmp, ".png")
+                cost += cfg.style.keyframe.cost_per_image
+            except Exception as exc:  # noqa: BLE001 — el fallo no corre la cadena
+                logger.error("[%s] FALLO generando destino: %s", shot_id, exc)
+                destino = None
     picked = pose_picks.get(f"{shot_id}/destino")
     if picked:  # D-063: variante elegida por el humano -> manda, con key propia
         p = _resolve_under(project.dir, picked)
@@ -204,29 +222,36 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             destino, kf_key = p, f"picked:{p.name}"
 
     # --- start-still: la pose de apertura, derivada del destino anterior ---
-    # La KEY de la cadena sigue al destino previo aunque su archivo falte (dry):
-    # las keys del animatic en solo-lectura deben coincidir con las del render.
+    # La KEY de la cadena sigue al destino previo aunque su archivo falte:
+    # dry, render y re-runs deben computar EXACTAMENTE las mismas keys.
     if prev_destino_key is not None:
         source, source_key = prev_destino, prev_destino_key
     else:
         source, source_key = destino, kf_key  # primer plano: "momentos antes" del propio destino
+    # D-064: el ancla de la escena también gobierna la APERTURA (para el plano 1,
+    # el ancla es su propio destino). Coherencia extrema: el look elegido manda.
+    anchor, anchor_key = (scene_anchor, scene_anchor_key) if idx > 0 else (destino, kf_key)
     start_ext = compose_start_pose_prompt(shot, transition_in)
     start_styled = build_styled_prompt(scene, cfg.style, start_ext)
     start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig)
     start_inputs["role"] = "start_pose"        # namespace: no colisiona con destinos
     start_inputs["chain_from"] = source_key    # cambiar el destino previo invalida este
+    start_inputs["anchor"] = anchor_key        # D-064: cambiar el ancla regenera la apertura
     start_key = cache_key("keyframe", start_inputs)
-    hit = project.cache_lookup("keyframes", start_key, ".png")
-    if hit is not None:
-        start = hit
-    elif dry or source is None:  # dry: solo lectura; sin fuente no hay derivación
-        start = None
-    else:
-        logger.info("[%s] generando pose de apertura (animatic)...", shot_id)
-        tmp = await keyframer.generate(scene, ref_images=[source] + refs_io,
-                                       framing=start_ext)
-        start = project.cache_store("keyframes", start_key, tmp, ".png")
-        cost += cfg.style.keyframe.cost_per_image
+    start = project.cache_lookup("keyframes", start_key, ".png")
+    if start is None and not dry and source is not None:
+        try:
+            logger.info("[%s] generando pose de apertura (animatic)...", shot_id)
+            start_refs = [source]
+            if anchor is not None and anchor != source:
+                start_refs.append(anchor)
+            tmp = await keyframer.generate(scene, ref_images=start_refs + refs_io,
+                                           framing=start_ext)
+            start = project.cache_store("keyframes", start_key, tmp, ".png")
+            cost += cfg.style.keyframe.cost_per_image
+        except Exception as exc:  # noqa: BLE001 — el fallo no corre la cadena
+            logger.error("[%s] FALLO generando pose de apertura: %s", shot_id, exc)
+            start = None
     picked = pose_picks.get(f"{shot_id}/start")
     if picked:  # D-063: variante elegida -> manda, con key propia (cascada correcta)
         p = _resolve_under(project.dir, picked)
@@ -261,6 +286,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
         "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
+        "voice_id": effective_voice(scene, shot),  # D-065: el plano manda sobre la escena
     })
 
     # --- L5 video (cacheado) ---
@@ -324,8 +350,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
                 audio_cost = round(mm.cost_per_second * shot.duration_s, 4)  # solo si se generó
             diegetic_applied = True
             audio_provider = mm.name
-        except Exception:
-            pass  # sin diegético antes que perder el plano
+        except Exception as exc:  # best-effort, pero VISIBLE (D-066): nada de fallos mudos
+            logger.warning("[%s] sin audio diegético (%s): %s", shot_id, type(exc).__name__, exc)
 
     # --- L7 caption del plano (best-effort) ---
     cap = effective_caption(plano)
@@ -333,8 +359,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         try:
             clip_path = burn_lower_third(clip_path, run.dir / "captioned" / f"{shot_id}.mp4",
                                          cap, fontfile=default_font())
-        except Exception:
-            pass  # sin caption antes que perder el plano
+        except Exception as exc:
+            logger.warning("[%s] sin caption (%s): %s", shot_id, type(exc).__name__, exc)
 
     # --- L7 voz en off del plano (best-effort, cacheada) ---
     vo_applied = False
@@ -352,8 +378,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
                 tts_cost = round(getattr(tts, "cost_per_char", 0.0) * len(plano.voiceover), 6)
             clip_path = mux_voiceover(clip_path, vo_file, run.dir / "voiced" / f"{shot_id}.mp4")
             vo_applied = True
-        except Exception:
-            pass  # sin VO antes que perder el plano
+        except Exception as exc:
+            logger.warning("[%s] sin voz en off (%s): %s", shot_id, type(exc).__name__, exc)
 
     record = SceneRecord(
         run_id=run.run_id, scene_id=shot_id, provider=result.provider,
@@ -488,8 +514,8 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     async def _one(entry: dict, b: dict | None):
         """Un plano de la Fase B. Devuelve la tupla del plano o None si falló."""
         scene, shot, shot_id = entry["scene"], entry["shot"], entry["shot_id"]
-        if b is None:  # la Fase A no pudo generar sus poses frontera
-            telemetry.record_failure(shot_id, "poses frontera (animatic) no disponibles")
+        if b is None or b["destino"] is None:  # sin destino no hay clip (la apertura es opcional)
+            telemetry.record_failure(shot_id, "destino (animatic) no disponible")
             return None
         refs, rule, subset, strategy, provider_sig = scene_ctx[scene.id]
         async with sem:

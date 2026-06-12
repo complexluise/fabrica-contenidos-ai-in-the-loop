@@ -145,3 +145,144 @@ async def test_pose_pick_changes_key_and_path(tmp_path):
     s1 = strip[0]
     assert s1["start"].endswith("variante_elegida.png")   # la pose elegida manda
     assert s1["start_key"].startswith("picked:")          # key distinta -> el clip aguas abajo se invalida
+
+
+# --- D-063: las KEYS de la cadena son estables ante fallos de generación -----
+
+async def test_chain_keys_stable_when_a_pose_generation_fails(tmp_path, monkeypatch):
+    """Un fallo de generación a mitad del film NO corre las keys aguas abajo:
+    la identidad es pura/posicional. Si no, lo generado queda bajo keys
+    inalcanzables y los re-runs regeneran (plata) o pierden poses."""
+    from unittest.mock import AsyncMock
+    from pipeline.runner import ensure_boundary_stills
+
+    proj = Project(slug="t", root=tmp_path)
+    (proj.cache_dir / "keyframes").mkdir(parents=True)
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="a", duration_s=3, shots=[Shot(action="x", duration_s=3)]),
+        Scene(id="s2", prompt="b", duration_s=3, shots=[Shot(action="y", duration_s=3)]),
+    ])
+    cfg = load_config(CONFIG_DIR, "lego")
+
+    img = tmp_path / "gen.png"
+    img.write_bytes(b"\x89PNG")
+    ok = AsyncMock(return_value=img)
+
+    # Run A: todo genera OK -> keys de referencia.
+    from types import SimpleNamespace
+    kf_ok = SimpleNamespace(generate=ok)
+    ref = await ensure_boundary_stills(proj, spec, cfg, kf_ok, {})
+    ref_keys = [(b["kf_key"], b["start_key"]) for b in ref]
+
+    # Run B (cache limpio): el PRIMER destino falla; el resto genera.
+    import shutil
+    shutil.rmtree(proj.cache_dir / "keyframes"); (proj.cache_dir / "keyframes").mkdir()
+    calls = {"n": 0}
+    async def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("proveedor caído")
+        return img
+    kf_flaky = SimpleNamespace(generate=flaky)
+    out = await ensure_boundary_stills(proj, spec, cfg, kf_flaky, {})
+
+    assert [(b["kf_key"], b["start_key"]) for b in out] == ref_keys  # keys idénticas
+    assert out[0]["destino"] is None      # el fallo se refleja en el ARCHIVO, no en la key
+    assert out[1]["destino"] is not None  # el resto siguió
+
+
+# --- D-064: subtítulos estilo Instagram (envoltura pura) ----------------------
+
+def test_wrap_caption_breaks_long_lines():
+    from pipeline.post import wrap_caption
+    t = wrap_caption("Detengamos la violencia. Conversemos ahora mismo.", width=18)
+    lines = t.split("\n")
+    assert len(lines) >= 2
+    assert all(len(l) <= 22 for l in lines)  # ancho de lectura en vertical
+
+
+def test_wrap_caption_caps_lines():
+    from pipeline.post import wrap_caption
+    t = wrap_caption(" ".join(["palabra"] * 30), width=18, max_lines=3)
+    assert len(t.split("\n")) <= 3 and t.endswith("…")
+
+
+def test_caption_filter_is_ig_style():
+    from pipeline.post import caption_filter
+    f = caption_filter(Path("cap.txt"), height=1920)
+    assert "textfile=" in f          # newlines/acentos sin escaping frágil
+    assert "borderw=" in f           # borde grueso, no cajita negra
+    assert "box=1" not in f
+    assert "0.72" in f or "0.70" in f  # zona segura sobre la UI de IG
+
+
+# --- D-064: el ANCLA de la escena entra como base de TODAS sus poses ----------
+
+async def test_scene_anchor_feeds_every_pose_of_the_scene(tmp_path):
+    """Coherencia extrema (D-064): el ancla de la escena entra como referencia en
+    TODAS sus poses — incluso el destino del plano 3 (que encadena del 2, no del
+    ancla) y la apertura de una escena cuyo start deriva de la escena ANTERIOR."""
+    from unittest.mock import AsyncMock
+    from pipeline.runner import ensure_boundary_stills
+
+    proj = Project(slug="t", root=tmp_path)
+    (proj.cache_dir / "keyframes").mkdir(parents=True)
+    a1 = proj.cache_dir / "keyframes" / "ancla1.png"; a1.write_bytes(b"\x89PNG")
+    a2 = proj.cache_dir / "keyframes" / "ancla2.png"; a2.write_bytes(b"\x89PNG")
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="a", duration_s=12, shots=[
+            Shot(action="x", duration_s=4), Shot(action="y", duration_s=4),
+            Shot(action="z", duration_s=4),
+        ]),
+        Scene(id="s2", prompt="b", duration_s=4, shots=[Shot(action="w", duration_s=4)]),
+    ])
+    cfg = load_config(CONFIG_DIR, "lego")
+    img = tmp_path / "gen.png"; img.write_bytes(b"\x89PNG")
+    calls = []
+    async def gen(scene, ref_images=None, seed=None, framing=""):
+        calls.append((scene.id, framing, set(map(str, ref_images or []))))
+        return img
+    from types import SimpleNamespace
+    kf = SimpleNamespace(generate=gen)
+
+    await ensure_boundary_stills(proj, spec, cfg, kf, {"s1": a1, "s2": a2})
+
+    # destino del plano 3 de s1 (encadena del plano 2): DEBE llevar el ancla a1
+    d3 = [refs for sid, fr, refs in calls if sid == "s1" and "OPENING" not in fr]
+    assert d3 and all(str(a1) in refs for refs in d3), d3
+    # la apertura de s2 deriva del destino de s1, pero DEBE llevar el ancla a2
+    s2_starts = [refs for sid, fr, refs in calls if sid == "s2" and "OPENING" in fr]
+    assert s2_starts and all(str(a2) in refs for refs in s2_starts), s2_starts
+
+
+# --- D-065: voz por PLANO (dos hablantes en una escena) -----------------------
+
+def test_shot_voice_id_roundtrips_in_spec():
+    from pipeline.project import spec_from_dict, spec_to_dict
+    spec = spec_from_dict({"scenes": [{
+        "id": "s1", "prompt": "p", "duration_s": 8,
+        "voice_id": "voz_cepeda",
+        "shots": [
+            {"action": "a", "duration_s": 4, "voiceover": "¡Peleá!", "voice_id": "voz_espriella"},
+            {"action": "b", "duration_s": 4, "voiceover": "Me defiendo."},
+        ],
+    }]}, "t")
+    sh = spec.scenes[0].shots
+    assert sh[0].voice_id == "voz_espriella" and sh[1].voice_id is None
+    d = spec_to_dict(spec)["scenes"][0]["shots"]
+    assert d[0]["voice_id"] == "voz_espriella" and "voice_id" not in d[1]
+
+
+def test_voice_resolution_prefers_shot_over_scene():
+    from pipeline.audio import resolve_voice
+    from pipeline.runner import effective_voice
+    scene = Scene(id="s1", prompt="p", duration_s=8, voice_id="voz_escena", shots=[
+        Shot(action="a", duration_s=4, voice_id="voz_plano"),
+        Shot(action="b", duration_s=4),
+    ])
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[scene],
+                       voice_id="voz_proyecto")
+    assert effective_voice(scene, scene.shots[0]) == "voz_plano"   # el plano manda
+    assert effective_voice(scene, scene.shots[1]) == "voz_escena"  # cae a la escena
+    plano = scene.model_copy(update={"voice_id": effective_voice(scene, scene.shots[1])})
+    assert resolve_voice(plano, spec) == "voz_escena"

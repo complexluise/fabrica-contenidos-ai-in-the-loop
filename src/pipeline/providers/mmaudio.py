@@ -48,11 +48,16 @@ class MMAudioV2:
         """Sube el clip a fal, corre MMAudio y devuelve la URL del video con audio.
 
         No fija `duration`: MMAudio usa la longitud del clip (ya recortado al plano).
+        Timeout duro (D-066): una cola de fal trabada colgaba el render ENTERO
+        (visto en producción: 40+ min en un solo plano). El sfx es best-effort —
+        mejor un plano sin diegético que un run congelado.
         """
+        import asyncio
         import fal_client
 
         client = fal_client.AsyncClient(key=self._api_key)
-        video_url = await client.upload_file(str(clip))
+        video_url = await asyncio.wait_for(client.upload_file(str(clip)), timeout=120)
         arguments = {"video_url": video_url, "prompt": cue, "seed": seed}
-        result = await client.subscribe(self.model, arguments=arguments)
+        result = await asyncio.wait_for(
+            client.subscribe(self.model, arguments=arguments), timeout=240)
         return _extract_video_url(result)
