@@ -100,3 +100,4 @@ es continua entre archivos.
 | D-061 | El Studio en etapas: "Elegir" se separa en Casting / Encuadres / Animatic | Vigente |
 | D-062 | Gramática de cobertura: el oficio entra al canal de avisos (y la plata se nombra) | Vigente |
 | D-063 | Palancas de calidad: el preset de imagen pisa al estilo + poses elegibles (best-of-N) | Vigente |
+| D-064 | Notas de dirección corte #3: subtítulos IG + coherencia extrema por ancla + keys posicionales | Vigente |
