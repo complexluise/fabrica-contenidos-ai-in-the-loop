@@ -1043,6 +1043,32 @@ Ver [D-067].
 
 ---
 
+## Sprint 6.30 — La edición entra al flujo (D-068, corrige D-062)
+
+**Objetivo:** cerrar las deudas del examen del flujo antes de la próxima corrida: duraciones de
+EDICIÓN (no de facturación), el ensemble conserva sus tomas pagadas, y la música por defecto.
+Ver [D-068].
+
+### Acceptance Criteria
+- [x] AC1 — `short_shot_billing` retirado (empujaba ritmo lento); duraciones = edición; autor
+  reescrito; billing como info. 🔬
+- [x] AC2 — `alternate_takes` del ensemble conservadas (cache `takes/` + manifest). 🔬
+- [x] AC3 — `music_prompt` en el spec (round-trip, autor lo emite) → generada una vez (cacheada,
+  timeout D-066) → mezclada con ducking. 🔬
+- [x] AC4 — esquiva al ritmo probado del re-edit (54s→38s) + cama musical declarada.
+- [ ] AC5 — Corrida completa (pendiente de autorización: ~$3-4, regeneración total por D-067).
+
+### Tasks
+- [x] T6.30.1 — Tests (red): advisory ausente, ensemble takes, music round-trip. 🔬 ✅
+- [x] T6.30.2 — state/ensemble/runner/project/author + yaml de esquiva. 🔬 ✅
+- [x] T6.30.3 — ADR D-068 + índice. ✅
+
+> **Estado:** core en verde (**335 tests**). La etapa de edición ACTIVA (describe juzgando
+> movimiento, selects sobre tomas conservadas, corte automatizado mcp-video/movis) se diseña con el
+> usuario como D-069+.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

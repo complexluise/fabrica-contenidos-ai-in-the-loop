@@ -49,6 +49,13 @@ class Ensemble:
                 "candidates": [(r.provider, round(s, 3)) for r, _, s in scored],
                 "selected_score": round(best_score, 3),
                 "gate_scores": report_scores(best_rep),
+                # D-068: las tomas perdedoras están PAGADAS — se conservan como
+                # cobertura para la edición, no se tiran.
+                "alternate_takes": [
+                    {"provider": r.provider, "video_path": str(r.video_path),
+                     "score": round(sc, 3)}
+                    for r, _, sc in scored if r is not best_res
+                ],
             }
         )
         return best_res

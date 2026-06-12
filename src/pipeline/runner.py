@@ -327,6 +327,17 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
             "gate_passed": result.raw_meta.get("gate_passed", True),
             "gate_scores": result.raw_meta.get("gate_scores", {})})
         cached = False
+        # D-068: las tomas perdedoras del ensemble están PAGADAS — a cache como
+        # cobertura para la edición (export/describe las verán), no a la basura.
+        from pathlib import Path as _P
+        for i, take in enumerate(result.raw_meta.get("alternate_takes") or []):
+            tp = _P(take["video_path"])
+            if tp.exists():
+                stored_take = project.cache_store("takes", f"{vid_key}a{i}", tp, ".mp4")
+                take["video_path"] = str(stored_take)
+                logger.info("[%s] toma alternativa conservada: %s (%s)",
+                            shot_id, stored_take.name, take["provider"])
+        cached = False
         gate_str = "ok" if result.raw_meta.get("gate_passed", True) else "fail"
         logger.info("[%s] video listo: %s | $%.3f | %.1fs | gate=%s",
                     shot_id, result.provider, result.cost_usd, result.latency_s, gate_str)
@@ -414,7 +425,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         "motion": video_ext or "",  # D-048/A1: el movimiento que se le pidio al video
         "voiceover": plano.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
         "sfx": shot.sfx or "", "ambience": scene.ambience or "", "sfx_key": sfx_key,
-        "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {})}
+        "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {}),
+        "alternate_takes": result.raw_meta.get("alternate_takes", [])}
     return (clip_path, record, manifest_entry, (vo_applied or diegetic_applied),
             keyframe, kf_key)
 
@@ -573,6 +585,23 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
 
     try:
         music = spec.music if (spec.music and spec.music.exists()) else None
+        # D-068: la cama musical entra al flujo — declarada en el spec, generada
+        # UNA vez (cache content-addressed) y mezclada con el ducking existente.
+        if music is None and spec.music_prompt and get_settings().fal_key:
+            try:
+                from .music import generate_music_fal
+                total_s = min(sum(s2.duration_s for s2 in spec.scenes), 190.0)
+                mkey = cache_key("music", {"prompt": spec.music_prompt, "s": round(total_s)})
+                music = project.cache_lookup("music", mkey, ".wav")
+                if music is None:
+                    logger.info("musica: generando cama (%.0fs)...", total_s)
+                    tmp_m = run.dir / "_music.wav"
+                    await generate_music_fal(spec.music_prompt, total_s, tmp_m,
+                                             get_settings().fal_key, steps=60)
+                    music = project.cache_store("music", mkey, tmp_m, ".wav")
+            except Exception as exc:  # best-effort, visible (D-066)
+                logger.warning("sin musica (%s): %s", type(exc).__name__, exc)
+                music = None
         # Con voz o audio diegético, la música baja para quedar por debajo (ducking, D-034).
         music_volume = 0.25 if audio_applied else 1.0
         stitched = concat_clips(clips, run.dir / "_stitched.mp4", music=music,

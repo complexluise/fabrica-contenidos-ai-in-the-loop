@@ -74,6 +74,7 @@ class ProjectSpec:
     storyboard_backend: str = "fal"  # backend de imagen activo (D-053): "fal" | "google"
     voice_backend: str = "kokoro"  # backend de voz/TTS activo (D-058): "kokoro" | "elevenlabs"
     world: str | None = None  # D-067: la biblia del MUNDO [EN] — set/luz/clima canónicos que viajan a CADA prompt
+    music_prompt: str | None = None  # D-068: la cama musical [EN]; se genera una vez (cacheada) y el concat la mezcla
 
 
 def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
@@ -119,6 +120,7 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
         storyboard_backend=data.get("storyboard_backend", "fal"),
         voice_backend=data.get("voice_backend", "kokoro"),
         world=data.get("world"),
+        music_prompt=data.get("music_prompt"),
     )
 
 
@@ -272,6 +274,8 @@ def spec_to_dict(spec: ProjectSpec) -> dict:
         data["voice_backend"] = spec.voice_backend
     if spec.world:
         data["world"] = spec.world
+    if spec.music_prompt:
+        data["music_prompt"] = spec.music_prompt
     if spec.music:
         data["music"] = str(spec.music)
     if spec.voice_id:
