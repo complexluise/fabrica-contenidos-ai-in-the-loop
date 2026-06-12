@@ -70,6 +70,55 @@
     } catch (e) { err = humanError(e); }
     finally { dropping = ""; }
   }
+
+  // D-063: best-of-N por pose — generar variantes y ELEGIR (no solo regenerar).
+  let variantsBusy = $state("");  // "shot/which" generando variantes
+  function genVariants(shotId, which) {
+    variantsBusy = `${shotId}/${which}`; err = "";
+    runJob(`/api/projects/${slug}/animatic/${shotId}/${which}/variants?n=3`, {
+      onDone: async (status) => {
+        variantsBusy = "";
+        if (status !== "done") err = `Variantes: terminó como ${status}.`;
+        await load();
+      },
+      onError: (e) => { variantsBusy = ""; err = humanError(e); },
+    });
+  }
+  async function pickVariant(shotId, which, url) {
+    err = "";
+    try {
+      await post(`/api/projects/${slug}/animatic/${shotId}/${which}/pick`, { path: url });
+      await load(); await refreshStatus();
+    } catch (e) { err = humanError(e); }
+  }
+
+  // D-062: ▶ reproducir el animatic — las poses en secuencia con sus duraciones.
+  let playing = $state(false);
+  let playIdx = $state(0);
+  let playPose = $state("start"); // "start" | "destino" dentro del plano
+  let playTimer = null;
+  function stopPlay() { playing = false; if (playTimer) clearTimeout(playTimer); playTimer = null; }
+  function play() {
+    if (!strip.length) return;
+    playing = true; playIdx = 0; playPose = "start";
+    stepPlay();
+  }
+  function stepPlay() {
+    const e = strip[playIdx];
+    if (!e) { stopPlay(); return; }
+    const dur = Math.max(1, e.duration_s || 2) * 1000;
+    if (playPose === "start") {
+      // apertura ~40% del plano, destino el resto (el clip ATERRIZA en el destino)
+      playTimer = setTimeout(() => { playPose = "destino"; stepPlay(); }, dur * 0.4);
+    } else {
+      playTimer = setTimeout(() => {
+        if (playIdx + 1 < strip.length) { playIdx += 1; playPose = "start"; stepPlay(); }
+        else stopPlay();
+      }, dur * 0.6);
+    }
+  }
+  let playerShot = $derived(strip[playIdx] ?? null);
+  let playerImg = $derived(playerShot ? (playPose === "start" ? playerShot.start : playerShot.destino) : null);
 </script>
 
 <header class="head">
@@ -101,13 +150,40 @@
           <span class="muted">desde perfil {cheapProfile.key ?? cheapProfile.label ?? ""} (se elige en Producción)</span>
         {/if}
       </p>
+      {#if data.billing}
+        <p class="est-line billing" title="El proveedor de video factura bloques de ~5s: un plano de 2s paga 5s (D-062)">
+          ⏱ el corte usa <b>{data.billing.used_s.toFixed(0)}s</b> pero paga
+          <b>{data.billing.paid_s.toFixed(0)}s</b> de video
+          {#if data.billing.wasted_s > 0}
+            <span class="waste">(~{data.billing.wasted_s.toFixed(0)}s pagados que se tiran — planos de 4-5s aprovechan el bloque)</span>
+          {/if}
+        </p>
+      {/if}
     </div>
     <div class="gen-controls">
+      <button class="ghost" onclick={play} disabled={playing || !strip.length}
+              title="Las poses en secuencia con sus duraciones: el ritmo de la película, gratis">
+        ▶ Reproducir
+      </button>
       <button class="machine cta" onclick={generate} disabled={busy || !hasFal || data.missing_poses === 0}>
         {busy ? "Generando…" : data.missing_poses > 0 ? `Completar animatic (${data.missing_poses})` : "✓ Animatic completo"}
       </button>
     </div>
   </div>
+
+  {#if playing && playerShot}
+    <div class="player" onclick={stopPlay} role="button" tabindex="0">
+      {#if playerImg}
+        <img src={playerImg} alt={playerShot.shot_id} />
+      {:else}
+        <div class="player-hole">pose faltante</div>
+      {/if}
+      <div class="player-bar">
+        <span class="mono">{playerShot.shot_id} · {playPose} · {playerShot.duration_s}s</span>
+        <span class="muted">plano {playIdx + 1}/{strip.length} — clic para parar</span>
+      </div>
+    </div>
+  {/if}
 
   {#if busy}<div class="progress mono"><span class="spin"></span>{progress}</div>{/if}
   {#if err}<p class="error">{err}</p>{/if}
@@ -131,29 +207,37 @@
               <span class="dur">{e.duration_s}s</span>
             </div>
             <div class="poses">
-              <div class="pose">
-                {#if e.start}
-                  <img src={e.start} alt="apertura {e.shot_id}" loading="lazy" />
-                  <button class="regen" title="No convence: descartar y regenerar esta pose"
-                          disabled={busy || dropping === `${e.shot_id}/start`}
-                          onclick={() => regenPose(e.shot_id, "start")}>↻</button>
-                {:else}
-                  <div class="hole">apertura</div>
-                {/if}
-                <span class="pose-lbl">apertura</span>
-              </div>
-              <span class="arrow">→</span>
-              <div class="pose">
-                {#if e.destino}
-                  <img src={e.destino} alt="destino {e.shot_id}" loading="lazy" />
-                  <button class="regen" title="No convence: descartar y regenerar esta pose"
-                          disabled={busy || dropping === `${e.shot_id}/destino`}
-                          onclick={() => regenPose(e.shot_id, "destino")}>↻</button>
-                {:else}
-                  <div class="hole">destino</div>
-                {/if}
-                <span class="pose-lbl">destino</span>
-              </div>
+              {#each ["start", "destino"] as which, wi}
+                {#if wi === 1}<span class="arrow">→</span>{/if}
+                {@const img = which === "start" ? e.start : e.destino}
+                {@const variants = e[`${which}_variants`] || []}
+                {@const vBusy = variantsBusy === `${e.shot_id}/${which}`}
+                <div class="pose">
+                  {#if img}
+                    <img src={img} alt="{which} {e.shot_id}" loading="lazy" />
+                    {#if e[`${which}_picked`]}<span class="pick-badge" title="Variante elegida por vos">★</span>{/if}
+                    <button class="regen" title="No convence: descartar y regenerar esta pose"
+                            disabled={busy || dropping === `${e.shot_id}/${which}`}
+                            onclick={() => regenPose(e.shot_id, which)}>↻</button>
+                    <button class="vary" title="Generar 3 variantes y ELEGIR (D-063)"
+                            disabled={busy || vBusy || !hasFal}
+                            onclick={() => genVariants(e.shot_id, which)}>{vBusy ? "…" : "⊞"}</button>
+                  {:else}
+                    <div class="hole">{which === "start" ? "apertura" : "destino"}</div>
+                  {/if}
+                  <span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>
+                  {#if variants.length}
+                    <div class="variants">
+                      {#each variants as v}
+                        <button class="vthumb" title="Elegir esta variante"
+                                onclick={() => pickVariant(e.shot_id, which, v)}>
+                          <img src={v} alt="variante" loading="lazy" />
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
             </div>
             {#if e.intention}<p class="intent" title="la función dramática del plano">{e.intention}</p>{/if}
           </div>
@@ -233,4 +317,38 @@
   .savebar { position: sticky; bottom: 0; margin-top: 26px; padding: 16px 0 8px; background: linear-gradient(0deg, var(--paper) 60%, transparent); display: flex; align-items: center; gap: 14px; }
   .saved-seal { font-size: 13px; font-weight: 700; color: var(--ok); background: var(--ok-wash); border-radius: 999px; padding: 6px 14px; }
   .muted { color: var(--ink-soft); }
+
+  /* D-062: la plata visible */
+  .billing { color: var(--ink-2); }
+  .billing .waste { color: var(--warn-deep, #9a6b00); font-size: 11.5px; }
+
+  /* D-062: ▶ reproductor del animatic (poses en secuencia) */
+  .player {
+    position: fixed; inset: 0; z-index: 50; background: rgba(15, 12, 9, 0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; cursor: pointer;
+  }
+  .player img { max-height: 78vh; max-width: 92vw; border-radius: var(--r); box-shadow: 0 12px 60px rgba(0,0,0,0.6); }
+  .player-hole { color: #999; font-size: 14px; }
+  .player-bar { display: flex; gap: 16px; color: #ddd; font-size: 13px; }
+  .player-bar .mono { font-family: var(--font-mono); }
+
+  /* D-063: variantes por pose (best-of-N) */
+  .vary {
+    position: absolute; top: 4px; left: 4px; z-index: 2; width: 22px; height: 22px;
+    padding: 0; line-height: 1; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(0,0,0,0.55); color: #fff; font-size: 12px;
+    opacity: 0; transition: opacity 0.12s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+  .pose:hover .vary { opacity: 1; }
+  .vary:hover { background: var(--blue); }
+  .pick-badge {
+    position: absolute; bottom: 22px; right: 4px; z-index: 2; width: 18px; height: 18px;
+    display: grid; place-items: center; border-radius: 50%;
+    background: var(--red); color: #fff; font-size: 11px; box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+  .variants { display: flex; gap: 4px; margin-top: 4px; }
+  .vthumb { padding: 0; border: 2px solid transparent; border-radius: var(--r-sm); overflow: hidden; line-height: 0; box-shadow: none; cursor: pointer; }
+  .vthumb:hover { border-color: var(--red); }
+  .vthumb img { display: block; width: 29px; height: 29px; object-fit: cover; }
 </style>

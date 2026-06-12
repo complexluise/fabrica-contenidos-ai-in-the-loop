@@ -122,6 +122,14 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
 
     Devuelve, por entrada de la cinta: {destino, kf_key, start, start_key, cost}.
     """
+    # D-063: poses ELEGIDAS por el humano entre variantes (pose_picks.yaml).
+    # Mismo patrón que el ancla: la pose elegida entra con key "picked:<nombre>"
+    # -> cambiarla invalida el clip aguas abajo (cascada de cache correcta).
+    pose_picks: dict = {}
+    picks_path = project.dir / "pose_picks.yaml"
+    if picks_path.exists():
+        pose_picks = yaml.safe_load(picks_path.read_text(encoding="utf-8")) or {}
+
     out: list[dict] = []
     prev_destino = None  # destino del plano anterior DEL FILM (fuente del start)
     prev_destino_key = None
@@ -138,7 +146,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
             boundary = await _shot_boundaries(
                 project=project, cfg=cfg, keyframer=keyframer, scene=scene, shot=shot,
                 shot_id=shot_id, idx=idx, transition_in=entry["transition_in"],
-                keyframe_overrides=keyframe_overrides,
+                keyframe_overrides=keyframe_overrides, pose_picks=pose_picks,
                 prev_destino=prev_destino, prev_destino_key=prev_destino_key,
                 scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key, dry=dry)
         except Exception as exc:  # noqa: BLE001 — un still fallido no aborta el run
@@ -152,10 +160,12 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
 
 
 async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx,
-                           transition_in, keyframe_overrides,
+                           transition_in, keyframe_overrides, pose_picks: dict | None = None,
                            prev_destino, prev_destino_key,
                            scene_prev_kf, scene_prev_key, dry: bool = False) -> dict:
     """Las dos poses frontera de UN plano (destino + start). Cacheadas."""
+    from .project import _resolve_under
+    pose_picks = pose_picks or {}
     refs_io = resolve_refs(project.dir, scene.character_refs)
     ref_sig = sorted(str(r) for r in scene.character_refs)
     cost = 0.0
@@ -187,6 +197,11 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
                 framing=kf_ext)
             destino = project.cache_store("keyframes", kf_key, tmp, ".png")
             cost += cfg.style.keyframe.cost_per_image
+    picked = pose_picks.get(f"{shot_id}/destino")
+    if picked:  # D-063: variante elegida por el humano -> manda, con key propia
+        p = _resolve_under(project.dir, picked)
+        if p.exists():
+            destino, kf_key = p, f"picked:{p.name}"
 
     # --- start-still: la pose de apertura, derivada del destino anterior ---
     # La KEY de la cadena sigue al destino previo aunque su archivo falte (dry):
@@ -212,6 +227,11 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
                                        framing=start_ext)
         start = project.cache_store("keyframes", start_key, tmp, ".png")
         cost += cfg.style.keyframe.cost_per_image
+    picked = pose_picks.get(f"{shot_id}/start")
+    if picked:  # D-063: variante elegida -> manda, con key propia (cascada correcta)
+        p = _resolve_under(project.dir, picked)
+        if p.exists():
+            start, start_key = p, f"picked:{p.name}"
 
     return {"destino": destino, "kf_key": kf_key, "start": start,
             "start_key": start_key, "cost": cost}

@@ -983,6 +983,40 @@ checkpoint **Animatic**: la película en stills antes de pagar video. Ver [D-060
 
 ---
 
+## Sprint 6.28 — Gramática de cobertura + palancas de calidad (D-062 + D-063)
+
+**Objetivo:** la auditoría post-primer-corte: cobertura pobre, el 45% del gasto de video tirado en
+bloques de facturación, voz que se cortaría a mitad de palabra, encuadres repetidos — todo invisible.
+Y las palancas de calidad de imagen muertas (el `model` de D-053 sin cablear). Fuente + visibilidad +
+elegir (no solo regenerar). Ver [D-062]/[D-063].
+
+### Acceptance Criteria
+- [x] AC1 — Autor con découpage por clase, dirección de pantalla, duración consciente de facturación
+  y semántica de transiciones (crítico desde D-060). 🔬(prompt)
+- [x] AC2 — Advisories `hero_thin_coverage` / `vo_too_long` / `repeated_framing` /
+  `short_shot_billing` + `billing_summary` (pagado vs usado) en GET /animatic y la página. 🔬
+- [x] AC3 — `▶ Reproducir` el animatic (poses en secuencia con duraciones) — cierra deuda D-061.
+- [x] AC4 — El preset de storyboard pisa `model`/`ref_model` del estilo (cablea la config muerta de
+  D-053); preset `fal-max` (Kontext) elegible por flag/chip. 🔬
+- [x] AC5 — Poses elegibles: `pose_variants` (misma derivación real, seeds distintos) +
+  `record_pose_pick` con key `picked:` → cascada de cache correcta; UI ⊞/★. 🔬
+- [x] AC6 — Verificado sobre esquiva sin gastar: 10 avisos reales (4 heros pobres + 6 escenas
+  pagando bloques) y billing 55s pagados / 30s usados.
+
+### Tasks (orden test-first)
+- [x] T6.28.1 — `tests/test_coverage_quality.py` (red): 4 advisories, billing, override fal-max,
+  pose pick cambia key. 🔬 ✅
+- [x] T6.28.2 — `state.py` (advisories + billing) + `author.py` (cobertura). 🔬 ✅
+- [x] T6.28.3 — `config.py` override + `routing.yaml` fal-max; `runner.py` pose_picks. 🔬 ✅
+- [x] T6.28.4 — `studio.py` (pose_variants/record_pose_pick) + endpoints + `Animatic.svelte`
+  (plata, ▶, variantes). ✅
+- [x] T6.28.5 — ADR D-062 + D-063 + índice. ✅
+
+> **Estado:** core en verde (**322 tests**, +8). Ruta de calidad de video = uso de perfiles
+> existentes: animatic curado → `render --profile fal-standard|prod`.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

@@ -595,19 +595,37 @@ def create_app(projects_dir: Path = Path("projects"),
     async def get_animatic(slug: str):
         """La tira del animatic en SOLO LECTURA (cero costo): poses por plano +
         costo estimado de completar lo que falta. Mismas cache keys que el render."""
+        from ..project import _resolve_under
+        from ..state import billing_summary
         from ..studio import animatic_strip
 
         project, spec, cfg = load(slug)
         strip = await animatic_strip(project, spec, cfg)
         missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
+        # D-063: pool de variantes + la elegida, por pose.
+        def _read_yaml(p: Path) -> dict:
+            return (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
+        pool = _read_yaml(project.dir / "pose_candidates.yaml")
+        picks = _read_yaml(project.dir / "pose_picks.yaml")
         for e in strip:  # paths -> URLs servibles
             e["start"] = file_url(e["start"]) if e["start"] else None
             e["destino"] = file_url(e["destino"]) if e["destino"] else None
+            for which in ("start", "destino"):
+                key = f"{e['shot_id']}/{which}"
+                e[f"{which}_variants"] = [
+                    file_url(_resolve_under(project.dir, p))
+                    for p in (pool.get(key) or [])
+                    if _resolve_under(project.dir, p).exists()
+                ]
+                e[f"{which}_picked"] = key in picks
         return {"strip": strip,
                 "total": len(strip),
                 "ready": sum(1 for e in strip if e["ready"]),
                 "missing_poses": missing,
-                "est_missing_cost_usd": round(missing * cfg.storyboard.est_cost_per_image_usd, 4)}
+                "est_missing_cost_usd": round(missing * cfg.storyboard.est_cost_per_image_usd, 4),
+                # D-062: la plata visible — segundos pagados (bloques del proveedor) vs usados.
+                "billing": billing_summary(spec),
+                "est_cost_per_image_usd": cfg.storyboard.est_cost_per_image_usd}
 
     @app.post("/api/projects/{slug}/animatic")
     async def gen_animatic(slug: str, backend: str | None = None):
@@ -648,6 +666,39 @@ def create_app(projects_dir: Path = Path("projects"),
         if sidecar.exists():
             sidecar.unlink()
         return {"dropped": True, "shot_id": shot_id, "which": which}
+
+    @app.post("/api/projects/{slug}/animatic/{shot_id}/{which}/variants")
+    async def gen_pose_variants(slug: str, shot_id: str, which: str, n: int = 3,
+                                backend: str | None = None):
+        """[D-063] Genera N variantes de UNA pose (best-of-N: elegir, no solo regenerar)."""
+        from .. import studio
+
+        if which not in ("start", "destino"):
+            raise HTTPException(400, "which debe ser 'start' o 'destino'.")
+        project, spec, cfg = load(slug)
+        if backend:
+            from ..config import load_config
+            cfg = load_config(config_dir, spec.style, backend=backend)
+
+        async def coro():
+            paths = await studio.pose_variants(project, spec, cfg, shot_id, which, n=n)
+            return {"variants": len(paths)}
+
+        return jobs.spawn("pose_variants", f"{slug}/{shot_id}/{which}", coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/animatic/{shot_id}/{which}/pick")
+    async def pick_pose(slug: str, shot_id: str, which: str, body: dict):
+        """[D-063] Fija la variante elegida (key `picked:` -> cascada de cache correcta).
+
+        Body: { "path": "<url o ruta de la variante>" }"""
+        from ..studio import record_pose_pick
+
+        project, spec, cfg = load(slug)
+        raw = str(body.get("path") or "")
+        # acepta la URL servida (/files/<slug>/...) o una ruta project-relative
+        rel = raw.split(f"/files/{slug}/", 1)[-1] if f"/files/{slug}/" in raw else raw
+        path = record_pose_pick(project, shot_id, which, Path(rel))
+        return {"saved": str(path), "shot_id": shot_id, "which": which}
 
     @app.post("/api/projects/{slug}/cast")
     async def gen_cast(slug: str, n: int = 4, backend: str | None = None):
