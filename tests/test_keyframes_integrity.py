@@ -224,9 +224,12 @@ def test_signing_advisories_flags_empty_shots_and_unknown_class():
 
 
 def test_signing_advisories_clean_spec_has_none():
-    # "Limpio" también para D-062: el plano usa el bloque de facturación completo (5s).
+    # "Limpio" también para D-062 (bloque completo) y D-072 (el plano de video
+    # declara su frase de movimiento — sin `motion` hay aviso de tweening).
     spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
-        Scene(id="s1", prompt="p", duration_s=5, shots=[Shot(framing="x", duration_s=5)]),
+        Scene(id="s1", prompt="p", duration_s=5,
+              shots=[Shot(framing="x", duration_s=5,
+                          motion="he nods slowly, then holds")]),
     ])
     routing = RoutingConfig(rules={
         "standard": StrategyRule(strategy="router", providers=["k"]),

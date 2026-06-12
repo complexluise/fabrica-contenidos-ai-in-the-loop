@@ -106,7 +106,8 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
     designed = {name: ch for name, ch in spec.characters.items() if ch.design}
     if not designed:
         raise RuntimeError("Ningún personaje tiene 'design:' en project.yaml.")
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
+                                  fmt=spec.format)  # D-071: stills en el formato del spec
     groups: dict[str, list[Path]] = {}
     manifest: dict[str, list[str]] = {}
 
@@ -199,7 +200,8 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
     Todas las (escena x candidato) se lanzan a la vez limitadas por el semaforo.
     fal.ai flux-lora soporta ~10 requests simultaneos en plan Pro; 5 es seguro.
     """
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
+                                  fmt=spec.format)  # D-071: stills en el formato del spec
     sem = asyncio.Semaphore(concurrency)
 
     # Pre-computa metadatos por escena (sincrono, sin I/O)
@@ -285,7 +287,8 @@ async def gen_keyframes_scene(
     if scene is None:
         raise ValueError(f"Escena '{scene_id}' no encontrada en el proyecto.")
 
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
+                                  fmt=spec.format)  # D-071: stills en el formato del spec
     refs = character_refs(scene, spec.characters)
     scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)
@@ -352,7 +355,8 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
         raise RuntimeError(f"Primero elegí el encuadre ancla de '{scene_id}'.")
     anchor = _resolve_under(project.dir, anchor_rel)
 
-    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend)
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
+                                  fmt=spec.format)  # D-071: stills en el formato del spec
     refs = character_refs(scene, spec.characters)
     scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)
@@ -656,7 +660,8 @@ def _animatic_prep(project: Project, spec: ProjectSpec, cfg: Config):
     for scene in spec.scenes:  # refs de personaje, como hace el runner
         scene.character_refs = character_refs(scene, spec.characters)
     keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch",
-                                  backend=cfg.storyboard.keyframe.backend)
+                                  backend=cfg.storyboard.keyframe.backend,
+                                  fmt=spec.format)  # D-071
     return keyframer, overrides
 
 
@@ -686,7 +691,10 @@ async def animatic_strip(project: Project, spec: ProjectSpec, cfg: Config) -> li
             "destino": str(b["destino"]) if b and b["destino"] else None,
             "start_key": b["start_key"] if b else None,   # D-063: identidad de la pose
             "kf_key": b["kf_key"] if b else None,
-            "ready": bool(b and b["start"] and b["destino"]),
+            "lands": shot.lands,            # D-070: solo estos tienen apertura
+            "media": shot.media,            # D-074: still = $0 de video
+            # D-070: cámara-actúa está listo con su destino; lands exige ambas poses.
+            "ready": bool(b and b["destino"] and (b["start"] or not shot.lands)),
         })
     return out
 
@@ -707,6 +715,51 @@ def record_pose_pick(project: Project, shot_id: str, which: str, variant: Path) 
     picks[f"{shot_id}/{which}"] = relativize(project.dir, resolved)
     path.write_text(yaml.safe_dump(picks, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
+
+
+def record_take_pick(project: Project, shot_id: str, take: Path) -> Path:
+    """[D-074] Fija la TOMA elegida de un plano (take_picks.yaml, portable D-044).
+
+    Mismo patrón que pose_picks: la toma elegida entra al render con key
+    `picked:<nombre>` (cache-hit semántico, $0) y manda sobre el ranking del
+    gate — el gate ordena, el humano decide (AI-in-the-Loop)."""
+    resolved = _resolve_under(project.dir, take)
+    if not resolved.exists():
+        raise RuntimeError(f"La toma elegida no existe: {resolved}")
+    path = project.dir / "take_picks.yaml"
+    picks = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+    picks = picks or {}
+    picks[shot_id] = relativize(project.dir, resolved)
+    path.write_text(yaml.safe_dump(picks, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def shot_takes(project: Project, shot_id: str | None = None) -> dict[str, list[dict]]:
+    """[D-074] Las tomas disponibles por plano, leídas del último manifest (barato).
+
+    Devuelve {shot_id: [{video_path, provider, gate_scores, picked}]}: la toma
+    titular primero (la del corte) y luego las alternativas. Para el CLI
+    `takes <slug>` y la UI."""
+    run = project.latest_run()
+    if run is None:
+        return {}
+    manifest = yaml.safe_load(run.manifest_path.read_text(encoding="utf-8")) or {}
+    picks_path = project.dir / "take_picks.yaml"
+    picks = (yaml.safe_load(picks_path.read_text(encoding="utf-8")) or {}) if picks_path.exists() else {}
+    out: dict[str, list[dict]] = {}
+    for entry in manifest.get("scenes", []):
+        sid = entry.get("id")
+        if shot_id and sid != shot_id:
+            continue
+        takes = [{"video_key": entry.get("video_key"), "provider": entry.get("provider"),
+                  "gate_scores": entry.get("gate_scores", {}), "role": "titular"}]
+        for alt in entry.get("alternate_takes", []) or []:
+            takes.append({**alt, "role": "alternativa"})
+        if picks.get(sid):
+            for t in takes:
+                t["picked"] = str(t.get("video_path", "")).endswith(Path(picks[sid]).name)
+        out[sid] = takes
+    return out
 
 
 async def pose_variants(project: Project, spec: ProjectSpec, cfg: Config,

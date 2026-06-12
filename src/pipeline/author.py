@@ -97,10 +97,14 @@ lo ve/oye la audiencia) o [EN] (inglés, alimenta a un modelo de IA):
           "intention": "[ES] la FUNCIÓN dramática del plano: qué hace entender o sentir. Solo la lee el humano.",
           "action": "[EN] what is SEEN (still composition) + what physically happens: subject + action + what enters/leaves frame. NO camera movement here.",
           "duration_s": 3,
+          "motion": "[EN] la frase de MOVIMIENTO para el video (qué se mueve, velocidad, dónde termina). 15-40 palabras, UNA acción.",
+          "lands": "true SOLO si el plano debe ATERRIZAR en su pose final (interpolación, cuesta 3x). Default false.",
+          "media": "video (default) | still — planos contemplativos como imagen fija con push-in ($0 de video).",
+          "takes": "tomas a generar para curaduría (1 default; 2-3 en los hero).",
           "camera": {{
             "size": "ECU|CU|MCU|MS|MLS|LS|ELS|insert",
             "angle": "eye|high|low|overhead|worm|dutch|ots",
-            "move": "static|pan|tilt|push_in|pull_out|track|crane|handheld|zoom",
+            "move": "static|pan|tilt|push_in|pull_out|track|crane|handheld|zoom|orbit",
             "focus": "deep|shallow|rack"
           }},
           "visual": {{
@@ -130,6 +134,10 @@ en inglés, es un ERROR. Los enums (camera/tone/transition) van tal cual.
 
 **`world`** (la biblia, [EN]) — el universo se describe UNA vez y viaja a cada prompt (ingeniería de
 contexto, D-067). Los `prompt` de escena NO re-describen el set: solo lo que esa escena AGREGA.
+Incluí la GRAMÁTICA DE LENTE/ESCALA del mundo (hace que el still parezca un fotograma y no una
+ilustración): tipo de fotografía (macro/35mm...), altura de cámara, profundidad de campo, textura
+de superficie (desgaste, huellas), y las reglas físicas del universo (p.ej. en LEGO: todo
+construible con bricks, los cuerpos no se doblan, los smears son de bricks translúcidos).
 
 **`prompt`** (scene base, [EN]) — lo que la ESCENA agrega al mundo: qué personajes, qué pasa, qué
 atmósfera puntual. Sin re-describir el set (eso vive en `world`), sin diálogo, sin cámara.
@@ -138,6 +146,32 @@ atmósfera puntual. Sin re-describir el set (eso vive en `world`), sin diálogo,
 simples y de UN beat (caer, girar, extender, chocar), siluetas fuertes, causa visible. NO escribas
 interacciones finas de objetos ("atrapa la palabra y el brillo muere entre sus dedos"): el modelo
 improvisa y rompe la coherencia. El impacto emocional va al CORTE y al SONIDO, no a la actuación.
+
+**`motion` (el dialecto de video, D-072 — OBLIGATORIO en planos de video)** — en i2v la imagen ES
+la escena: NO re-describas lo que ya está en el frame (eso produce cámara lenta flotante). `motion`
+dice SOLO qué se mueve, a qué velocidad y dónde termina:
+• UNA acción primaria, presente, transitiva: "the agent jabs his pointing finger forward twice".
+• VELOCIDAD explícita siempre: "quickly", "at normal speed" (sin ella el modelo flota en slow-mo).
+• ENDPOINT siempre: "...then settles into his stance" (movimiento abierto = deriva/morphing).
+• Movimiento secundario opcional (lluvia, chispas) + qué queda quieto: "the set stays static".
+• La acción debe CABER en ~5s físicos. 15-40 palabras. La cámara NO va acá (va en `camera.move`).
+
+**LA CÁMARA ACTÚA (gramática brickfilm/acción, D-070)** — los personajes rígidos no actúan: POSAN.
+La intensidad la ponen la cámara, el corte y el sonido:
+• Bullet-time / momentos congelados: pose extrema sostenida + `camera.move: orbit` (la cámara
+  recorre el instante; nada se mueve). Es el caso MÁS confiable del modelo.
+• Impactos: el corte EN el contacto; la reacción ES el golpe (el plano siguiente muestra la
+  consecuencia); el sonido vende el impacto. No pidas coreografía articulada continua.
+• Emoción con cara fija: ángulo de cámara (low=poder, high=derrota, dutch=caos) + postura
+  (cabeza/torso/brazos) + plano de reacción. La expresión impresa se cambia ENTRE planos, jamás
+  morfea dentro de uno.
+
+**`lands` / `media` / `takes` (la economía del plano, D-070/D-074)** —
+• `lands: true` SOLO donde el plano debe terminar EXACTO en una pose (un agarre, una mano que se
+  abre): cuesta 3x (interpolación real). Casi todo el film va sin lands (cámara-actúa).
+• `media: still` para planos contemplativos (establecimientos, cierres, inserts quietos): la imagen
+  fija con push-in cuesta $0 de video y suele verse MEJOR que un i2v quieto.
+• `takes: 2-3` en los planos hero: se generan variantes y el humano descarta (curaduría > suerte).
 
 **`shots`** — cada plano es un ARTEFACTO (pensá como director de fotografía):
 • `intention` [ES]: la función dramática. Cada plano existe por una razón.

@@ -37,11 +37,27 @@ pura del spec. Tu trabajo es **escribir ese YAML**, no generar nada todavía.
    - `characters` — lista de nombres del banco que aparecen (consistencia).
    - `seed` — `0` por defecto. **Subirlo es un reroll** de esa escena (nueva
      variante, [SPEC §7.2](../../SPEC.md)).
-3. **Declara el banco de personajes** (opcional) en `characters:`. Si una cara hay
+3. **Escribe la biblia del mundo** (`world:`, [EN], D-067): UNA descripción canónica
+   de set/luz/clima/paleta + la gramática de lente/escala + las reglas físicas del
+   universo. Viaja a cada prompt; las escenas solo agregan su delta.
+4. **Por plano, los campos que deciden cómo se genera y cuánto cuesta** (D-070..D-074):
+   - `action` [EN] — la imagen FIJA (el still). `motion` [EN] — **obligatorio en
+     planos de video**: qué se mueve + velocidad explícita + dónde termina
+     ("...then settles"), 15-40 palabras, UNA acción. NO re-describas la escena en
+     `motion` (la imagen ya la tiene; re-describir = cámara lenta flotante).
+   - `lands: true` SOLO si el plano debe ATERRIZAR exacto en su pose (interpolación
+     real, 3x costo). Default: "la cámara actúa" (i2v desde el still elegido;
+     `camera.move: orbit` para bullet-time / momentos congelados).
+   - `media: still` para planos contemplativos (establecimiento, cierre): imagen
+     fija con push-in, $0 de video.
+   - `takes: 2-3` en los hero: variantes para que el humano descarte
+     (`pipeline takes` / `pick-take`).
+5. **Declara el banco de personajes** (opcional) en `characters:`. Si una cara hay
    que **diseñarla**, dale un bloque `design:` y luego usa la skill
    [[bank-casting]]. Si ya tienes una imagen canónica, ponla en `refs:`.
-4. **Música** (opcional): `music: data/track.mp3`.
-5. **Valida**: `uv run pipeline run <slug>` arranca el modo autónomo con caché. Para
+6. **Música**: `music: data/track.mp3` (archivo) o `music_prompt:` [EN] (cama
+   generada una vez y cacheada, D-068).
+7. **Valida**: `uv run pipeline run <slug>` arranca el modo autónomo con caché. Para
    el flujo por etapas (recomendado para video posteable) sigue
    [[bank-casting]] → [[keyframe-best-of-n]].
 
@@ -51,7 +67,10 @@ pura del spec. Tu trabajo es **escribir ese YAML**, no generar nada todavía.
 project: spot-agua             # = slug
 style: lego                    # config/styles/<style>.yaml
 format: "9:16"                 # 9:16 | 1:1 | 16:9
-# music: data/fondo.mp3        # opcional
+world: "ONE sunlit LEGO city plaza, macro toy photography at minifig eye level,
+  shallow depth of field, worn plastic with fingerprints; everything buildable
+  from real bricks, minifig bodies never bend"            # la biblia (D-067/D-070)
+music_prompt: "warm upbeat marimba, hopeful build"        # o music: data/fondo.mp3
 characters:                    # opcional — banco para consistencia
   mascota:
     design:                    # cara a DISEÑAR -> ver skill bank-casting
@@ -59,15 +78,20 @@ characters:                    # opcional — banco para consistencia
       refs: [data/sujeto.jpeg, data/lego_ref.jpg]   # sujeto + referencia de estilo
 scenes:
   - id: s1
-    prompt: "Plano general de una ciudad LEGO al amanecer, calles vacías"
+    prompt: "empty streets at dawn, the plaza waking up"  # solo el DELTA sobre world
     duration_s: 5
     class: standard
-    seed: 0
-  - id: s2
-    prompt: "La mascota LEGO juega en un parque al atardecer, plano medio"
-    duration_s: 5
-    characters: [mascota]
-    seed: 0
+    shots:
+      - action: "Wide on the empty plaza, long morning shadows"
+        media: still           # establecimiento = still con push-in ($0 de video)
+        duration_s: 2
+        camera: {size: LS, move: push_in}
+      - action: "The mascot mid-jump over a puddle, water drops frozen as trans bricks"
+        motion: "The mascot leaps over the puddle quickly, drops scattering,
+          then lands and holds the pose"                  # dialecto D-072
+        takes: 2               # variantes para descarte humano (D-074)
+        duration_s: 3
+        camera: {size: MS, angle: low}
 ```
 
 ## Errores comunes

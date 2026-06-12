@@ -62,4 +62,23 @@ async def test_strip_shows_picked_anchor_as_destino(tmp_path):
     strip = await animatic_strip(proj, _spec(), cfg)
     s1 = next(e for e in strip if e["shot_id"] == "s1")
     assert s1["destino"] and s1["destino"].endswith("anchor.png")  # el ancla elegida
-    assert s1["start"] is None and s1["ready"] is False  # falta la pose de apertura
+    # D-070 (cámara-actúa): sin `lands`, el destino ES el plano -> listo sin apertura.
+    assert s1["start"] is None and s1["ready"] is True
+
+
+async def test_strip_lands_shot_requires_both_poses(tmp_path):
+    """D-070: un plano `lands` (interpola) NO está listo solo con el destino."""
+    proj = _project(tmp_path)
+    anchor = proj.cache_dir / "keyframes" / "anchor.png"
+    anchor.write_bytes(b"\x89PNG")
+    proj.selections_path.write_text(
+        yaml.safe_dump({"s1": "cache/keyframes/anchor.png"}), encoding="utf-8")
+    cfg = load_config(CONFIG_DIR, "lego")
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="a", duration_s=2,
+              shots=[Shot(action="x", duration_s=2, lands=True)]),
+    ])
+    strip = await animatic_strip(proj, spec, cfg)
+    s1 = strip[0]
+    assert s1["lands"] is True
+    assert s1["destino"] and s1["start"] is None and s1["ready"] is False

@@ -1089,6 +1089,37 @@ por duración (≤2.5s = i2v sin interpolar), corrida con animatic primero. Ver 
 
 ---
 
+## Sprint 6.32 — El motor que SÍ llega al servidor (D-070..D-074)
+
+**Objetivo:** corregir las tres fallas mecánicas verificadas contra la doc de fal y los clips
+pagados (el end-frame nunca se ejecutó — fal ignora parámetros desconocidos; la cadena de aspecto
+producía un reel ~44% mutilado; los prompts de video re-describían la escena = tweening), y
+construir las capas que separan a los top creators: dialecto de movimiento, finishing $0 y
+economía de tomas. Ver [D-070]–[D-074].
+
+### Acceptance Criteria
+- [x] AC1 — End-frame REAL: capability `end_frame` + provider `kling_pro` (`tail_image_url`);
+  `FalProvider` se niega a subir end-frame a un modelo incapaz. `shot.lands` explícito reemplaza
+  a `is_anchored`; aperturas SOLO para planos lands; `pick_end_frame_provider` enruta
+  (subset → más barato global → degradar con warning). 🔬
+- [x] AC2 — 9:16 de punta a punta: `image_size_args` por familia de modelo; `fmt` en
+  `KeyframeGenerator` (runner/studio/cli); aspecto en cache key y en el request de video. 🔬
+- [x] AC3 — Dialecto de movimiento: `shot.motion` + `compose_video_prompt` motion-only (cámara
+  primero, endpoint garantizado, `orbit` para bullet-time); `video_negative_prompt`; `cfg_scale`;
+  advisories `shot_missing_motion` y `lands_unroutable`. 🔬
+- [x] AC4 — Finishing $0: `finish.py` (cadena balance→look→vignette→halation→sharpen→grano +
+  loudnorm two-pass -14 LUFS) + bloque `finish:` del estilo + `shot.speed`; best-effort siempre. 🔬
+- [x] AC5 — Economía de tomas: `shot.takes` (N tomas cacheadas, `rank_takes` del gate, humano
+  manda vía `take_picks.yaml` / CLI `takes`+`pick-take`); `shot.media: still` con Ken Burns. 🔬
+- [ ] AC6 — Smoke real de esquiva con el motor nuevo (animatic 9:16 → visto bueno → video).
+  Pendiente de autorización del usuario (presupuesto).
+
+> **Estado:** core en verde (**370 tests**). El paradigma pasa de "interpolar todo" (que nunca
+> ocurrió) a "la cámara actúa" con aterrizajes opt-in. NOTA: las cache keys cambian globalmente
+> (prompts, aspecto, lands) — la próxima corrida regenera todo.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

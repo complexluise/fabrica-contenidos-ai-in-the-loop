@@ -159,6 +159,24 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
         # D-068: el aviso short_shot_billing se RETIRA — empujaba planos largos y
         # ritmo lento. Las duraciones del autor son de EDICIÓN; el bloque del
         # proveedor es COBERTURA. El pagado-vs-usado vive como INFO en el animatic.
+        # D-072: plano de video sin `motion` -> el prompt de video cae al fallback
+        # legacy (re-describir la escena), la causa #1 documentada del tweening.
+        for i, sh in enumerate(shots, start=1):
+            if sh.media == "video" and not sh.motion:
+                out.append({"scene": s.id, "kind": "shot_missing_motion",
+                            "msg": f"el plano {i} no define 'motion'; el video recibirá la "
+                                   "re-descripción de la escena (tweening lento). Escribí la "
+                                   "frase de movimiento (qué se mueve, velocidad, dónde termina)."})
+    # D-070: planos `lands` (interpolación real) sin NINGÚN provider end_frame
+    # configurado -> degradarían a cámara-actúa en el render; mejor saberlo al firmar.
+    any_end_frame = any("end_frame" in p.capabilities for p in providers.values())
+    if not any_end_frame:
+        for s in spec.scenes:
+            if any(sh.lands for sh in effective_shots(s)):
+                out.append({"scene": s.id, "kind": "lands_unroutable",
+                            "msg": "tiene planos 'lands' (aterrizan en su pose) pero ningún "
+                                   "provider configurado soporta end-frame (capability "
+                                   "'end_frame', p.ej. kling_pro); degradarían a i2v libre."})
     # D-062: encuadre repetido en cortes consecutivos, a través de TODO el film.
     film = [(s.id, sh) for s in spec.scenes for sh in effective_shots(s)]
     for (_, prev), (sid, cur) in zip(film, film[1:]):
@@ -188,11 +206,14 @@ def _block_paid(duration_s: float, block_s: float = BILLING_BLOCK_S) -> float:
 def billing_summary(spec: ProjectSpec, block_s: float = BILLING_BLOCK_S) -> dict:
     """Segundos pagados vs usados de todo el film (D-062): la plata visible.
 
-    `paid_s` = bloques del proveedor por plano; `used_s` = lo que queda en el corte."""
+    `paid_s` = bloques del proveedor por plano x TOMAS (D-074); los planos
+    `media: still` no pagan video ($0, Ken Burns); `used_s` = lo que queda en
+    el corte (los stills sí cuentan: ocupan tiempo de película)."""
     from .project import effective_shots
     shots = [sh for s in spec.scenes for sh in effective_shots(s)]
     used = sum(sh.duration_s for sh in shots)
-    paid = sum(_block_paid(sh.duration_s, block_s) for sh in shots)
+    paid = sum(_block_paid(sh.duration_s, block_s) * max(1, sh.takes)
+               for sh in shots if sh.media == "video")
     return {"paid_s": paid, "used_s": used, "wasted_s": round(paid - used, 2)}
 
 

@@ -174,11 +174,23 @@ def _shot_to_dict(sh: Shot) -> dict:
         d["intention"] = sh.intention
     if sh.action:  # D-047: que se ve (visual primario)
         d["action"] = sh.action
+    if sh.motion:  # D-072: la frase de movimiento del video (dialecto i2v)
+        d["motion"] = sh.motion
     if sh.framing:  # legacy/fallback
         d["framing"] = sh.framing
     d["duration_s"] = _num(sh.duration_s)
     if sh.seed:
         d["seed"] = sh.seed
+    if sh.lands:  # D-070: el plano aterriza en su pose (interpolación real)
+        d["lands"] = True
+    if sh.media != "video":  # D-074: still con Ken Burns ($0 de video)
+        d["media"] = sh.media
+    if sh.takes != 1:  # D-074: tomas para curaduría
+        d["takes"] = sh.takes
+    if sh.speed:  # D-073: conformado de velocidad del clip
+        d["speed"] = sh.speed
+    if sh.cfg_scale is not None:  # D-072: adherencia del modelo de video
+        d["cfg_scale"] = sh.cfg_scale
     if not sh.camera.is_default():  # D-047: gramatica de camara
         d["camera"] = _camera_to_dict(sh.camera)
     if not sh.visual.is_empty():  # D-047: estructura visual de Block

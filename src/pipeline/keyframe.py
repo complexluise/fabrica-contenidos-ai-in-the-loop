@@ -42,6 +42,34 @@ def _extract_image_bytes(response) -> bytes | None:
     return None
 
 
+# D-071: el formato del spec viaja a la generación de imagen. Sin esto los
+# stills salían en el default del modelo (Kontext: 1024x1024 CUADRADO) para un
+# film 9:16 → el video heredaba el cuadrado y el reframe recortaba ~44% de cada
+# composición. Dos dialectos de tamaño en fal:
+#   - familia flux clásica (flux-lora, flux/dev...): `image_size` (enum)
+#   - kontext / nano-banana (editores):              `aspect_ratio` ("9:16")
+# fal ignora en silencio los parámetros desconocidos (la lección de D-070), así
+# que mandar la key equivocada = quedarse en cuadrado sin enterarse.
+_IMAGE_SIZE_BY_FMT = {
+    "9:16": "portrait_16_9",
+    "16:9": "landscape_16_9",
+    "1:1": "square_hd",
+}
+_ASPECT_MODELS = ("kontext", "nano-banana")
+# Ratios que los editores (kontext/nano-banana) aceptan en su enum.
+_KNOWN_RATIOS = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "9:21"}
+
+
+def image_size_args(model: str, fmt: str) -> dict:
+    """Args de tamaño/aspecto para el modelo de imagen según su familia (pura).
+
+    Formato no mapeable -> {} (no romper; el modelo usa su default)."""
+    if any(tag in model for tag in _ASPECT_MODELS):
+        return {"aspect_ratio": fmt} if fmt in _KNOWN_RATIOS else {}
+    size = _IMAGE_SIZE_BY_FMT.get(fmt)
+    return {"image_size": size} if size else {}
+
+
 def build_styled_prompt(scene: Scene, style: StyleConfig, framing: str = "",
                         world: str | None = None) -> str:
     """Inyecta el prompt de la escena (+ el framing del plano) en el template de estilo.
@@ -64,11 +92,12 @@ class KeyframeGenerator:
     """
 
     def __init__(self, style: StyleConfig, out_dir: Path = Path("out/keyframes"),
-                 backend: str | None = None):
+                 backend: str | None = None, fmt: str = "9:16"):
         self.style = style
         self.out_dir = out_dir
         # backend explicito (toggle) o el del estilo (fal por defecto).
         self.backend = (backend or style.keyframe.backend or "fal").lower()
+        self.fmt = fmt  # D-071: el formato del spec gobierna el tamaño del still
         out_dir.mkdir(parents=True, exist_ok=True)
 
     async def generate(self, scene: Scene, ref_images: list[Path] | None = None,
@@ -122,8 +151,15 @@ class KeyframeGenerator:
                 data=Path(p).read_bytes(), mime_type="image/png"))
 
         config = None
-        try:  # seed es best-effort: si el SDK/modelo no lo acepta, igual genera
-            config = types.GenerateContentConfig(seed=seed) if seed is not None else None
+        try:  # seed/aspecto best-effort: si el SDK/modelo no los acepta, igual genera
+            kwargs: dict = {}
+            if seed is not None:
+                kwargs["seed"] = seed
+            try:  # D-071: aspecto del spec también en Gemini (SDKs nuevos)
+                kwargs["image_config"] = types.ImageConfig(aspect_ratio=self.fmt)
+            except Exception:  # noqa: BLE001 — SDK sin ImageConfig: sin aspecto
+                pass
+            config = types.GenerateContentConfig(**kwargs) if kwargs else None
         except Exception:  # noqa: BLE001
             config = None
 
@@ -146,7 +182,8 @@ class KeyframeGenerator:
         key = get_settings().require("fal_key", "keyframe con referencia de personaje")
         client = fal_client.AsyncClient(key=key)
         urls = [await client.upload_file(str(p)) for p in ref_images]
-        arguments = {"prompt": prompt, "image_urls": urls}
+        arguments = {"prompt": prompt, "image_urls": urls,
+                     **image_size_args(self.style.keyframe.ref_model or "", self.fmt)}
         if seed is not None:
             arguments["seed"] = seed
         result = await asyncio.wait_for(
@@ -166,7 +203,7 @@ class KeyframeGenerator:
         client = fal_client.AsyncClient(key=key)
 
         kf = self.style.keyframe
-        arguments: dict = {"prompt": prompt}
+        arguments: dict = {"prompt": prompt, **image_size_args(kf.model, self.fmt)}
         if seed is not None:
             arguments["seed"] = seed
         if self.style.negative_prompt:

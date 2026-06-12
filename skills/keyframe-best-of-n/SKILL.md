@@ -38,7 +38,11 @@ uv run pipeline keyframes <slug> --n 4
 #    puedes elegir unas escenas ahora y el resto luego.
 uv run pipeline pick <slug> s1=2 s2=0 s3=1
 
-# 4. Renderiza el video con los keyframes elegidos
+# 3.5 (opcional, recomendado) El film entero en poses ANTES de pagar video (D-060/D-070)
+uv run pipeline animatic <slug>
+
+# 4. Renderiza el video con los keyframes elegidos. El elegido ES el frame-0 del
+#    clip ("la cámara actúa", D-070); los planos `lands: true` interpolan hacia él.
 uv run pipeline render <slug>
 ```
 
