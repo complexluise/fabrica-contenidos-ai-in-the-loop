@@ -137,6 +137,8 @@ def render_guion(spec: ProjectSpec, planos: list[dict]) -> str:
     # --- onboarding + definiciones (al final) ---
     L += ["## Cómo está organizado", "",
           "- **media/** — los videos + las voces (mismo nombre = mismo plano) + la música.",
+          "- **takes/** — tomas ALTERNATIVAS del ensemble (elegí la mejor, no te cases con una).",
+          "- **descripciones.yaml** — notas de visionado de la IA por plano (usable / en-mensaje / roto).",
           "- **frames/** — la imagen base (keyframe) de cada plano.",
           "- **rough_cut.mp4** — cómo proponemos el orden y el ritmo (NO es el corte final).",
           "- **subtitulos.srt** — subtítulos ya sincronizados.", "",
@@ -243,6 +245,23 @@ def export_bundle(project: Project, spec: ProjectSpec) -> Path:
         kf = p.get("keyframe_path")
         if kf and Path(kf).exists():  # el keyframe, en frames/
             shutil.copyfile(kf, frames / f"{base}.png")
+
+    # D-069: las TOMAS ALTERNATIVAS del ensemble (pagadas y conservadas, D-068)
+    # van al bundle — el editor humano elige entre tomas reales, no recibe una sola.
+    takes_dir = export_dir / "takes"
+    for p in planos:
+        for i, take in enumerate(p.get("alternate_takes") or []):
+            tp = Path(take.get("video_path", ""))
+            if tp.exists():
+                takes_dir.mkdir(parents=True, exist_ok=True)
+                prov = take.get("provider", "alt")
+                shutil.copyfile(tp, takes_dir / f"{p['base']}_take{i + 2}_{prov}.mp4")
+
+    # D-069: las notas del describe (Haiku: usable/en-mensaje/roto) viajan con el
+    # material — son las notas de visionado del editor. Best-effort.
+    desc = project.dir / "descriptions.yaml"
+    if desc.exists():
+        shutil.copyfile(desc, export_dir / "descripciones.yaml")
 
     if spec.music and Path(spec.music).exists():
         shutil.copyfile(spec.music, media / f"music{Path(spec.music).suffix}")

@@ -24,6 +24,18 @@ su prompt. Responde SOLO JSON: {{"aesthetic":0-1,"char_consistency":0-1,"clip_ad
 Prompt de la escena: {prompt}
 """
 
+_MOTION_PROMPT = """Eres control de calidad de video IA. Ves {n} frames de UN clip en ORDEN
+CRONOLÓGICO. Evalúa el MOVIMIENTO además de la imagen. Responde SOLO JSON:
+{{"aesthetic":0-1,"char_consistency":0-1,"clip_adherence":0-1,"artifacts":0-1,"reason":""}}
+- aesthetic: calidad visual de los frames.
+- char_consistency: ¿los personajes/set son LOS MISMOS en los 3 frames? (deriva de identidad,
+  vestuarios que cambian, caras que se funden = bajo).
+- clip_adherence: ¿la ACCIÓN entre frames respeta el prompt? (movimiento con propósito = alto;
+  morphing gomoso, deslizamiento sin física, congelado = bajo).
+- artifacts: 0 limpio, 1 roto (extremidades extra, fundidos, glitches entre frames).
+Prompt de la escena: {prompt}
+"""
+
 _DEFAULT_MODEL = "claude-haiku-4-5-20251001"  # barato; el perfil prod usa Opus
 
 
@@ -46,6 +58,51 @@ class VLMSignal:
 
     def __init__(self, vlm_model: str | None = _DEFAULT_MODEL):
         self._model = vlm_model  # None -> señal deshabilitada
+
+    async def score_frames(self, frames: list[Path], scene: Scene) -> dict:
+        """D-069: juzga el CLIP viendo los frames cronológicos (movimiento incluido)."""
+        if not self._model:
+            return {}
+        prompt = _MOTION_PROMPT.format(n=len(frames), prompt=scene.prompt[:600])
+        if self._model.startswith("gemini"):
+            return await self._judge_google_frames(frames, prompt)
+        key = get_settings().anthropic_api_key
+        if not key:
+            return {}
+        try:
+            import anthropic
+        except ImportError:  # pragma: no cover
+            return {}
+        client = anthropic.Anthropic(api_key=key)
+        msg = client.messages.create(
+            model=self._model,
+            max_tokens=300,
+            messages=[{
+                "role": "user",
+                "content": [*(_image_block(f) for f in frames),
+                            {"type": "text", "text": prompt}],
+            }],
+        )
+        metrics, _reason = parse_judge_metrics(msg.content[0].text)
+        return metrics
+
+    async def _judge_google_frames(self, frames: list[Path], prompt: str) -> dict:
+        """Multi-frame por Gemini (perfil gemini-budget). I/O (smoke)."""
+        key = get_settings().google_api_key
+        if not key:
+            return {}
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError:  # pragma: no cover
+            return {}
+        client = genai.Client(api_key=key)
+        parts = [types.Part.from_bytes(data=f.read_bytes(), mime_type="image/png")
+                 for f in frames]
+        resp = client.models.generate_content(
+            model=self._model, contents=[*parts, prompt])
+        metrics, _reason = parse_judge_metrics(resp.text or "")
+        return metrics
 
     async def score(self, frame: Path, scene: Scene) -> dict:
         if not self._model:

@@ -25,3 +25,16 @@ def extract_frame(video_path: Path, at_seconds: float = 1.0) -> Path:
         check=True, capture_output=True,
     )
     return out
+
+
+def frame_times(duration_s: float) -> list[float]:
+    """Tiempos de muestreo para que el gate VEA el movimiento (D-069). Pura.
+
+    3 muestras (inicio/medio/fin, lejos de los bordes) — suficiente para detectar
+    morphing, deriva de identidad y movimiento roto sin pagar un video-LLM.
+    Clips cortísimos: una sola muestra central."""
+    if duration_s < 1.2:
+        return [round(duration_s / 2, 3)]
+    a = max(0.3, duration_s * 0.1)
+    c = min(duration_s - 0.3, duration_s * 0.9)
+    return [round(a, 3), round(duration_s / 2, 3), round(c, 3)]

@@ -88,6 +88,19 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
     }
 
 
+ACTION_MAX_S = 2.5  # D-069: hasta aquí un plano es ACCIÓN (i2v libre, sin interpolar)
+
+
+def is_anchored(duration_s: float) -> bool:
+    """D-069: ¿el plano interpola al destino (anclado) o corre libre (acción)?
+
+    La interpolación start→destino da movimiento "tweening" — perfecto para
+    gestos y diálogo, flotante y sin peso para impactos. Los planos de acción
+    (≤{ACTION_MAX_S}s, las duraciones de edición de D-068) generan i2v LIBRE
+    desde la apertura: el modelo pone la dinámica, el prompt el movimiento."""
+    return duration_s > ACTION_MAX_S
+
+
 def effective_voice(scene, shot) -> str | None:
     """Voz efectiva del plano (D-065): plano > escena. Dos hablantes pueden convivir
     en una escena (plano/contraplano) con su propia voz cada uno. Pura."""
@@ -295,6 +308,13 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
     # template de estilo + la biblia del mundo (antes le llegaba el prompt crudo:
     # Kling nunca supo que esto era toy photography). El negative también viaja.
     eff_prompt = build_styled_prompt(scene, cfg.style, video_ext, world=spec.world)
+    # D-069: plano de ACCIÓN -> i2v libre desde la apertura (sin end anchor);
+    # plano largo -> interpolación al destino (como D-060). El trim acompaña:
+    # libre conserva la CABEZA (la acción arranca ya), anclado conserva la cola.
+    anchored = is_anchored(shot.duration_s)
+    if not anchored and start_frame is not None:
+        keyframe, kf_key = start_frame, chain_key or kf_key  # la apertura es el init
+        start_frame = None
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,

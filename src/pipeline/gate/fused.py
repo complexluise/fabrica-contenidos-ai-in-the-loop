@@ -9,7 +9,7 @@ ninguna señal disponible, gate permisivo (no bloquea smokes locales).
 from __future__ import annotations
 
 from ..contracts import GateReport, GenResult, Scene
-from .frames import extract_frame
+from .frames import extract_frame, frame_times
 from .fusion import build_report, enforce_verdict, fuse_signals
 from .vlm import VLMSignal
 
@@ -52,7 +52,14 @@ class FusedGate:
     async def evaluate(self, scene: Scene, result: GenResult) -> GateReport:
         thresholds = self._thresholds_for(scene)
         try:
-            frame = extract_frame(result.video_path)
+            # D-069: el gate deja de ser ciego al movimiento — 3 muestras
+            # cronológicas del clip; el VLM las ve TODAS (morphing/deriva/
+            # movimiento roto), las señales de frame único reciben la del medio.
+            from ..assemble import _probe_duration
+            dur = _probe_duration(result.video_path)
+            times = frame_times(dur) if dur else [1.0]
+            frames = [extract_frame(result.video_path, t) for t in times]
+            frame = frames[len(frames) // 2]
         except Exception as exc:
             return GateReport(passed=True, reason=f"gate permisivo (sin frame: {exc})")
 
@@ -60,7 +67,10 @@ class FusedGate:
         used: list[str] = []
         for sig in self.signals:
             try:
-                metrics = await sig.score(frame, scene)
+                if hasattr(sig, "score_frames"):
+                    metrics = await sig.score_frames(frames, scene)
+                else:
+                    metrics = await sig.score(frame, scene)
             except Exception:
                 continue
             if metrics:

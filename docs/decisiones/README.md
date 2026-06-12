@@ -105,3 +105,4 @@ es continua entre archivos.
 | D-066 | Timeouts duros en todo fal + fallos best-effort visibles (nada cuelga, nada muere mudo) | Vigente |
 | D-067 | Ingeniería de contexto: biblia del mundo + estilo al video + referencias con nombre | Vigente |
 | D-068 | La edición entra al flujo: cobertura conservada + ritmo de edición + música por defecto (corrige D-062) | Vigente |
+| D-069 | Juicio del movimiento y corte humano: gate multi-frame + acción libre + export como sala de edición | Vigente |

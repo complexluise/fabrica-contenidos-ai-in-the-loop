@@ -372,3 +372,24 @@ def test_music_prompt_roundtrips_in_spec():
                            "scenes": [{"id": "s1", "prompt": "p", "duration_s": 4}]}, "t")
     assert spec.music_prompt == "dark tense electronic pulse"
     assert spec_to_dict(spec)["music_prompt"] == "dark tense electronic pulse"
+
+
+# --- D-069: acción libre por duración + gate que VE el movimiento -------------
+
+def test_is_anchored_heuristic():
+    """Planos de acción (≤2.5s) generan i2v LIBRE (el modelo pone la dinámica);
+    los largos (gestos/diálogo) interpolan al destino. Cae de las duraciones
+    de edición (D-068): cero campos nuevos."""
+    from pipeline.runner import is_anchored
+    assert is_anchored(4.0) is True    # gesto/diálogo -> interpola al destino
+    assert is_anchored(2.5) is False   # impacto/acción -> i2v libre desde la apertura
+    assert is_anchored(1.5) is False
+
+
+def test_gate_frame_times_sample_motion():
+    """El gate deja de ser ciego al movimiento: 3 muestras (inicio/medio/fin)."""
+    from pipeline.gate.frames import frame_times
+    ts = frame_times(5.0)
+    assert len(ts) == 3 and ts[0] < ts[1] < ts[2]
+    assert ts[0] >= 0.3 and ts[2] <= 4.7  # evita frames negros de borde
+    assert frame_times(0.8) == [0.4]      # clip cortísimo: una sola muestra
