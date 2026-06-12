@@ -68,3 +68,6 @@ _recut/
 
 # Capturas de auditoria UX (material de trabajo)
 _ux_shots/
+
+# Scripts efimeros de migracion (nunca commitear)
+_mig_*.py
