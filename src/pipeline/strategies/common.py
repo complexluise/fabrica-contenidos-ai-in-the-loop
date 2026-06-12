@@ -14,23 +14,30 @@ def eligible_providers(scene: Scene, providers: list) -> list:
 def scene_to_request(scene: Scene) -> GenRequest:
     """Escena/plano -> request del provider.
 
-    D-059 (cinta pixel-real): si el plano trae `start_frame` (el último frame real
-    del clip anterior), el clip INTERPOLA start→end y el keyframe elegido es el
-    DESTINO (`end_image`), no el frame-0. Sin cadena (corte o primer plano), el
-    keyframe entra como `init_image` (comportamiento clásico)."""
+    D-070 (corrige D-059): si el plano trae `start_frame` (apertura de un plano
+    `lands`), el clip INTERPOLA start→end — y el runner garantiza que el
+    provider tenga capability `end_frame` (el end-frame REAL: `tail_image_url`
+    de Kling PRO; los demás lo ignoraban en silencio). Sin apertura, el destino
+    elegido entra como `init_image` (cámara-actúa).
+    D-071/D-072: el formato del spec y el cfg_scale del plano viajan también."""
+    extras = dict(
+        negative_prompt=scene.negative_prompt,
+        cfg_scale=scene.cfg_scale,
+        seed=scene.seed,
+    )
+    if scene.aspect:
+        extras["aspect_ratio"] = scene.aspect
     if scene.start_frame is not None:
         return GenRequest(
             prompt=scene.prompt,
             duration_s=scene.duration_s,
             init_image=scene.start_frame,
             end_image=scene.keyframe,
-            negative_prompt=scene.negative_prompt,
-            seed=scene.seed,
+            **extras,
         )
     return GenRequest(
         prompt=scene.prompt,
         duration_s=scene.duration_s,
         init_image=scene.keyframe,
-        negative_prompt=scene.negative_prompt,
-        seed=scene.seed,
+        **extras,
     )

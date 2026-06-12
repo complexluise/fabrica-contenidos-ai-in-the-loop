@@ -133,11 +133,17 @@ class Visual(BaseModel):                         # estructura visual (Bruce Bloc
 class Shot(BaseModel):                          # plano = ARTEFACTO audiovisual (D-028/D-047)
     intention: str | None = None               # función dramática — [ES] (solo la lee el humano)
     action: str | None = None                  # qué SE VE (imagen fija) — [EN]; visual primario
+    motion: str | None = None                  # la frase de MOVIMIENTO del video — [EN] (dialecto i2v, D-072)
     duration_s: float
-    camera: Camera = Camera()                  # gramática (size/angle/focus → keyframe; move → video)
+    camera: Camera = Camera()                  # gramática (size/angle/focus → keyframe; move → video; +orbit D-070)
     visual: Visual = Visual()                  # estructura de Block — [EN]
     transition: "cut|match_cut|dissolve|smash_cut|wipe" | None = None
     seed: int = 0                              # reroll del plano (cache miss solo en este plano)
+    lands: bool = False                        # aterriza EXACTO en su pose → interpolación real (D-070, 3x costo)
+    media: "video|still" = "video"             # still = Ken Burns sobre el destino, $0 de video (D-074)
+    takes: int = 1                             # tomas para curaduría (gate ordena, humano elige; D-074)
+    speed: float | None = None                 # conformado de velocidad 1.1-1.3x (flotación AI, D-073)
+    cfg_scale: float | None = None             # adherencia del modelo de video (D-072)
     voiceover: str | None = None               # lo que SE OYE: narración o la línea hablada — [ES] (TTS+mux, D-057)
     caption: str | None = None                 # texto en pantalla — [ES]
     sfx: str | None = None                     # sonido de la acción — [EN] (V2A MMAudio, D-034)
@@ -169,17 +175,34 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
 # la narrativa (D-046, `prompt_compile`). IDIOMA (D-050): lo que ve/oye la audiencia → [ES]; lo que
 # alimenta a los modelos de IA → [EN]. Ver D-046/D-047/D-048/D-050.
 #
-# ANIMATIC DE POSES FRONTERA (D-060, revisa D-059): el keyframe es el frame-DESTINO del plano
-# (donde el clip ATERRIZA), no el frame-0. Cada plano queda definido por DOS poses generadas:
-# el START-STILL (la apertura — derivado editando el destino del plano ANTERIOR del film, cruzando
-# escenas → continuidad de ELEMENTOS incluso en cortes; la `transition` de entrada modula el
-# reencuadre) y el DESTINO (el ancla elegida / cadena D-048). El video es puro INTERCALADO
-# start→destino (Kling `image_url` + `end_image_url`) y corre EN PARALELO (D-039): Fase A stills
-# (centavos, secuencial) + Fase B clips (paralelo). El trim conserva la COLA (el aterrizaje vive
-# en el último frame). La key del clip incluye la key de su start-still → la cascada de cache se
-# acota al nivel barato. Checkpoint `pipeline animatic`: la película en poses ANTES de pagar video.
+# "LA CÁMARA ACTÚA" (D-070, corrige la ejecución de D-059/D-060): el modo DEFAULT de cada plano
+# es i2v LIBRE desde su DESTINO elegido (el still del humano ES el frame-0) con el prompt moviendo
+# cámara/sujeto — gramática brickfilm: el personaje POSA, la cámara actúa (`orbit` = bullet-time).
+# El trim conserva la CABEZA. `shot.lands: true` (opt-in, puesta en escena) interpola DE VERDAD
+# apertura→destino vía un provider con capability `end_frame` (Kling 2.1 PRO `tail_image_url`,
+# 3x el costo) y el trim conserva la COLA. LECCIÓN D-070: fal IGNORA EN SILENCIO los parámetros
+# desconocidos — el `end_image_url` de D-059 nunca existió en ningún endpoint y la interpolación
+# jamás se ejecutó; verificar cada parámetro contra el endpoint EXACTO antes de confiar en él.
+#
+# ANIMATIC (D-060/D-070): las APERTURAS solo existen para planos `lands`; el resto del animatic
+# son los destinos encadenados (D-048/D-064, intactos). Fase A stills (centavos) + Fase B clips
+# (paralelo, D-039). Checkpoint `pipeline animatic`: la película en poses ANTES de pagar video.
 # UX en etapas (D-061, una página = una decisión): Guion → Storyboard → Casting → Encuadres →
 # Animatic → Producción. El Studio refleja esto en páginas separadas con costo visible en cada una.
+#
+# DIALECTO DE MOVIMIENTO (D-072): el prompt de VIDEO no re-describe la escena (la imagen ES la
+# escena; re-describirla = tweening lento documentado). `shot.motion` (qué se mueve, velocidad,
+# endpoint) + instrucción de cámara SIEMPRE explícita. El mundo/estilo (D-067) viajan a los STILLS;
+# al video viaja solo el movimiento + `video_negative_prompt` (artefactos de tiempo) + `cfg_scale`.
+#
+# FORMATO (D-071): `spec.format` viaja a TODA generación (stills `image_size`/`aspect_ratio` por
+# familia de modelo; video `aspect_ratio`) y a las cache keys. La cadena rota producía stills
+# 1024x1024 → video 960x960 → reframe que mutilaba ~44% de cada composición en un reel 9:16.
+#
+# ECONOMÍA DE TOMAS (D-074): `shot.takes` genera N tomas (cacheadas por seed); el gate las ORDENA
+# (ranker, no juez) y `take_picks.yaml` deja mandar al humano. `shot.media: still` = Ken Burns
+# sobre el destino ($0 de video). FINISHING (D-073): el film concatenado pasa por el "film stock"
+# del estilo (grade → vignette → halation → grano temporal → loudnorm two-pass -14 LUFS), ffmpeg, $0.
 
 # --- Contrato de generación (lo que ve CUALQUIER provider) -----------------
 class GenRequest(BaseModel):
@@ -187,7 +210,8 @@ class GenRequest(BaseModel):
     duration_s: float
     aspect_ratio: str = "9:16"
     init_image: Path | None = None             # frame inicial (image-to-video)
-    end_image: Path | None = None              # frame final/DESTINO (D-059); interpola start→end
+    end_image: Path | None = None              # frame final/DESTINO; SOLO providers `end_frame` (D-070)
+    cfg_scale: float | None = None             # adherencia al prompt (D-072); None = default del modelo
     ref_images: list[Path] = []                # consistencia de personaje
     seed: int | None = None
 

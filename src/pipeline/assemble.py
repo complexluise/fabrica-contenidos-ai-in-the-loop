@@ -188,6 +188,52 @@ def extract_last_frame(clip: Path, out: Path) -> Path:
     return out
 
 
+def ken_burns_filter(duration_s: float, size: tuple[int, int], fps: int = 24,
+                     move: str = "push_in") -> str:
+    """Filtro zoompan para animar un STILL como clip (pura, D-074).
+
+    Los planos contemplativos no necesitan i2v: un push-in suave sobre el still
+    elegido es gramática de cine (y de brickfilm) a $0 de video. `pull_out`
+    invierte el zoom. El still se escala al formato del SPEC (no al suyo)."""
+    w, h = size
+    frames = max(1, round(duration_s * fps))
+    if move == "pull_out":
+        zoom = f"if(eq(on,0),1.08,max(zoom-0.08/{frames},1.0))"
+    else:  # push_in (default)
+        zoom = f"min(zoom+0.08/{frames},1.08)"
+    return (
+        f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,"  # super-sample: zoompan sin jitter
+        f"crop={w * 2}:{h * 2},"
+        f"zoompan=z='{zoom}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":s={w}x{h}:fps={fps}"
+    )
+
+
+def still_to_clip(image: Path, out: Path, duration_s: float,
+                  size: tuple[int, int] = (1080, 1920), fps: int = 24,
+                  move: str = "push_in") -> Path:
+    """Convierte un still en un clip con Ken Burns (I/O ffmpeg, D-074)."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [_ffmpeg(), "-y", "-loop", "1", "-i", str(image),
+           "-t", f"{duration_s}", "-vf", ken_burns_filter(duration_s, size, fps, move),
+           "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", str(out)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return out
+
+
+def cut_times(durations: list[float]) -> list[float]:
+    """Timestamps de los CORTES del film (acumulado, sin el final). Pura.
+
+    Alimenta los impactos de audio en cortes (D-073) y cualquier marcador de
+    edición: el manifest conoce las duraciones, esto las vuelve tiempos."""
+    out: list[float] = []
+    acc = 0.0
+    for d in durations[:-1]:
+        acc += d
+        out.append(round(acc, 3))
+    return out
+
+
 def concat_clips(clips: list[Path], out_path: Path, music: Path | None = None,
                  music_volume: float = 1.0) -> Path:
     """Concatena clips en orden. Opcionalmente mezcla musica de fondo (ducked).

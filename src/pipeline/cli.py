@@ -77,7 +77,7 @@ async def _run_async(
     cfg = load_config(config_dir, style)
     providers = [build_provider(p) for p in cfg.providers.values()]
     gate = VLMGate(cfg.routing.thresholds)
-    keyframer = KeyframeGenerator(cfg.style)
+    keyframer = KeyframeGenerator(cfg.style, fmt=fmt)  # D-071
     router = SmartRouter(max_retries=1)
     telemetry = Telemetry(run_id)
 
@@ -280,6 +280,56 @@ def pick(
 
 
 @app.command()
+def takes(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    shot: str = typer.Option(None, "--shot", help="Filtra a un plano (p.ej. s2)."),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[AI-in-the-Loop · D-074] Lista las tomas de cada plano del último render
+    (la titular del corte + las alternativas, con sus scores del gate)."""
+    from .project import Project
+    from .studio import shot_takes
+
+    proj = Project(slug=project, root=projects_dir)
+    all_takes = shot_takes(proj, shot)
+    if not all_takes:
+        console.print("[yellow]Sin render todavía[/] (o el plano no existe). Corre `render` primero.")
+        raise typer.Exit(1)
+    for sid, items in all_takes.items():
+        console.print(f"[bold]{sid}[/]")
+        for i, t in enumerate(items):
+            gs = t.get("gate_scores") or {}
+            score = ", ".join(f"{k}={v:.2f}" for k, v in gs.items()) or "sin score"
+            mark = " [green](elegida)[/]" if t.get("picked") else ""
+            vp = t.get("video_path") or t.get("video_key") or "?"
+            console.print(f"  [{i}] {t.get('role', '?'):<11} {t.get('provider', '?'):<10} {score}{mark}")
+            console.print(f"      {vp}")
+    console.print("\n  fija una con: [cyan]pipeline pick-take "
+                  f"{project} <shot>=<ruta del .mp4>[/]")
+
+
+@app.command(name="pick-take")
+def pick_take(
+    project: str = typer.Argument(..., help="Slug del proyecto."),
+    selections: list[str] = typer.Argument(..., help="Elecciones plano=ruta (p.ej. s2=cache/takes/abc.mp4)."),
+    projects_dir: Path = typer.Option(Path("projects")),
+):
+    """[AI-in-the-Loop · D-074] Fija la TOMA elegida de un plano: manda sobre el
+    ranking del gate en el próximo render (cache-hit, $0)."""
+    from .project import Project
+    from .studio import record_take_pick
+
+    proj = Project(slug=project, root=projects_dir)
+    for sel in selections:
+        if "=" not in sel:
+            console.print(f"[red]Formato inválido:[/] '{sel}' (usa plano=ruta).")
+            raise typer.Exit(1)
+        sid, _, raw = sel.partition("=")
+        path = record_take_pick(proj, sid.strip(), Path(raw.strip()))
+        console.print(f"[bold green]Guardado[/] {sid} -> {raw} ({path.name})")
+
+
+@app.command()
 def animatic(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     backend: str = typer.Option(None, "--backend", help="Backend de imagen: fal (default) o google (D-053)."),
@@ -292,14 +342,18 @@ def animatic(
 
     try:
         proj, spec, cfg = _load_project(project, projects_dir, config_dir, backend=backend)
+        from .project import effective_shots
         n_shots = sum(len(s.shots) or 1 for s in spec.scenes)
-        console.print(f"[bold]{project}[/] - animatic: {n_shots} planos x 2 poses"
+        # D-070: las aperturas solo existen para planos `lands` (los que interpolan).
+        n_lands = sum(1 for s in spec.scenes for sh in effective_shots(s) if sh.lands)
+        n_poses = n_shots + n_lands
+        console.print(f"[bold]{project}[/] - animatic: {n_shots} destinos + {n_lands} aperturas"
                       f" | backend {cfg.storyboard.name}")
         _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
         sheet = asyncio.run(build_animatic(proj, spec, cfg))
         console.print(f"\n[bold green]Listo[/] animatic: {sheet}\n"
                       "  si una pose no convence: ajusta el ancla (pick) o el seed del plano y re-corre.")
-        console.print(_cost_summary("poses", n_shots * 2, cfg.storyboard.est_cost_per_image_usd))
+        console.print(_cost_summary("poses", n_poses, cfg.storyboard.est_cost_per_image_usd))
     except Exception as exc:
         if _is_balance_error(exc):
             console.print("[yellow]Saldo agotado.[/] Cambia con: [cyan]--backend google[/]")

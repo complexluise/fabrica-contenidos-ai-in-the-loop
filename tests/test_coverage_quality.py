@@ -122,7 +122,9 @@ async def test_pose_pick_changes_key_and_path(tmp_path):
     variant = proj.cache_dir / "keyframes" / "variante_elegida.png"
     variant.write_bytes(b"\x89PNG")
     spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
-        Scene(id="s1", prompt="p", duration_s=3, shots=[Shot(action="x", duration_s=3)]),
+        # lands=True (D-070): solo los planos que interpolan tienen pose de apertura.
+        Scene(id="s1", prompt="p", duration_s=3, shots=[Shot(action="x", duration_s=3,
+                                                             lands=True)]),
     ])
     cfg = load_config(CONFIG_DIR, "lego")
 
@@ -219,11 +221,14 @@ async def test_scene_anchor_feeds_every_pose_of_the_scene(tmp_path):
     a1 = proj.cache_dir / "keyframes" / "ancla1.png"; a1.write_bytes(b"\x89PNG")
     a2 = proj.cache_dir / "keyframes" / "ancla2.png"; a2.write_bytes(b"\x89PNG")
     spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        # lands=True (D-070): las APERTURAS solo existen para planos que interpolan.
         Scene(id="s1", prompt="a", duration_s=12, shots=[
-            Shot(action="x", duration_s=4), Shot(action="y", duration_s=4),
-            Shot(action="z", duration_s=4),
+            Shot(action="x", duration_s=4, lands=True),
+            Shot(action="y", duration_s=4, lands=True),
+            Shot(action="z", duration_s=4, lands=True),
         ]),
-        Scene(id="s2", prompt="b", duration_s=4, shots=[Shot(action="w", duration_s=4)]),
+        Scene(id="s2", prompt="b", duration_s=4, shots=[Shot(action="w", duration_s=4,
+                                                             lands=True)]),
     ])
     cfg = load_config(CONFIG_DIR, "lego")
     img = tmp_path / "gen.png"; img.write_bytes(b"\x89PNG")
@@ -374,16 +379,10 @@ def test_music_prompt_roundtrips_in_spec():
     assert spec_to_dict(spec)["music_prompt"] == "dark tense electronic pulse"
 
 
-# --- D-069: acción libre por duración + gate que VE el movimiento -------------
-
-def test_is_anchored_heuristic():
-    """Planos de acción (≤2.5s) generan i2v LIBRE (el modelo pone la dinámica);
-    los largos (gestos/diálogo) interpolan al destino. Cae de las duraciones
-    de edición (D-068): cero campos nuevos."""
-    from pipeline.runner import is_anchored
-    assert is_anchored(4.0) is True    # gesto/diálogo -> interpola al destino
-    assert is_anchored(2.5) is False   # impacto/acción -> i2v libre desde la apertura
-    assert is_anchored(1.5) is False
+# --- D-069 -> D-070: la heurística is_anchored se RETIRÓ ----------------------
+# La interpolación por duración partía de una premisa falsa (el end-frame nunca
+# llegó al servidor, D-070). El modo ahora es EXPLÍCITO: `shot.lands` (ver
+# test_camera_acts.py). El gate multi-frame de D-069 sigue vigente (abajo).
 
 
 def test_gate_frame_times_sample_motion():

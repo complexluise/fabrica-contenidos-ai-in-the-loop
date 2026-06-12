@@ -92,7 +92,7 @@ es continua entre archivos.
 | D-057 | Cerrar el ciclo guion→spec: voz por `voiceover`, `needs_audio` no abusado, advisories + guard de routing | Vigente |
 | D-058 | Backend de voz seleccionable (ElevenLabs prod / Kokoro proto) como eje independiente persistido | Vigente |
 | D-059 | Cinta de planos pixel-real: el keyframe es el DESTINO del plano, no el frame-0 (revisa D-039/D-048) | Revisada por D-060 |
-| D-060 | Animatic de poses frontera: el film en stills curables; video = intercalado paralelo (revisa D-059) | Vigente |
+| D-060 | Animatic de poses frontera: el film en stills curables; video = intercalado paralelo (revisa D-059) | Revisada por D-070 |
 
 ### [0061-0070.md](0061-0070.md)
 | # | Decisión | Estado |
@@ -105,4 +105,13 @@ es continua entre archivos.
 | D-066 | Timeouts duros en todo fal + fallos best-effort visibles (nada cuelga, nada muere mudo) | Vigente |
 | D-067 | Ingeniería de contexto: biblia del mundo + estilo al video + referencias con nombre | Vigente |
 | D-068 | La edición entra al flujo: cobertura conservada + ritmo de edición + música por defecto (corrige D-062) | Vigente |
-| D-069 | Juicio del movimiento y corte humano: gate multi-frame + acción libre + export como sala de edición | Vigente |
+| D-069 | Juicio del movimiento y corte humano: gate multi-frame + acción libre + export como sala de edición | Revisada por D-070 (is_anchored) |
+| D-070 | El motor fantasma: end-frame real (`kling_pro`/`tail_image_url`) + "la cámara actúa" (`lands`) | Vigente |
+
+### [0071-0080.md](0071-0080.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-071 | 9:16 de punta a punta: el formato del spec viaja a imagen y video (la cadena estaba rota) | Vigente |
+| D-072 | El dialecto de movimiento: `shot.motion`, prompt de video motion-only, negative de tiempo, cfg | Vigente |
+| D-073 | La capa de finishing: el "film stock" en ffmpeg (grade+grano+loudnorm), $0/corrida | Vigente |
+| D-074 | La economía de tomas: N takes + ranking del gate + pick humano + stills Ken Burns | Vigente |

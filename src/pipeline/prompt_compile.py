@@ -63,7 +63,41 @@ _MOVE = {
     "static": "static camera", "pan": "panning", "tilt": "tilting",
     "push_in": "slow push-in", "pull_out": "pull-out", "track": "tracking shot",
     "crane": "crane move", "handheld": "handheld", "zoom": "zoom",
+    "orbit": "orbiting camera",
 }
+
+# D-072: el dialecto de cámara que Kling OBEDECE en i2v, como ORACIÓN inicial.
+# La cámara sin especificar es causa documentada de deriva/warping; "static
+# shot, camera remains fixed" reduce el morphing activamente. Una sola
+# instrucción de cámara por clip (combinar transforma = geometría rota).
+_MOVE_VIDEO = {
+    "static": "Static shot, the camera remains fixed",
+    "pan": "The camera pans slowly",
+    "tilt": "The camera tilts slowly",
+    "push_in": "Slow dolly in",
+    "pull_out": "Slow dolly out",
+    "track": "Tracking shot, the camera follows the subject",
+    "crane": "Crane shot, the camera rises slowly",
+    "handheld": "Subtle handheld camera",
+    "zoom": "Slow zoom in",
+    "orbit": "The camera orbits slowly around the frozen subject",
+}
+
+# Señales de que el movimiento ya CIERRA (endpoint). Movimiento abierto
+# ("moving around") = deriva/morphing documentado; siempre se cierra.
+_ENDPOINT_CUES = ("settle", "stop", "rest", "hold", "freeze", "lands",
+                  "comes to", "then", "finishes", "ends")
+
+
+def ensure_motion_endpoint(text: str) -> str:
+    """Garantiza que la frase de movimiento tenga un punto de aterrizaje (pura).
+
+    El dialecto i2v exige cerrar cada movimiento ('then settles into position');
+    si el autor ya lo cerró, no se toca."""
+    low = text.lower()
+    if any(cue in low for cue in _ENDPOINT_CUES):
+        return text
+    return text.rstrip(".") + ", then settles into the final pose"
 _FOCUS = {"deep": "deep focus", "shallow": "shallow depth of field", "rack": "rack focus"}
 _TONE = {
     "high_key": "high-key lighting", "low_key": "low-key lighting",
@@ -127,9 +161,20 @@ def compose_keyframe_prompt(shot: Shot) -> str:
 
 
 def compose_video_prompt(shot: Shot) -> str:
-    """Texto para el VIDEO (movimiento/accion). El keyframe entra como `init_image`,
-    asi que aca importa el MOVIMIENTO y la accion, no re-describir la composicion
-    fija (D-048/A1). Pura."""
+    """Texto para el VIDEO en el dialecto i2v (D-072). Pura.
+
+    Con `shot.motion`: cámara PRIMERO (siempre explícita), luego el movimiento
+    con endpoint garantizado. La imagen ES la escena — el `action` (la
+    re-descripción del still) NO viaja: re-describir lo que ya está en el frame
+    es la causa #1 documentada del tweening lento (el modelo lee la descripción
+    como estado-objetivo, ya lo tiene, no anima nada).
+
+    Sin `motion` (proyectos viejos): fallback legacy action+move; el advisory
+    `shot_missing_motion` lo señala al firmar."""
+    if shot.motion:
+        camera = _MOVE_VIDEO.get(shot.camera.move, _MOVE_VIDEO["static"])
+        movement = ensure_motion_endpoint(shot.motion.strip())
+        return f"{camera}. {movement}."
     parts = [_shot_base(shot), motion_phrase(shot.camera)]
     return ", ".join(p for p in parts if p)
 

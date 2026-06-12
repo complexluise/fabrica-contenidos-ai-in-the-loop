@@ -15,6 +15,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from .finish import FinishConfig
+
 
 class ProviderConfig(BaseModel):
     name: str
@@ -38,6 +40,16 @@ class StyleConfig(BaseModel):
     keyframe: KeyframeConfig
     prompt_template: str
     negative_prompt: str = ""
+    # D-072: negative ESPECÍFICO de video (artefactos de movimiento: morphing,
+    # slow motion, identity drift). El de imagen habla de pixeles; este, de tiempo.
+    # Vacío -> cae al negative_prompt de imagen (compat).
+    video_negative_prompt: str = ""
+    # D-073: el "film stock" del estilo (grade+grano+mastering en ffmpeg, $0).
+    finish: FinishConfig = Field(default_factory=FinishConfig)
+
+    def effective_video_negative(self) -> str:
+        """Negative para el modelo de VIDEO: el específico, o el de imagen (compat)."""
+        return self.video_negative_prompt or self.negative_prompt
 
 
 class StrategyRule(BaseModel):

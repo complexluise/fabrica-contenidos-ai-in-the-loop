@@ -86,13 +86,15 @@ def test_request_falls_back_to_destino_as_init_without_start():
     assert req.end_image is None
 
 
-# --- fal_kling: end_image_url (intacto) ---------------------------------------
+# --- fal_kling: el end-frame REAL (D-070 corrige D-059) ------------------------
 
-def test_video_arguments_include_end_image_url():
+def test_video_arguments_include_tail_image_url():
+    """`tail_image_url` es el nombre real en Kling 2.1 PRO; `end_image_url` no
+    existía en ningún endpoint y fal lo ignoraba en silencio (D-070)."""
     args = video_arguments("prompt", seed=7, init_url="http://a/i.png",
                            end_url="http://a/e.png")
     assert args["image_url"] == "http://a/i.png"
-    assert args["end_image_url"] == "http://a/e.png"
+    assert args["tail_image_url"] == "http://a/e.png"
 
 
 # --- cache: el start-still entra a la key del video ---------------------------

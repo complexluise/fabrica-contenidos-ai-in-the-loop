@@ -57,7 +57,8 @@ from .telemetry import SceneRecord, Telemetry
 logger = logging.getLogger(__name__)
 
 
-def _keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str]) -> dict:
+def _keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str],
+                     aspect: str = "9:16") -> dict:
     kf = cfg.style.keyframe
     return {
         "prompt": styled_prompt,
@@ -68,12 +69,15 @@ def _keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str]) -> dic
         # Identidad: cambiar referencias o el modelo de edición invalida el keyframe.
         "ref_model": kf.ref_model if ref_sig else None,
         "character_refs": ref_sig,
+        # D-071: el formato entra a la identidad del still (antes salían 1024x1024
+        # cuadrados para un film 9:16 y el reframe recortaba ~44% de la composición).
+        "aspect": aspect,
     }
 
 
 def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
                   scene_prompt: str, duration_s: float, aspect: str, seed: int,
-                  chain_from: str | None = None) -> dict:
+                  chain_from: str | None = None, lands: bool = False) -> dict:
     return {
         "keyframe_key": keyframe_key,  # encadena: cambiar keyframe invalida el video
         "strategy": strategy,          # cambiar de estrategia invalida el clip
@@ -85,20 +89,40 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
         # D-059: identidad del frame-inicio = la key del clip anterior. Cambiar un
         # plano upstream invalida este (cascada de la cinta pixel-real).
         "chain_from": chain_from,
+        # D-070: el MODO de generación (interpolación real vs cámara-actúa) es
+        # parte de la identidad del clip — cambiar lands regenera.
+        "lands": lands,
     }
 
 
-ACTION_MAX_S = 2.5  # D-069: hasta aquí un plano es ACCIÓN (i2v libre, sin interpolar)
+def pick_end_frame_provider(subset: list, providers_all: dict):
+    """Provider para un plano `lands` (D-070): necesita capability `end_frame`.
+
+    Preferencia: el primero capaz DEL SUBSET del routing; si el perfil no trae
+    ninguno, el más barato capaz de TODOS los configurados (la declaración del
+    guionista pesa más que el perfil); si nadie puede -> None (el plano degrada
+    a cámara-actúa, con warning). Pura."""
+    capable = [p for p in subset if "end_frame" in getattr(p, "capabilities", set())]
+    if capable:
+        return capable[0]
+    global_capable = [p for p in providers_all.values()
+                      if "end_frame" in getattr(p, "capabilities", set())]
+    if global_capable:
+        return min(global_capable, key=lambda p: getattr(p, "cost_per_second", 1e9))
+    return None
 
 
-def is_anchored(duration_s: float) -> bool:
-    """D-069: ¿el plano interpola al destino (anclado) o corre libre (acción)?
+def rank_takes(takes: list[dict]) -> list[dict]:
+    """Ordena tomas por score del gate (mejor primero). Pura (D-074).
 
-    La interpolación start→destino da movimiento "tweening" — perfecto para
-    gestos y diálogo, flotante y sin peso para impactos. Los planos de acción
-    (≤{ACTION_MAX_S}s, las duraciones de edición de D-068) generan i2v LIBRE
-    desde la apertura: el modelo pone la dinámica, el prompt el movimiento."""
-    return duration_s > ACTION_MAX_S
+    El gate es RANKER, no juez (AI-in-the-Loop): ordena para que el humano
+    descarte más rápido. Sin scores -> al final (no se asume calidad)."""
+    def score(t: dict) -> float:
+        gs = t.get("gate_scores") or {}
+        vals = [v for k, v in gs.items()
+                if isinstance(v, (int, float)) and k != "artifacts"]
+        return sum(vals) / len(vals) if vals else 0.0
+    return sorted(takes, key=score, reverse=True)
 
 
 def effective_voice(scene, shot) -> str | None:
@@ -170,7 +194,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
             prev_destino=prev_destino, prev_destino_key=prev_destino_key,
             scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key,
             scene_anchor=scene_anchor, scene_anchor_key=scene_anchor_key,
-            world=spec.world, dry=dry)
+            world=spec.world, fmt=spec.format, dry=dry)
         out.append(boundary)
         # Las KEYS avanzan SIEMPRE (identidad pura/posicional de la cadena): un fallo
         # de generación deja el ARCHIVO en None pero no corre las keys aguas abajo —
@@ -187,8 +211,13 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
                            prev_destino, prev_destino_key,
                            scene_prev_kf, scene_prev_key,
                            scene_anchor=None, scene_anchor_key=None,
-                           world: str | None = None, dry: bool = False) -> dict:
-    """Las dos poses frontera de UN plano (destino + start). Cacheadas."""
+                           world: str | None = None, fmt: str = "9:16",
+                           dry: bool = False) -> dict:
+    """Las poses frontera de UN plano. Cacheadas.
+
+    D-070: la APERTURA solo existe para planos `lands` (los que interpolan de
+    verdad); el resto es cámara-actúa — su único still es el destino. Mitad de
+    stills, cero poses fantasma que ningún video usa."""
     from .project import _resolve_under
     pose_picks = pose_picks or {}
     refs_io = resolve_refs(project.dir, scene.character_refs)
@@ -201,7 +230,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     kf_ext = compose_keyframe_prompt(shot)
     styled = build_styled_prompt(scene, cfg.style, kf_ext, world=world)
     chain_refs: list = []
-    kf_inputs = _keyframe_inputs(styled, cfg, ref_sig)
+    kf_inputs = _keyframe_inputs(styled, cfg, ref_sig, aspect=fmt)
     if idx > 0 and cfg.style.keyframe.ref_model:
         kf_inputs["chain_from"] = scene_prev_key  # identidad posicional, archivo aparte
         kf_inputs["anchor"] = scene_anchor_key    # D-064: cambiar el ancla regenera la escena
@@ -240,7 +269,12 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
         if p.exists():
             destino, kf_key = p, f"picked:{p.name}"
 
-    # --- start-still: la pose de apertura, derivada del destino anterior ---
+    # --- start-still: la pose de apertura, SOLO para planos `lands` (D-070) ---
+    # Cámara-actúa (default): el destino es el único still; sin apertura no hay
+    # interpolación que pagar ni pose fantasma que curar.
+    if not shot.lands:
+        return {"destino": destino, "kf_key": kf_key, "start": None,
+                "start_key": None, "cost": cost}
     # La KEY de la cadena sigue al destino previo aunque su archivo falte:
     # dry, render y re-runs deben computar EXACTAMENTE las mismas keys.
     if prev_destino_key is not None:
@@ -252,7 +286,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     anchor, anchor_key = (scene_anchor, scene_anchor_key) if idx > 0 else (destino, kf_key)
     start_ext = compose_start_pose_prompt(shot, transition_in)
     start_styled = build_styled_prompt(scene, cfg.style, start_ext, world=world)
-    start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig)
+    start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig, aspect=fmt)
     start_inputs["role"] = "start_pose"        # namespace: no colisiona con destinos
     start_inputs["chain_from"] = source_key    # cambiar el destino previo invalida este
     start_inputs["anchor"] = anchor_key        # D-064: cambiar el ancla regenera la apertura
@@ -285,92 +319,180 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             "start_key": start_key, "cost": cost}
 
 
+async def _generate_takes(*, project, spec, run, gate, shot, shot_id, plano,
+                          rule, subset, strategy, provider_sig, eff_prompt,
+                          kf_key, chain_key, lands, take_picks):
+    """El video del plano con economía de tomas (D-074). Devuelve (result, vid_key, cached).
+
+    `shot.takes` genera N tomas (seed, seed+1, ...) — cada una con su propia
+    cache key (re-run = $0). El gate las ORDENA (ranker, no juez); el humano
+    puede imponer la suya vía take_picks.yaml. Las no elegidas viajan como
+    `alternate_takes` (cobertura pagada -> sala de edición, D-068/D-069)."""
+    from pathlib import Path as _P
+    from .project import _resolve_under
+
+    # La toma elegida por el humano manda (mismo patrón que pose_picks, D-063).
+    picked = take_picks.get(shot_id)
+    if picked:
+        p = _resolve_under(project.dir, picked)
+        if p.exists():
+            logger.info("[%s] toma elegida por el humano: %s", shot_id, p.name)
+            result = GenResult(video_path=p, provider="picked", cost_usd=0.0,
+                               latency_s=0.0,
+                               raw_meta={"cached": True, "gate_passed": True})
+            return result, f"picked:{p.name}", True
+
+    n_takes = max(1, int(shot.takes or 1))
+    results: list[tuple[str, GenResult, bool]] = []
+    for i in range(n_takes):
+        seed_i = shot.seed + i
+        vid_key_i = cache_key("video", _video_inputs(
+            kf_key, rule.strategy, provider_sig, eff_prompt, shot.duration_s,
+            spec.format, seed_i, chain_from=chain_key, lands=lands))
+        hit = project.cache_lookup("clips", vid_key_i, ".mp4")
+        if hit is not None:
+            meta = project.sidecar_lookup("clips", vid_key_i) or {}
+            res = GenResult(video_path=hit, provider=meta.get("provider", "cache"),
+                            cost_usd=0.0, latency_s=0.0,
+                            raw_meta={"cached": True,
+                                      "gate_passed": meta.get("gate_passed", True),
+                                      "gate_scores": meta.get("gate_scores", {})})
+            results.append((vid_key_i, res, True))
+            logger.info("[%s] toma %d/%d (cache hit): %s", shot_id, i + 1, n_takes,
+                        res.provider)
+            continue
+        logger.info("[%s] toma %d/%d: %s -> %s | generando...", shot_id, i + 1,
+                    n_takes, rule.strategy, [p.name for p in subset])
+        plano_i = plano.model_copy(update={"seed": seed_i}) if i else plano
+        res = await strategy.run(plano_i, subset, gate)
+        stored = project.cache_store("clips", vid_key_i, res.video_path, ".mp4")
+        res.video_path = stored
+        project.sidecar_store("clips", vid_key_i, {
+            "provider": res.provider,
+            "gate_passed": res.raw_meta.get("gate_passed", True),
+            "gate_scores": res.raw_meta.get("gate_scores", {})})
+        # D-068: las tomas perdedoras del ensemble están PAGADAS — a cache como
+        # cobertura para la edición (export/describe las verán), no a la basura.
+        for j, take in enumerate(res.raw_meta.get("alternate_takes") or []):
+            tp = _P(take["video_path"])
+            if tp.exists():
+                stored_take = project.cache_store("takes", f"{vid_key_i}a{j}", tp, ".mp4")
+                take["video_path"] = str(stored_take)
+                logger.info("[%s] toma alternativa conservada: %s (%s)",
+                            shot_id, stored_take.name, take["provider"])
+        results.append((vid_key_i, res, False))
+        gate_str = "ok" if res.raw_meta.get("gate_passed", True) else "fail"
+        logger.info("[%s] toma %d lista: %s | $%.3f | %.1fs | gate=%s", shot_id,
+                    i + 1, res.provider, res.cost_usd, res.latency_s, gate_str)
+
+    if len(results) == 1:
+        vid_key, result, cached = results[0]
+        return result, vid_key, cached
+
+    # El gate ordena; el mejor encabeza el corte. Las demás NO se tiran: son
+    # tomas del plano (el humano elige con pick-take; el export las empaqueta).
+    ranked = rank_takes([
+        {"video_key": k, "video_path": str(r.video_path), "provider": r.provider,
+         "gate_scores": r.raw_meta.get("gate_scores", {}), "_res": r, "_cached": c}
+        for k, r, c in results])
+    best = ranked[0]
+    result = best["_res"]
+    losers = [{k: v for k, v in t.items() if not k.startswith("_")} for t in ranked[1:]]
+    result.raw_meta["alternate_takes"] = losers + (result.raw_meta.get("alternate_takes") or [])
+    result.cost_usd = round(sum(r.cost_usd for _, r, _ in results), 4)  # el plano pagó todas
+    logger.info("[%s] %d tomas; el gate prefiere %s (pick-take para imponer otra)",
+                shot_id, len(ranked), best["provider"])
+    return result, best["video_key"], best["_cached"]
+
+
 async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
                        scene, shot, shot_id, refs,
                        rule, subset, strategy, provider_sig,
                        keyframe, kf_key, stills_cost=0.0,
-                       start_frame=None, chain_key=None):
+                       start_frame=None, chain_key=None,
+                       providers_all=None, take_picks=None):
     """Renderiza UN plano (D-028): video -> recorte -> sfx -> caption -> vo.
 
-    D-060 (animatic): las poses frontera (destino + start) llegan YA generadas
-    por `ensure_boundary_stills` (Fase A) → este paso es paralelizable. El video
-    INTERPOLA `start_frame` → `keyframe` (el destino, donde aterriza); el recorte
-    conserva la COLA (el aterrizaje), no la cabeza. `chain_key` (la key del
-    start-still) entra a la cache key del clip.
+    D-070 (cámara-actúa): por defecto el clip es i2v LIBRE desde el DESTINO
+    elegido (la imagen ES la escena; el prompt solo mueve cámara/sujeto) y el
+    recorte conserva la CABEZA. `shot.lands` interpola de verdad apertura →
+    destino vía un provider `end_frame` (Kling PRO) y conserva la COLA.
+    D-074: `shot.media == "still"` ($0 de video: Ken Burns) y `shot.takes` (N
+    tomas cacheadas, el gate ordena, el humano elige en take_picks.yaml).
     Devuelve (clip_path, record, manifest_entry, audio_applied, keyframe, kf_key).
     """
     refs_io = resolve_refs(project.dir, refs)
     kf_ext = compose_keyframe_prompt(shot)  # para el manifest (framing legible)
+    take_picks = take_picks or {}
 
-    # Escena efectiva del plano: prompt + MOVIMIENTO del plano (D-048/A1), audio/seed del plano.
+    # D-072: el prompt de VIDEO habla SOLO movimiento (dialecto i2v). El mundo,
+    # el estilo y la composición ya viven en el still — re-describirlos al video
+    # (D-067 lo hacía) es la causa #1 documentada del tweening lento.
     video_ext = compose_video_prompt(shot)
-    # D-067: el modelo de VIDEO recibe el MISMO contexto que las imágenes — el
-    # template de estilo + la biblia del mundo (antes le llegaba el prompt crudo:
-    # Kling nunca supo que esto era toy photography). El negative también viaja.
-    eff_prompt = build_styled_prompt(scene, cfg.style, video_ext, world=spec.world)
-    # D-069: plano de ACCIÓN -> i2v libre desde la apertura (sin end anchor);
-    # plano largo -> interpolación al destino (como D-060). El trim acompaña:
-    # libre conserva la CABEZA (la acción arranca ya), anclado conserva la cola.
-    anchored = is_anchored(shot.duration_s)
-    if not anchored and start_frame is not None:
-        keyframe, kf_key = start_frame, chain_key or kf_key  # la apertura es el init
-        start_frame = None
+    eff_prompt = video_ext
+    # D-070: lands -> interpolación REAL (apertura → destino) con provider capaz.
+    lands = bool(shot.lands)
+    subset_eff, provider_sig_eff = subset, provider_sig
+    if lands:
+        end_provider = pick_end_frame_provider(subset, providers_all or {})
+        if end_provider is None or start_frame is None:
+            logger.warning("[%s] lands sin %s; degrada a cámara-actúa (i2v libre).",
+                           shot_id, "provider end_frame" if end_provider is None else "apertura")
+            lands = False
+        else:
+            subset_eff = [end_provider]
+            provider_sig_eff = {end_provider.name: getattr(end_provider, "model",
+                                                           end_provider.name)}
+    if not lands:
+        start_frame, chain_key = None, None  # cámara-actúa: el destino es el init
+
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
         "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
         "voice_id": effective_voice(scene, shot),  # D-065: el plano manda sobre la escena
-        "negative_prompt": cfg.style.negative_prompt or None,  # D-067
+        "negative_prompt": cfg.style.effective_video_negative() or None,  # D-072
+        "aspect": spec.format,            # D-071: el formato viaja al provider
+        "cfg_scale": shot.cfg_scale,      # D-072: adherencia por plano
     })
 
-    # --- L5 video (cacheado) ---
-    vid_key = cache_key("video", _video_inputs(
-        kf_key, rule.strategy, provider_sig, eff_prompt, shot.duration_s, spec.format,
-        shot.seed, chain_from=chain_key))
-    vid_hit = project.cache_lookup("clips", vid_key, ".mp4")
-    if vid_hit is not None:
-        meta = project.sidecar_lookup("clips", vid_key) or {}
-        result = GenResult(video_path=vid_hit, provider=meta.get("provider", "cache"),
-                           cost_usd=0.0, latency_s=0.0,
-                           raw_meta={"cached": True, "gate_passed": meta.get("gate_passed", True),
-                                     "gate_scores": meta.get("gate_scores", {})})
-        cached = True
-        logger.info("[%s] video (cache hit): %s", shot_id, result.provider)
+    # --- D-074: plano STILL — Ken Burns sobre el destino, $0 de video ---
+    if shot.media == "still":
+        from .assemble import still_to_clip
+        from .deliver import _FORMATS
+        vid_key = f"still:{kf_key}"
+        move = shot.camera.move if shot.camera.move in ("push_in", "pull_out") else "push_in"
+        clip_path = still_to_clip(keyframe, run.dir / "_trim" / f"{shot_id}.mp4",
+                                  shot.duration_s, size=_FORMATS.get(spec.format, (1080, 1920)),
+                                  fps=cfg.style.finish.fps, move=move)
+        result = GenResult(video_path=clip_path, provider="still", cost_usd=0.0,
+                           latency_s=0.0, raw_meta={"gate_passed": True})
+        cached = False
+        logger.info("[%s] still con Ken Burns (%s, $0 de video)", shot_id, move)
     else:
-        logger.info("[%s] video: %s -> %s | generando...",
-                    shot_id, rule.strategy, [p.name for p in subset])
-        result = await strategy.run(plano, subset, gate)
-        stored = project.cache_store("clips", vid_key, result.video_path, ".mp4")
-        result.video_path = stored
-        project.sidecar_store("clips", vid_key, {
-            "provider": result.provider,
-            "gate_passed": result.raw_meta.get("gate_passed", True),
-            "gate_scores": result.raw_meta.get("gate_scores", {})})
-        cached = False
-        # D-068: las tomas perdedoras del ensemble están PAGADAS — a cache como
-        # cobertura para la edición (export/describe las verán), no a la basura.
-        from pathlib import Path as _P
-        for i, take in enumerate(result.raw_meta.get("alternate_takes") or []):
-            tp = _P(take["video_path"])
-            if tp.exists():
-                stored_take = project.cache_store("takes", f"{vid_key}a{i}", tp, ".mp4")
-                take["video_path"] = str(stored_take)
-                logger.info("[%s] toma alternativa conservada: %s (%s)",
-                            shot_id, stored_take.name, take["provider"])
-        cached = False
-        gate_str = "ok" if result.raw_meta.get("gate_passed", True) else "fail"
-        logger.info("[%s] video listo: %s | $%.3f | %.1fs | gate=%s",
-                    shot_id, result.provider, result.cost_usd, result.latency_s, gate_str)
+        result, vid_key, cached = await _generate_takes(
+            project=project, spec=spec, run=run, gate=gate, shot=shot,
+            shot_id=shot_id, plano=plano, rule=rule, subset=subset_eff,
+            strategy=strategy, provider_sig=provider_sig_eff,
+            eff_prompt=eff_prompt, kf_key=kf_key, chain_key=chain_key,
+            lands=lands, take_picks=take_picks)
 
-    # --- recorte a la duración del plano (conservador: solo si el clip es más largo) ---
-    # D-060: los clips anclados a destino ATERRIZAN al final → se conserva la COLA
-    # (recorte de cabeza). El A/B mostró que recortar la cola tiraba el aterrizaje.
-    if start_frame is not None:
-        clip_path = trim_to_tail(result.video_path, run.dir / "_trim" / f"{shot_id}.mp4",
-                                 shot.duration_s)
-    else:
-        clip_path = trim_to(result.video_path, run.dir / "_trim" / f"{shot_id}.mp4",
-                            shot.duration_s)
+        # --- recorte a la duración del plano (conservador: solo si es más largo) ---
+        # D-070: cámara-actúa arranca EN el destino -> se conserva la CABEZA;
+        # lands aterriza al final -> se conserva la COLA. (El tail-trim de D-069
+        # sobre clips no interpolados conservaba los frames MÁS derivados.)
+        if lands:
+            clip_path = trim_to_tail(result.video_path, run.dir / "_trim" / f"{shot_id}.mp4",
+                                     shot.duration_s)
+        else:
+            clip_path = trim_to(result.video_path, run.dir / "_trim" / f"{shot_id}.mp4",
+                                shot.duration_s)
+
+    # --- D-073: conformado de velocidad del plano (la flotación AI se va acá) ---
+    if shot.speed and shot.speed != 1.0:
+        from .finish import conform_speed
+        clip_path = conform_speed(clip_path, run.dir / "_speed" / f"{shot_id}.mp4",
+                                  shot.speed, fps=cfg.style.finish.fps)
 
     # --- L7 audio diegético: SFX (acción) + ambiente (lugar) vía V2A (D-034) ---
     # Best-effort y cacheado. Si el clip YA trae audio (modelo nativo tipo Veo),
@@ -440,6 +562,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         "strategy": rule.strategy, "provider": result.provider,
         "keyframe_key": kf_key, "keyframe_path": str(keyframe),
         "video_key": vid_key, "cached": cached, "duration_s": shot.duration_s,
+        "media": shot.media, "lands": lands, "takes": shot.takes,  # D-070/D-074
         "seed": shot.seed, "framing": kf_ext or shot.framing, "caption": cap,
         "intention": shot.intention or "",  # D-047: funcion dramatica al guion
         "motion": video_ext or "",  # D-048/A1: el movimiento que se le pidio al video
@@ -488,8 +611,10 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     logger.info("run %s | %d escenas | estilo %s | formato %s | concurrencia %d",
                 run.run_id, len(spec.scenes), spec.style, spec.format, concurrency)
     # D-053: backend del keyframe viene del storyboard backend activo.
+    # D-071: el formato del spec gobierna el tamaño de los stills.
     keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch",
-                                   backend=cfg.storyboard.keyframe.backend)
+                                   backend=cfg.storyboard.keyframe.backend,
+                                   fmt=spec.format)
     telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
 
     # Voz en off (Sprint 6): chequea scene.voiceover Y shot.voiceover (ambos válidos).
@@ -555,6 +680,12 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     boundaries = await ensure_boundary_stills(project, spec, cfg, keyframer,
                                               keyframe_overrides)
 
+    # D-074: tomas elegidas por el humano (mismo patrón que pose_picks, D-063).
+    take_picks: dict = {}
+    tp_path = project.dir / "take_picks.yaml"
+    if tp_path.exists():
+        take_picks = yaml.safe_load(tp_path.read_text(encoding="utf-8")) or {}
+
     sem = asyncio.Semaphore(concurrency)
 
     async def _one(entry: dict, b: dict | None):
@@ -572,7 +703,8 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
                     refs=refs, rule=rule, subset=subset, strategy=strategy,
                     provider_sig=provider_sig, keyframe=b["destino"],
                     kf_key=b["kf_key"], stills_cost=b["cost"],
-                    start_frame=b["start"], chain_key=b["start_key"])
+                    start_frame=b["start"], chain_key=b["start_key"],
+                    providers_all=providers_by_name, take_picks=take_picks)
             except Exception as exc:  # noqa: BLE001 — registra y sigue
                 telemetry.record_failure(shot_id, str(exc))
                 logger.error("[%s] FALLO: %s", shot_id, exc)
@@ -627,6 +759,20 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
         stitched = concat_clips(clips, run.dir / "_stitched.mp4", music=music,
                                 music_volume=music_volume)
         final = reframe(stitched, run.dir / f"final_{spec.format.replace(':', 'x')}.mp4", spec.format)
+        # D-073: el film stock — grade + grano + mastering a -14 LUFS, en ffmpeg,
+        # $0. Es la capa que mata el "plástico digital" y unifica las tomas de
+        # generaciones distintas en UNA película. Best-effort: jamás tumba el run.
+        if cfg.style.finish.enabled:
+            from .finish import apply_finish
+            try:
+                master = apply_finish(
+                    final, run.dir / f"master_{spec.format.replace(':', 'x')}.mp4",
+                    cfg.style.finish)
+                if master != final:
+                    final = master
+                    logger.info("finishing: film stock aplicado (%s)", final.name)
+            except Exception as exc:  # noqa: BLE001 — visible, nunca fatal (D-066)
+                logger.warning("finishing: omitido (%s): %s", type(exc).__name__, exc)
         _write_manifest(run, spec, cfg, manifest_scenes)
     finally:
         # Telemetría: cierre y reporte garantizados aunque el ensamblaje (ffmpeg)

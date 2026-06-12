@@ -6,6 +6,14 @@ providers:
     model: "fal-ai/kling-video/v2.1/standard/image-to-video"
     cost_per_second: 0.03
     capabilities: [i2v, lipsync, "4k"]
+  # D-070: el ÚNICO Kling 2.1 con end-frame real (tail_image_url). El standard
+  # NO lo tiene: fal ignoraba nuestro end_image_url en silencio y la
+  # interpolación de D-059/D-060 jamás se ejecutó. Solo para planos `lands`.
+  kling_pro:
+    backend: fal
+    model: "fal-ai/kling-video/v2.1/pro/image-to-video"
+    cost_per_second: 0.09   # $0.45 / video de 5s (3x el standard) — verificado 2026-06
+    capabilities: [i2v, lipsync, "4k", end_frame]
   seedance:
     backend: fal
     model: "fal-ai/bytedance/seedance/v1/lite/image-to-video"

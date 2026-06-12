@@ -11,6 +11,24 @@ keyframe:
   # keyframe se genera condicionado a esas imagenes (consistencia de identidad).
   ref_model: "fal-ai/nano-banana/edit"
 prompt_template: >
-  {scene_prompt}, LEGO brick style, plastic minifigure characters, studio lighting,
-  shallow depth of field, highly detailed, toy photography
-negative_prompt: "realistic skin, photorealism, blur, deformed bricks"
+  {scene_prompt}, LEGO brick style, plastic minifigure characters, macro photography
+  at minifig eye level, shallow depth of field with a defocused foreground element,
+  rim lighting, worn plastic with subtle fingerprints and mold seams, highly detailed,
+  toy photography
+negative_prompt: "realistic skin, photorealism, blur, deformed bricks, bent rubbery limbs, infinite depth of field"
+# D-072: negative del modelo de VIDEO — artefactos de TIEMPO, no de pixel.
+# 5-8 términos, el peor primero (los primeros pesan más); "slow motion" mata
+# el default onírico de Kling cuando el prompt no fija velocidad.
+video_negative_prompt: "morphing faces, identity drift, extra limbs, slow motion, bent rubbery limbs, blur, distort"
+# D-073: el film stock del estilo (ffmpeg, $0/corrida). El orden de la cadena
+# vive en finish.py; aquí solo los escalares.
+finish:
+  enabled: true
+  saturation: 0.9
+  contrast: 1.02
+  vignette: true
+  halation_alpha: 0.12
+  grain: 7
+  fps: 24
+  lufs: -14.0     # spec Instagram/TikTok
+  true_peak: -1.0

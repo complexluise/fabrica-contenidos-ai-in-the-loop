@@ -24,9 +24,11 @@ SceneClass = Literal["hero", "standard", "volume"]
 ShotSize = Literal["ECU", "CU", "MCU", "MS", "MLS", "LS", "ELS", "insert"]
 # Angulo de camara (ots = over-the-shoulder; worm = contrapicado extremo).
 CameraAngle = Literal["eye", "high", "low", "overhead", "worm", "dutch", "ots"]
-# Movimiento de camara.
+# Movimiento de camara. `orbit` (D-070): el bullet-time brickfilm — la pose se
+# congela y la CAMARA orbita (Trinity Help, 2009: la camara actua, el minifig posa).
 CameraMove = Literal[
     "static", "pan", "tilt", "push_in", "pull_out", "track", "crane", "handheld", "zoom",
+    "orbit",
 ]
 # Profundidad de campo / foco (rack = foco que viaja entre planos).
 FocusDepth = Literal["deep", "shallow", "rack"]
@@ -36,7 +38,10 @@ ToneKey = Literal["high_key", "low_key", "neutral", "silhouette"]
 Transition = Literal["cut", "match_cut", "dissolve", "smash_cut", "wipe"]
 
 # Capabilities que una escena puede exigir y un provider puede ofrecer.
-Capability = Literal["i2v", "audio", "lipsync", "4k", "camera", "hdr", "multishot"]
+# `end_frame` (D-070): el provider acepta un frame FINAL e interpola hacia él
+# (Kling 2.1 PRO `tail_image_url`; el standard NO lo tiene — fal ignora en
+# silencio los parámetros desconocidos, por eso D-059/D-060 nunca se ejecutó).
+Capability = Literal["i2v", "audio", "lipsync", "4k", "camera", "hdr", "multishot", "end_frame"]
 
 
 class SceneRequirements(BaseModel):
@@ -127,8 +132,26 @@ class Shot(BaseModel):
     # --- narrativa / intencion ---
     intention: Optional[str] = None  # funcion dramatica: que comunica este plano (D-047)
     action: Optional[str] = None  # que SE VE / que pasa; visual primario (D-047)
+    # D-072: la frase de MOVIMIENTO para el video (dialecto i2v: qué se mueve,
+    # qué tan rápido, dónde termina — 15-40 palabras, presente, UNA acción).
+    # En i2v la imagen ES la escena: re-describirla (el `action`) produce el
+    # tweening lento documentado. Sin `motion` -> fallback legacy + advisory.
+    motion: Optional[str] = None
     duration_s: float = Field(gt=0)
     seed: int = 0  # reroll del plano (cache miss solo en este plano)
+    # D-070: este plano debe ATERRIZAR en su destino -> interpolación REAL
+    # (apertura + tail_image_url) vía un provider con capability `end_frame`.
+    # Default False = "la cámara actúa": i2v libre desde el destino elegido.
+    lands: bool = False
+    # D-074: planos contemplativos como STILL con Ken Burns ($0 de video).
+    media: Literal["video", "still"] = "video"
+    # D-074: tomas por plano de video (curaduría brutal: genera N, el humano
+    # descarta). El gate las ordena; take_picks.yaml registra la elegida.
+    takes: int = Field(default=1, ge=1, le=6)
+    # D-073: conformado de velocidad del clip (1.1-1.3 arregla la flotación AI).
+    speed: Optional[float] = Field(default=None, gt=0)
+    # D-072: adherencia del modelo de video (fal cfg_scale; default del modelo 0.5).
+    cfg_scale: Optional[float] = Field(default=None, ge=0, le=1)
     # --- gramatica + estructura visual (D-047) ---
     camera: Camera = Field(default_factory=Camera)
     visual: Visual = Field(default_factory=Visual)
@@ -160,6 +183,8 @@ class Scene(BaseModel):
     keyframe: Optional[Path] = None  # rellenado por L3 (plano 1 = keyframe elegido)
     start_frame: Optional[Path] = None  # transitorio (D-059): frame de la cinta (último frame real del clip previo)
     negative_prompt: Optional[str] = None  # transitorio (D-067): negative del estilo, viaja al GenRequest
+    aspect: Optional[str] = None  # transitorio (D-071): formato del spec -> GenRequest.aspect_ratio
+    cfg_scale: Optional[float] = None  # transitorio (D-072): adherencia del plano -> GenRequest
     seed: int = 0  # knob de reroll: subirlo regenera SOLO esta escena (cache miss)
     caption: Optional[str] = None  # texto en pantalla (lower-third), opcional
     voiceover: Optional[str] = None  # texto narrado (TTS ElevenLabs), opcional
@@ -206,6 +231,7 @@ class GenRequest(BaseModel):
     init_image: Optional[Path] = None  # frame inicial (image-to-video)
     end_image: Optional[Path] = None  # frame final/destino (D-059): el provider interpola start→end
     negative_prompt: Optional[str] = None  # D-067: lo que NO queremos (estilo); el video también lo recibe
+    cfg_scale: Optional[float] = None  # D-072: adherencia (fal); None -> default del modelo
     ref_images: list[Path] = Field(default_factory=list)
     seed: Optional[int] = None
 
