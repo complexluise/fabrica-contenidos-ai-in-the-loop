@@ -1069,6 +1069,26 @@ Ver [D-068].
 
 ---
 
+## Sprint 6.31 — Juicio del movimiento y corte humano (D-069)
+
+**Objetivo:** las 4 decisiones tomadas con el usuario sobre la mesa: edición HUMANA (export como
+sala de edición con tomas + notas), gate multi-frame (deja de ser ciego al morphing), acción libre
+por duración (≤2.5s = i2v sin interpolar), corrida con animatic primero. Ver [D-069].
+
+### Acceptance Criteria
+- [x] AC1 — `frame_times` + gate VLM multi-frame (`_MOTION_PROMPT`, anthropic y google); señales de
+  frame único intactas (frame medio). 🔬
+- [x] AC2 — `is_anchored`: planos ≤2.5s generan i2v libre desde la apertura (trim de cabeza);
+  largos interpolan al destino (trim de cola). 🔬
+- [x] AC3 — Export gana `takes/` (tomas alternativas) + `descripciones.yaml` (notas del describe);
+  guion.md los documenta.
+- [ ] AC4 — La corrida: animatic (~$1.5) → visto bueno del usuario → video (~$2-3). Pendiente del "corre".
+
+> **Estado:** core en verde (**337 tests**). La máquina juzga el movimiento y entrega material
+> completo; el corte final es humano (FILOSOFIA.md).
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
