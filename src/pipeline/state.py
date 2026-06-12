@@ -123,8 +123,8 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
         cortaría a mitad de palabra (el video manda la duración en el mux).
       - `repeated_framing` (D-062): dos planos consecutivos con el MISMO encuadre
         explícito (tamaño+ángulo) -> el corte "salta feo".
-      - `short_shot_billing` (D-062): el proveedor factura bloques (~5s); los planos
-        cortos pagan el bloque completo -> nombrar la plata que se tira.
+      (El antiguo `short_shot_billing` se retiró en D-068: el bloque del proveedor
+      es COBERTURA para la edición, no desperdicio — el dato vive en el animatic.)
 
     `routing`/`providers` vienen del Config activo (perfil); la elegibilidad la decide
     `routing_gaps` (misma lógica pura que el guard temprano del runner)."""
@@ -156,11 +156,9 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
                 out.append({"scene": s.id, "kind": "vo_too_long",
                             "msg": f"la voz del plano {i} dura ~{est:.1f}s y el plano {sh.duration_s:g}s; "
                                    "se cortaría a mitad de palabra (alarga el plano o acorta la línea)."})
-        wasted = sum(_block_paid(sh.duration_s) - sh.duration_s for sh in shots)
-        if wasted >= 1.0:
-            out.append({"scene": s.id, "kind": "short_shot_billing",
-                        "msg": f"sus planos pagan bloques de ~{BILLING_BLOCK_S:g}s del proveedor: "
-                               f"~{wasted:g}s pagados que el corte no usa (planos de 4-5s aprovechan el bloque)."})
+        # D-068: el aviso short_shot_billing se RETIRA — empujaba planos largos y
+        # ritmo lento. Las duraciones del autor son de EDICIÓN; el bloque del
+        # proveedor es COBERTURA. El pagado-vs-usado vive como INFO en el animatic.
     # D-062: encuadre repetido en cortes consecutivos, a través de TODO el film.
     film = [(s.id, sh) for s in spec.scenes for sh in effective_shots(s)]
     for (_, prev), (sid, cur) in zip(film, film[1:]):

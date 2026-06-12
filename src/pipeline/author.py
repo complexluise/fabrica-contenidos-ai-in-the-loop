@@ -66,6 +66,7 @@ lo ve/oye la audiencia) o [EN] (inglés, alimenta a un modelo de IA):
   "title": "[ES] título corto y evocador",
   "brief": "[ES] 2-3 frases: tono + arco narrativo + intención emocional",
   "world": "[EN] la BIBLIA del mundo: UNA descripción canónica del set/luz/clima/paleta que comparten TODAS las escenas (2-3 frases). Viaja a cada prompt: no la repitas en los prompts de escena.",
+  "music_prompt": "[EN] la cama musical del film: género/tempo/instrumentación/arco emocional (1-2 frases). null si la pieza no lleva música.",
   "style": "lego",
   "format": "9:16",
   "characters": {{
@@ -163,10 +164,10 @@ bajo (1-2). Construí tensión hacia el clímax; no dejes todo plano en la misma
 • DIRECCIÓN DE PANTALLA (eje/180°): si un personaje mira o se mueve hacia la derecha, mantené esa
   dirección en los planos siguientes de la escena (no cruces el eje sin un plano neutro).
 
-**DURACIÓN (la plata)** — el proveedor de video factura BLOQUES de ~5s: un plano de 2s paga 5s.
-Preferí planos de 4-5s que aprovechan el bloque; usá planos cortos (<3s) solo cuando el ritmo lo
-exige de verdad (un insert, un golpe). La voz de un plano debe caber en su duración
-(~2.5 palabras/segundo): no escribas 20 palabras para un plano de 3s.
+**DURACIÓN (es de EDICIÓN, no de facturación — D-068)** — `duration_s` es lo que el plano dura EN
+EL CORTE: acción 1.5-2.5s (cortes rápidos, impact frames), diálogo lo que la línea necesite
+(~2.5 palabras/segundo), respiros 3-4s. El proveedor genera bloques de ~5s igual: el sobrante es
+COBERTURA, no desperdicio. No alargues planos para "aprovechar el bloque" — eso mata el ritmo.
 
 **TRANSICIONES (semántica)** — la transición define cómo ARRANCA el plano siguiente:
 • `cut` (default): nueva composición libre. • `match_cut`: SOLO si los dos planos comparten
@@ -210,6 +211,7 @@ class ProjectDraft(BaseModel):
     title: str = "Proyecto sin título"
     brief: str = ""
     world: str = ""
+    music_prompt: str = ""
     style: str = "lego"
     format: str = "9:16"
     characters: dict[str, Character] = Field(default_factory=dict)
@@ -228,6 +230,7 @@ class ProjectDraft(BaseModel):
             title=self.title,
             brief=self.brief,
             world=self.world or None,
+            music_prompt=self.music_prompt or None,
         )
 
 

@@ -95,17 +95,6 @@ def test_repeated_default_cameras_do_not_spam():
 
 # --- D-062: el hueco de plata (bloques de facturación del proveedor) ---------
 
-def test_short_shots_billing_is_flagged_per_scene():
-    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
-        Scene(id="s1", prompt="p", duration_s=4,
-              shots=[Shot(action="a", duration_s=2), Shot(action="b", duration_s=2)]),
-        Scene(id="s2", prompt="p", duration_s=5, shots=[Shot(action="c", duration_s=5)]),
-    ])
-    kinds = _adv(spec)
-    assert ("s1", "short_shot_billing") in kinds   # 2 planos de 2s pagan 10s
-    assert ("s2", "short_shot_billing") not in kinds  # 5s = el bloque completo
-
-
 def test_billing_summary_paid_vs_used():
     spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
         Scene(id="s1", prompt="p", duration_s=4,
@@ -327,3 +316,59 @@ def test_kling_receives_negative_prompt():
     args = video_arguments("p", seed=None, init_url="u", end_url=None,
                            negative="blurry, morphing, extra limbs")
     assert args["negative_prompt"] == "blurry, morphing, extra limbs"
+
+
+# --- D-068: la edición entra al flujo -----------------------------------------
+
+def test_short_shot_billing_advisory_is_gone():
+    """D-068 corrige a D-062: el advisory de bloques empujaba planos LARGOS ->
+    ritmo lento. Las duraciones del autor son de EDICIÓN; el bloque de 5s es
+    COBERTURA, no desperdicio. El billing queda como info (animatic), no aviso."""
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="p", duration_s=4,
+              shots=[Shot(action="a", duration_s=2), Shot(action="b", duration_s=2)]),
+    ])
+    kinds = {a["kind"] for a in signing_advisories(spec, _routing(), _providers())}
+    assert "short_shot_billing" not in kinds
+
+
+async def test_ensemble_keeps_losing_takes():
+    """Las tomas perdedoras del ensemble están PAGADAS: se conservan como
+    cobertura para la edición (alternate_takes en el resultado), no se tiran."""
+    from pathlib import Path as P
+    from types import SimpleNamespace
+    from pipeline.strategies.ensemble import Ensemble
+    from pipeline.contracts import GenResult
+
+    class FakeProv:
+        def __init__(self, name, score_path):
+            self.name = name; self._p = score_path
+            self.capabilities = {"i2v"}
+        def supports(self, req): return req <= self.capabilities
+        async def generate(self, req):
+            return GenResult(video_path=P(self._p), provider=self.name,
+                             cost_usd=0.1, latency_s=1.0)
+
+    from pipeline.contracts import GateReport
+
+    class FakeGate:
+        async def evaluate(self, scene, res):
+            v = 0.9 if res.provider == "winner" else 0.2
+            return GateReport(scene_id=scene.id, passed=res.provider == "winner",
+                              aesthetic=v, char_consistency=v, clip_adherence=v)
+
+    scene = Scene(id="s1", prompt="p", duration_s=4)
+    res = await Ensemble().run(scene, [FakeProv("winner", "/w.mp4"),
+                                       FakeProv("loser", "/l.mp4")], FakeGate())
+    takes = res.raw_meta.get("alternate_takes")
+    assert takes and takes[0]["provider"] == "loser"
+    assert takes[0]["video_path"].endswith("l.mp4")
+
+
+def test_music_prompt_roundtrips_in_spec():
+    """D-068: la música entra al flujo — el spec declara la cama musical [EN]."""
+    from pipeline.project import spec_from_dict, spec_to_dict
+    spec = spec_from_dict({"music_prompt": "dark tense electronic pulse",
+                           "scenes": [{"id": "s1", "prompt": "p", "duration_s": 4}]}, "t")
+    assert spec.music_prompt == "dark tense electronic pulse"
+    assert spec_to_dict(spec)["music_prompt"] == "dark tense electronic pulse"
