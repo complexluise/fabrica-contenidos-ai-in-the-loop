@@ -253,3 +253,36 @@ async def test_scene_anchor_feeds_every_pose_of_the_scene(tmp_path):
     # la apertura de s2 deriva del destino de s1, pero DEBE llevar el ancla a2
     s2_starts = [refs for sid, fr, refs in calls if sid == "s2" and "OPENING" in fr]
     assert s2_starts and all(str(a2) in refs for refs in s2_starts), s2_starts
+
+
+# --- D-065: voz por PLANO (dos hablantes en una escena) -----------------------
+
+def test_shot_voice_id_roundtrips_in_spec():
+    from pipeline.project import spec_from_dict, spec_to_dict
+    spec = spec_from_dict({"scenes": [{
+        "id": "s1", "prompt": "p", "duration_s": 8,
+        "voice_id": "voz_cepeda",
+        "shots": [
+            {"action": "a", "duration_s": 4, "voiceover": "¡Peleá!", "voice_id": "voz_espriella"},
+            {"action": "b", "duration_s": 4, "voiceover": "Me defiendo."},
+        ],
+    }]}, "t")
+    sh = spec.scenes[0].shots
+    assert sh[0].voice_id == "voz_espriella" and sh[1].voice_id is None
+    d = spec_to_dict(spec)["scenes"][0]["shots"]
+    assert d[0]["voice_id"] == "voz_espriella" and "voice_id" not in d[1]
+
+
+def test_voice_resolution_prefers_shot_over_scene():
+    from pipeline.audio import resolve_voice
+    from pipeline.runner import effective_voice
+    scene = Scene(id="s1", prompt="p", duration_s=8, voice_id="voz_escena", shots=[
+        Shot(action="a", duration_s=4, voice_id="voz_plano"),
+        Shot(action="b", duration_s=4),
+    ])
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[scene],
+                       voice_id="voz_proyecto")
+    assert effective_voice(scene, scene.shots[0]) == "voz_plano"   # el plano manda
+    assert effective_voice(scene, scene.shots[1]) == "voz_escena"  # cae a la escena
+    plano = scene.model_copy(update={"voice_id": effective_voice(scene, scene.shots[1])})
+    assert resolve_voice(plano, spec) == "voz_escena"

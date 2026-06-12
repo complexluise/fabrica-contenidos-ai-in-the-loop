@@ -135,6 +135,7 @@ class Shot(BaseModel):
     transition: Optional[Transition] = None  # como entra al plano siguiente
     # --- sonido ---
     voiceover: Optional[str] = None  # audio del plano (TTS)
+    voice_id: Optional[str] = None  # D-065: voz del PLANO (dos hablantes en una escena); si no, la de la escena
     caption: Optional[str] = None  # texto en pantalla del plano
     sfx: Optional[str] = None  # efectos de sonido de la accion (V2A MMAudio, D-034)
     # --- legacy / generacion ---

@@ -87,6 +87,12 @@ def _video_inputs(keyframe_key: str, strategy: str, provider_sig: dict,
     }
 
 
+def effective_voice(scene, shot) -> str | None:
+    """Voz efectiva del plano (D-065): plano > escena. Dos hablantes pueden convivir
+    en una escena (plano/contraplano) con su propia voz cada uno. Pura."""
+    return shot.voice_id or scene.voice_id
+
+
 def plan_ribbon(spec: ProjectSpec) -> list[dict]:
     """Aplana (escena, plano) en la cinta ordenada del film (D-059/D-060).
 
@@ -280,6 +286,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
         "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
+        "voice_id": effective_voice(scene, shot),  # D-065: el plano manda sobre la escena
     })
 
     # --- L5 video (cacheado) ---
