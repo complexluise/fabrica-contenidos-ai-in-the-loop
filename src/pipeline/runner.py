@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 import yaml
 
-from .assemble import _has_audio, concat_clips, trim_to, trim_to_tail
+from .assemble import concat_clips, has_audio, trim_to, trim_to_tail
 from .audio import (
     DEFAULT_VOICE_MODEL,
     effective_audio_cue,
@@ -26,10 +27,10 @@ from .audio import (
     vo_inputs,
 )
 from .classifier import classify
-from .config import Config
-from .contracts import GenResult
+from .config import Config, narrative_model
+from .contracts import GenResult, ShotJob
 from .deliver import reframe
-from .gate import FusedGate
+from .gate import FusedGate, build_default_signals
 from .keyframe import KeyframeGenerator, build_styled_prompt
 from .prompt_compile import (
     compose_keyframe_prompt,
@@ -44,7 +45,9 @@ from .project import (
     cache_key,
     character_refs,
     effective_shots,
+    read_yaml,
     resolve_refs,
+    resolve_under,
 )
 from .providers.base import build_provider
 from .providers.elevenlabs_tts import ElevenLabsTTS
@@ -57,7 +60,7 @@ from .telemetry import SceneRecord, Telemetry
 logger = logging.getLogger(__name__)
 
 
-def _keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str],
+def keyframe_inputs(styled_prompt: str, cfg: Config, ref_sig: list[str],
                      aspect: str = "9:16") -> dict:
     kf = cfg.style.keyframe
     return {
@@ -169,10 +172,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
     # D-063: poses ELEGIDAS por el humano entre variantes (pose_picks.yaml).
     # Mismo patrón que el ancla: la pose elegida entra con key "picked:<nombre>"
     # -> cambiarla invalida el clip aguas abajo (cascada de cache correcta).
-    pose_picks: dict = {}
-    picks_path = project.dir / "pose_picks.yaml"
-    if picks_path.exists():
-        pose_picks = yaml.safe_load(picks_path.read_text(encoding="utf-8")) or {}
+    pose_picks = read_yaml(project.dir / "pose_picks.yaml")
 
     out: list[dict] = []
     prev_destino = None  # destino del plano anterior DEL FILM (fuente del start)
@@ -189,6 +189,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
             scene_anchor, scene_anchor_key = None, None  # D-064: el ancla de ESTA escena
         boundary = await _shot_boundaries(
             project=project, cfg=cfg, keyframer=keyframer, scene=scene, shot=shot,
+            refs=character_refs(scene, spec.characters),  # D-075: refs explicitas, sin mutar Scene
             shot_id=shot_id, idx=idx, transition_in=entry["transition_in"],
             keyframe_overrides=keyframe_overrides, pose_picks=pose_picks,
             prev_destino=prev_destino, prev_destino_key=prev_destino_key,
@@ -207,6 +208,7 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
 
 
 async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx,
+                           refs: list | None = None,
                            transition_in, keyframe_overrides, pose_picks: dict | None = None,
                            prev_destino, prev_destino_key,
                            scene_prev_kf, scene_prev_key,
@@ -218,10 +220,10 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     D-070: la APERTURA solo existe para planos `lands` (los que interpolan de
     verdad); el resto es cámara-actúa — su único still es el destino. Mitad de
     stills, cero poses fantasma que ningún video usa."""
-    from .project import _resolve_under
     pose_picks = pose_picks or {}
-    refs_io = resolve_refs(project.dir, scene.character_refs)
-    ref_sig = sorted(str(r) for r in scene.character_refs)
+    refs = refs or []  # D-075: las refs llegan explicitas (Scene ya no las carga)
+    refs_io = resolve_refs(project.dir, refs)
+    ref_sig = sorted(str(r) for r in refs)
     cost = 0.0
 
     # --- destino (la lógica de keyframe de siempre, D-048) ---
@@ -230,7 +232,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     kf_ext = compose_keyframe_prompt(shot)
     styled = build_styled_prompt(scene, cfg.style, kf_ext, world=world)
     chain_refs: list = []
-    kf_inputs = _keyframe_inputs(styled, cfg, ref_sig, aspect=fmt)
+    kf_inputs = keyframe_inputs(styled, cfg, ref_sig, aspect=fmt)
     if idx > 0 and cfg.style.keyframe.ref_model:
         kf_inputs["chain_from"] = scene_prev_key  # identidad posicional, archivo aparte
         kf_inputs["anchor"] = scene_anchor_key    # D-064: cambiar el ancla regenera la escena
@@ -265,7 +267,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
                 destino = None
     picked = pose_picks.get(f"{shot_id}/destino")
     if picked:  # D-063: variante elegida por el humano -> manda, con key propia
-        p = _resolve_under(project.dir, picked)
+        p = resolve_under(project.dir, picked)
         if p.exists():
             destino, kf_key = p, f"picked:{p.name}"
 
@@ -286,7 +288,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     anchor, anchor_key = (scene_anchor, scene_anchor_key) if idx > 0 else (destino, kf_key)
     start_ext = compose_start_pose_prompt(shot, transition_in)
     start_styled = build_styled_prompt(scene, cfg.style, start_ext, world=world)
-    start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig, aspect=fmt)
+    start_inputs = keyframe_inputs(start_styled, cfg, ref_sig, aspect=fmt)
     start_inputs["role"] = "start_pose"        # namespace: no colisiona con destinos
     start_inputs["chain_from"] = source_key    # cambiar el destino previo invalida este
     start_inputs["anchor"] = anchor_key        # D-064: cambiar el ancla regenera la apertura
@@ -311,7 +313,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             start = None
     picked = pose_picks.get(f"{shot_id}/start")
     if picked:  # D-063: variante elegida -> manda, con key propia (cascada correcta)
-        p = _resolve_under(project.dir, picked)
+        p = resolve_under(project.dir, picked)
         if p.exists():
             start, start_key = p, f"picked:{p.name}"
 
@@ -319,7 +321,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             "start_key": start_key, "cost": cost}
 
 
-async def _generate_takes(*, project, spec, run, gate, shot, shot_id, plano,
+async def _generate_takes(*, project, spec, run, gate, shot, shot_id, job,
                           rule, subset, strategy, provider_sig, eff_prompt,
                           kf_key, chain_key, lands, take_picks):
     """El video del plano con economía de tomas (D-074). Devuelve (result, vid_key, cached).
@@ -328,13 +330,11 @@ async def _generate_takes(*, project, spec, run, gate, shot, shot_id, plano,
     cache key (re-run = $0). El gate las ORDENA (ranker, no juez); el humano
     puede imponer la suya vía take_picks.yaml. Las no elegidas viajan como
     `alternate_takes` (cobertura pagada -> sala de edición, D-068/D-069)."""
-    from pathlib import Path as _P
-    from .project import _resolve_under
 
     # La toma elegida por el humano manda (mismo patrón que pose_picks, D-063).
     picked = take_picks.get(shot_id)
     if picked:
-        p = _resolve_under(project.dir, picked)
+        p = resolve_under(project.dir, picked)
         if p.exists():
             logger.info("[%s] toma elegida por el humano: %s", shot_id, p.name)
             result = GenResult(video_path=p, provider="picked", cost_usd=0.0,
@@ -363,10 +363,13 @@ async def _generate_takes(*, project, spec, run, gate, shot, shot_id, plano,
             continue
         logger.info("[%s] toma %d/%d: %s -> %s | generando...", shot_id, i + 1,
                     n_takes, rule.strategy, [p.name for p in subset])
-        plano_i = plano.model_copy(update={"seed": seed_i}) if i else plano
-        res = await strategy.run(plano_i, subset, gate)
+        job_i = job.model_copy(update={"seed": seed_i}) if i else job
+        res = await strategy.run(job_i, subset, gate)
+        raw_path = Path(res.video_path)
         stored = project.cache_store("clips", vid_key_i, res.video_path, ".mp4")
         res.video_path = stored
+        if raw_path != stored:  # D-076: el crudo descargado ya vive en cache
+            raw_path.unlink(missing_ok=True)
         project.sidecar_store("clips", vid_key_i, {
             "provider": res.provider,
             "gate_passed": res.raw_meta.get("gate_passed", True),
@@ -374,10 +377,11 @@ async def _generate_takes(*, project, spec, run, gate, shot, shot_id, plano,
         # D-068: las tomas perdedoras del ensemble están PAGADAS — a cache como
         # cobertura para la edición (export/describe las verán), no a la basura.
         for j, take in enumerate(res.raw_meta.get("alternate_takes") or []):
-            tp = _P(take["video_path"])
+            tp = Path(take["video_path"])
             if tp.exists():
                 stored_take = project.cache_store("takes", f"{vid_key_i}a{j}", tp, ".mp4")
                 take["video_path"] = str(stored_take)
+                tp.unlink(missing_ok=True)  # D-076: el crudo ya vive en cache
                 logger.info("[%s] toma alternativa conservada: %s (%s)",
                             shot_id, stored_take.name, take["provider"])
         results.append((vid_key_i, res, False))
@@ -446,24 +450,25 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
     if not lands:
         start_frame, chain_key = None, None  # cámara-actúa: el destino es el init
 
-    plano = scene.model_copy(update={
-        "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
-        "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
-        "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
-        "voice_id": effective_voice(scene, shot),  # D-065: el plano manda sobre la escena
-        "negative_prompt": cfg.style.effective_video_negative() or None,  # D-072
-        "aspect": spec.format,            # D-071: el formato viaja al provider
-        "cfg_scale": shot.cfg_scale,      # D-072: adherencia por plano
-    })
+    # D-075: el job de render es un contrato propio — Scene queda narrativa pura.
+    job = ShotJob(
+        id=shot_id, prompt=eff_prompt, duration_s=shot.duration_s, seed=shot.seed,
+        class_=scene.class_, requirements=scene.requirements,
+        keyframe=keyframe, start_frame=start_frame,
+        negative_prompt=cfg.style.effective_video_negative() or None,  # D-072
+        aspect=spec.format,            # D-071: el formato viaja al provider
+        cfg_scale=shot.cfg_scale,      # D-072: adherencia por plano
+        character_refs=refs_io,        # IdentitySignal compara contra estas
+    )
 
     # --- D-074: plano STILL — Ken Burns sobre el destino, $0 de video ---
     if shot.media == "still":
         from .assemble import still_to_clip
-        from .deliver import _FORMATS
+        from .deliver import FORMATS
         vid_key = f"still:{kf_key}"
         move = shot.camera.move if shot.camera.move in ("push_in", "pull_out") else "push_in"
         clip_path = still_to_clip(keyframe, run.dir / "_trim" / f"{shot_id}.mp4",
-                                  shot.duration_s, size=_FORMATS.get(spec.format, (1080, 1920)),
+                                  shot.duration_s, size=FORMATS.get(spec.format, (1080, 1920)),
                                   fps=cfg.style.finish.fps, move=move)
         result = GenResult(video_path=clip_path, provider="still", cost_usd=0.0,
                            latency_s=0.0, raw_meta={"gate_passed": True})
@@ -472,7 +477,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
     else:
         result, vid_key, cached = await _generate_takes(
             project=project, spec=spec, run=run, gate=gate, shot=shot,
-            shot_id=shot_id, plano=plano, rule=rule, subset=subset_eff,
+            shot_id=shot_id, job=job, rule=rule, subset=subset_eff,
             strategy=strategy, provider_sig=provider_sig_eff,
             eff_prompt=eff_prompt, kf_key=kf_key, chain_key=chain_key,
             lands=lands, take_picks=take_picks)
@@ -502,7 +507,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
     sfx_key = None
     audio_provider = ""
     audio_cost = 0.0
-    if cue and mm is not None and not _has_audio(clip_path):
+    if cue and mm is not None and not has_audio(clip_path):
         try:
             sfx_key = cache_key("sfx", {"video_key": vid_key, **sfx_inputs(cue, mm.model, shot.seed)})
             hit = project.cache_lookup("sfx", sfx_key, ".mp4")
@@ -521,7 +526,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
             logger.warning("[%s] sin audio diegético (%s): %s", shot_id, type(exc).__name__, exc)
 
     # --- L7 caption del plano (best-effort) ---
-    cap = effective_caption(plano)
+    cap = effective_caption(shot)
     if cap:
         try:
             clip_path = burn_lower_third(clip_path, run.dir / "captioned" / f"{shot_id}.mp4",
@@ -533,16 +538,18 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
     vo_applied = False
     vo_file = None  # path del .mp3 de la voz (para el export, D-029)
     tts_cost = 0.0
-    if plano.voiceover and tts is not None:
+    if shot.voiceover and tts is not None:
         try:
-            voice_id = resolve_voice(plano, spec, default=cfg.voice.default_voice)
-            vo_key = cache_key("voiceover", vo_inputs(plano.voiceover, voice_id, tts.model))
+            # D-065/D-075: la voz efectiva (plano > escena) viaja explicita.
+            voice_id = resolve_voice(effective_voice(scene, shot), spec,
+                                     default=cfg.voice.default_voice)
+            vo_key = cache_key("voiceover", vo_inputs(shot.voiceover, voice_id, tts.model))
             vo_file = project.cache_lookup("voiceover", vo_key, ".mp3")
             if vo_file is None:
                 scratch = run.dir / "_vo" / f"{shot_id}.mp3"
-                await tts.synthesize(plano.voiceover, voice_id, scratch)
+                await tts.synthesize(shot.voiceover, voice_id, scratch)
                 vo_file = project.cache_store("voiceover", vo_key, scratch, ".mp3")
-                tts_cost = round(getattr(tts, "cost_per_char", 0.0) * len(plano.voiceover), 6)
+                tts_cost = round(getattr(tts, "cost_per_char", 0.0) * len(shot.voiceover), 6)
             clip_path = mux_voiceover(clip_path, vo_file, run.dir / "voiced" / f"{shot_id}.mp4")
             vo_applied = True
         except Exception as exc:
@@ -566,7 +573,7 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         "seed": shot.seed, "framing": kf_ext or shot.framing, "caption": cap,
         "intention": shot.intention or "",  # D-047: funcion dramatica al guion
         "motion": video_ext or "",  # D-048/A1: el movimiento que se le pidio al video
-        "voiceover": plano.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
+        "voiceover": shot.voiceover or "", "vo_path": str(vo_file) if vo_file else None,
         "sfx": shot.sfx or "", "ambience": scene.ambience or "", "sfx_key": sfx_key,
         "characters": scene.characters, "gate_scores": result.raw_meta.get("gate_scores", {}),
         "alternate_takes": result.raw_meta.get("alternate_takes", [])}
@@ -599,9 +606,8 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
         )
     providers_by_name = {n: build_provider(p) for n, p in cfg.providers.items()}
     # D-052: gate deshabilitado si el perfil lo pide (lista vacía → permisivo).
-    from .gate.fused import _build_default_signals
     if cfg.profile.gate.enabled:
-        signals = _build_default_signals(vlm_model=cfg.profile.gate.vlm_model)
+        signals = build_default_signals(vlm_model=cfg.profile.gate.vlm_model)
     else:
         signals = []
     gate = FusedGate(cfg.routing.thresholds, enforce=cfg.routing.enforce, signals=signals)
@@ -664,9 +670,12 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     # Contexto por escena (clasificación, refs, regla), calculado una sola vez.
     scene_ctx: dict[str, tuple] = {}
     for scene in spec.scenes:
-        scene.class_ = scene.class_ or classify(scene)
+        if scene.class_ is None:
+            # D-078: el clasificador puede llamar a Claude (sync) — to_thread para
+            # no bloquear el loop (misma regla que el gate, D-076).
+            scene.class_ = await asyncio.to_thread(
+                classify, scene, narrative_model(cfg.storyboard))
         refs = character_refs(scene, spec.characters)
-        scene.character_refs = refs
         rule = select_rule(scene.class_, cfg.routing)
         subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]
         strategy = build_strategy(rule.strategy)
@@ -681,10 +690,7 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
                                               keyframe_overrides)
 
     # D-074: tomas elegidas por el humano (mismo patrón que pose_picks, D-063).
-    take_picks: dict = {}
-    tp_path = project.dir / "take_picks.yaml"
-    if tp_path.exists():
-        take_picks = yaml.safe_load(tp_path.read_text(encoding="utf-8")) or {}
+    take_picks = read_yaml(project.dir / "take_picks.yaml")
 
     sem = asyncio.Semaphore(concurrency)
 

@@ -270,3 +270,54 @@ def test_estimate_image_cost():
     assert estimate_image_cost(12, 4, 0.003) == pytest.approx(0.144)
     assert estimate_image_cost(0, 4, 0.003) == 0.0
     assert estimate_image_cost(3, 0, 0.003) == 0.0
+
+
+# --- D-078: "mas encuadres" jamas reusa un seed emitido ------------------------
+
+def test_candidate_seed_offset_monotonic():
+    from pipeline.studio import candidate_seed_offset
+
+    assert candidate_seed_offset(None, 0) == 0
+    assert candidate_seed_offset(None, 3) == 3   # compat: proyectos sin contador
+    assert candidate_seed_offset(5, 3) == 5      # borraste candidatos: NO vuelve el descartado
+    assert candidate_seed_offset(2, 4) == 4
+
+
+# --- D-078: la biblia del mundo viaja al checkpoint interactivo ----------------
+
+async def test_gen_keyframes_scene_carries_world(tmp_path, monkeypatch):
+    """El runner generaba destinos CON world (D-067); el studio generaba los
+    candidatos SIN el -> el humano curaba anclas sin el set canonico."""
+    from pipeline.config import Config, KeyframeConfig, StyleConfig
+
+    proj = _project(tmp_path)
+    img = tmp_path / "gen.png"
+    img.write_bytes(b"png")
+
+    class _FakeKF:
+        seen: dict = {}
+
+        def __init__(self, *a, **kw):
+            pass
+
+        async def generate(self, scene, ref_images=None, seed=None, framing="",
+                           world=None, ref_map=None):
+            _FakeKF.seen = {"world": world, "ref_map": ref_map}
+            return img
+
+    monkeypatch.setattr("pipeline.studio.KeyframeGenerator", _FakeKF)
+    routing = RoutingConfig(rules={"standard": StrategyRule(strategy="router", providers=["k"])},
+                            thresholds={})
+    cfg = Config(
+        providers={"k": ProviderConfig(name="k", backend="fal", model="m",
+                                       cost_per_second=0.0, capabilities={"i2v"})},
+        routing=routing,
+        style=StyleConfig(style="lego", keyframe=KeyframeConfig(backend="fal", model="kf"),
+                          prompt_template="{scene_prompt}"),
+    )
+    spec = ProjectSpec(slug="t", style="lego", format="9:16",
+                       world="LEGO megacity at dusk",
+                       scenes=[Scene(id="s1", prompt="p", duration_s=4)])
+    from pipeline.studio import gen_keyframes_scene
+    await gen_keyframes_scene(proj, spec, cfg, "s1", n=1)
+    assert _FakeKF.seen["world"] == "LEGO megacity at dusk"

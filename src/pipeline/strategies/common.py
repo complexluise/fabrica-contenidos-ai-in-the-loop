@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from ..contracts import GenRequest, Scene
+from ..contracts import GenRequest, ShotJob
 
 
-def eligible_providers(scene: Scene, providers: list) -> list:
-    """Providers que cumplen las capabilities exigidas por la escena, en orden."""
-    required = scene.requirements.required_capabilities()
+def eligible_providers(job: ShotJob, providers: list) -> list:
+    """Providers que cumplen las capabilities exigidas por el plano, en orden."""
+    required = job.requirements.required_capabilities()
     return [p for p in providers if p.supports(required)]
 
 
-def scene_to_request(scene: Scene) -> GenRequest:
-    """Escena/plano -> request del provider.
+def job_to_request(job: ShotJob) -> GenRequest:
+    """ShotJob -> request del provider (D-075).
 
     D-070 (corrige D-059): si el plano trae `start_frame` (apertura de un plano
     `lands`), el clip INTERPOLA start→end — y el runner garantiza que el
@@ -21,23 +21,23 @@ def scene_to_request(scene: Scene) -> GenRequest:
     elegido entra como `init_image` (cámara-actúa).
     D-071/D-072: el formato del spec y el cfg_scale del plano viajan también."""
     extras = dict(
-        negative_prompt=scene.negative_prompt,
-        cfg_scale=scene.cfg_scale,
-        seed=scene.seed,
+        negative_prompt=job.negative_prompt,
+        cfg_scale=job.cfg_scale,
+        seed=job.seed,
     )
-    if scene.aspect:
-        extras["aspect_ratio"] = scene.aspect
-    if scene.start_frame is not None:
+    if job.aspect:
+        extras["aspect_ratio"] = job.aspect
+    if job.start_frame is not None:
         return GenRequest(
-            prompt=scene.prompt,
-            duration_s=scene.duration_s,
-            init_image=scene.start_frame,
-            end_image=scene.keyframe,
+            prompt=job.prompt,
+            duration_s=job.duration_s,
+            init_image=job.start_frame,
+            end_image=job.keyframe,
             **extras,
         )
     return GenRequest(
-        prompt=scene.prompt,
-        duration_s=scene.duration_s,
-        init_image=scene.keyframe,
+        prompt=job.prompt,
+        duration_s=job.duration_s,
+        init_image=job.keyframe,
         **extras,
     )

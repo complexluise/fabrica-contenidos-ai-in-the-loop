@@ -181,17 +181,12 @@ class Scene(BaseModel):
     requirements: SceneRequirements = Field(default_factory=SceneRequirements)
     shots: list[Shot] = Field(default_factory=list)  # planos (D-028); vacio = 1 plano implicito
     keyframe: Optional[Path] = None  # rellenado por L3 (plano 1 = keyframe elegido)
-    start_frame: Optional[Path] = None  # transitorio (D-059): frame de la cinta (último frame real del clip previo)
-    negative_prompt: Optional[str] = None  # transitorio (D-067): negative del estilo, viaja al GenRequest
-    aspect: Optional[str] = None  # transitorio (D-071): formato del spec -> GenRequest.aspect_ratio
-    cfg_scale: Optional[float] = None  # transitorio (D-072): adherencia del plano -> GenRequest
     seed: int = 0  # knob de reroll: subirlo regenera SOLO esta escena (cache miss)
     caption: Optional[str] = None  # texto en pantalla (lower-third), opcional
     voiceover: Optional[str] = None  # texto narrado (TTS ElevenLabs), opcional
     voice_id: Optional[str] = None  # override de voz por escena (si no, default del proyecto)
     ambience: Optional[str] = None  # sonido del lugar (V2A MMAudio, por escena, D-034)
     visual_intensity: Optional[int] = None  # 1-5: curva de intensidad visual del video (D-047, Block)
-    character_refs: list[Path] = Field(default_factory=list)  # transitorio: refs resueltas por el runner
 
     model_config = {"populate_by_name": True}
 
@@ -220,6 +215,31 @@ class Scene(BaseModel):
         muestran su propio estado. Sin `prompt_src_hash` (nunca compilado) -> stale.
         """
         return not self.prompt_manual and self.prompt_src_hash != self.narrative_hash()
+
+
+class ShotJob(BaseModel):
+    """Trabajo de generación de UN plano (D-075): lo que ven Strategy y QualityGate.
+
+    Antes esto viajaba como un `Scene.model_copy` con campos "transitorios" — el
+    contrato narrativo y el job de render son cosas distintas. Separarlos evita
+    que cada knob nuevo de generación ensucie a `Scene`, y hace explícito qué
+    consumen estrategias y gate.
+    """
+
+    id: str  # shot_id de la cinta (p.ej. "s1.2")
+    prompt: str  # prompt de VIDEO (dialecto de movimiento, D-072)
+    duration_s: float = Field(gt=0)
+    seed: int = 0
+    class_: Optional[SceneClass] = Field(default=None, alias="class")  # umbral del gate
+    requirements: SceneRequirements = Field(default_factory=SceneRequirements)
+    keyframe: Optional[Path] = None  # destino: frame-0 en cámara-actúa; end en lands (D-070)
+    start_frame: Optional[Path] = None  # apertura: solo planos `lands` (interpolación real)
+    negative_prompt: Optional[str] = None  # D-067/D-072: negative de video del estilo
+    aspect: Optional[str] = None  # D-071: formato del spec -> GenRequest.aspect_ratio
+    cfg_scale: Optional[float] = None  # D-072: adherencia por plano
+    character_refs: list[Path] = Field(default_factory=list)  # refs resueltas (IdentitySignal)
+
+    model_config = {"populate_by_name": True}
 
 
 class GenRequest(BaseModel):
@@ -273,11 +293,11 @@ class Provider(Protocol):
 
 @runtime_checkable
 class QualityGate(Protocol):
-    async def evaluate(self, scene: Scene, result: GenResult) -> GateReport: ...
+    async def evaluate(self, job: ShotJob, result: GenResult) -> GateReport: ...
 
 
 @runtime_checkable
 class Strategy(Protocol):
     async def run(
-        self, scene: Scene, providers: list[Provider], gate: QualityGate
+        self, job: ShotJob, providers: list[Provider], gate: QualityGate
     ) -> GenResult: ...

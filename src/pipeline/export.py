@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from .assemble import trim_to
+from .assemble import trim_to, trim_to_tail
 from .project import Project, ProjectSpec
 
 logger = logging.getLogger(__name__)
@@ -235,7 +235,10 @@ def export_bundle(project: Project, spec: ProjectSpec) -> Path:
         dur = float(p.get("duration_s") or 0)
         clip = project.cache_lookup("clips", p["video_key"], ".mp4")
         if clip is not None:  # video limpio (caché) recortado a la duración del plano
-            trimmed = trim_to(clip, export_dir / "_t.mp4", dur) if dur > 0 else clip
+            # D-078: un plano `lands` ATERRIZA al final — recortar por cabeza
+            # tiraba el aterrizaje (la lección D-060, ahora también en el export).
+            trim = trim_to_tail if p.get("lands") else trim_to
+            trimmed = trim(clip, export_dir / "_t.mp4", dur) if dur > 0 else clip
             shutil.copyfile(trimmed, media / f"{base}.mp4")
             if trimmed != clip:
                 Path(trimmed).unlink(missing_ok=True)
@@ -266,7 +269,7 @@ def export_bundle(project: Project, spec: ProjectSpec) -> Path:
     if spec.music and Path(spec.music).exists():
         shutil.copyfile(spec.music, media / f"music{Path(spec.music).suffix}")
 
-    final = next(iter(run.dir.glob("final_*.mp4")), None)  # rough cut = el final del run
+    final = run.final_render()  # rough cut = master (film stock) > final (D-078)
     if final is not None:
         shutil.copyfile(final, export_dir / "rough_cut.mp4")
 

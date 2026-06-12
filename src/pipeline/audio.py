@@ -10,11 +10,10 @@ sobre el default del proyecto. Ver [[prefer-apis-over-heavy-libs]].
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
-from .assemble import _has_audio
+from .assemble import ffmpeg_exe, has_audio
 from .contracts import Scene
 
 # Voz stock multilingüe de ElevenLabs ("Rachel"); se cambia en el project.yaml
@@ -29,10 +28,12 @@ DEFAULT_VOICE_MODEL = "eleven_turbo_v2_5"
 DIEGETIC_DUCK = 0.6
 
 
-def resolve_voice(scene: Scene, spec, default: str | None = None) -> str:
-    """Voz efectiva: override por escena > default del proyecto > default del motor
-    de voz activo (D-058) > default del sistema."""
-    return scene.voice_id or getattr(spec, "voice_id", None) or default or DEFAULT_VOICE_ID
+def resolve_voice(voice_id: str | None, spec, default: str | None = None) -> str:
+    """Voz efectiva: la del plano/escena (`voice_id`, ya resuelta por
+    `effective_voice`) > default del proyecto > default del motor de voz activo
+    (D-058) > default del sistema. D-075: recibe el voice_id explícito en vez de
+    un objeto-escena (el job de render ya no viaja disfrazado de Scene)."""
+    return voice_id or getattr(spec, "voice_id", None) or default or DEFAULT_VOICE_ID
 
 
 def select_tts_backend(name: str, *, has_elevenlabs: bool, has_fal: bool) -> str | None:
@@ -47,14 +48,14 @@ def select_tts_backend(name: str, *, has_elevenlabs: bool, has_fal: bool) -> str
     return next((engine for engine, ok in available.items() if ok), None)
 
 
-def effective_caption(scene: Scene) -> str | None:
+def effective_caption(shot) -> str | None:
     """Caption a quemar: la explícita; si no hay, se autocompleta con la VO (Sprint 6).
 
     Como el humano ya escribe el texto de la voz en off, no hace falta whisper.
-    """
-    if scene.caption:
-        return scene.caption
-    return scene.voiceover or None
+    Acepta Shot o Scene (ambos tienen caption/voiceover)."""
+    if shot.caption:
+        return shot.caption
+    return shot.voiceover or None
 
 
 def vo_inputs(text: str, voice_id: str, model: str) -> dict:
@@ -91,34 +92,38 @@ def vo_mix_filter(diegetic_volume: float = DIEGETIC_DUCK) -> str:
 # --- mezcla con ffmpeg (I/O) ------------------------------------------------
 
 
-def _ffmpeg() -> str:
-    exe = shutil.which("ffmpeg")
-    if not exe:
-        raise RuntimeError("ffmpeg no está en el PATH. Instálalo para mezclar audio.")
-    return exe
-
-
-def mux_voiceover(clip: Path, voice: Path, out: Path,
-                  diegetic_volume: float = DIEGETIC_DUCK) -> Path:
-    """Pone la VO en el clip (el video manda la duración). No usa `-shortest`.
-
-    - Clip **con** audio diegético (sfx/ambiente de MMAudio o nativo, D-034):
-      **mezcla** la VO encima, bajando el diegético (`amix`), no lo reemplaza.
-    - Clip **mudo** (sin audio): la VO se vuelve su pista de audio (como antes).
-    """
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if _has_audio(clip):
-        cmd = [
-            _ffmpeg(), "-y", "-i", str(clip), "-i", str(voice),
+def mux_cmds(clip, voice, out, clip_has_audio: bool,
+             diegetic_volume: float = DIEGETIC_DUCK, exe: str = "ffmpeg") -> list[str]:
+    """Comando ffmpeg del mux de VO (pura, testeable). EL VIDEO MANDA LA DURACIÓN
+    en AMBAS ramas (D-078): `duration=first` en el amix (rama diegética) y
+    `-shortest` en la rama muda. Sin `-shortest`, una VO más larga que el plano
+    estiraba el clip y DESINCRONIZABA todo el film aguas abajo del concat
+    (verificado con ffmpeg: un film de 4s salía de 6s). La VO que no cabe se
+    corta — exactamente lo que el advisory `vo_too_long` promete al firmar."""
+    if clip_has_audio:
+        return [
+            exe, "-y", "-i", str(clip), "-i", str(voice),
             "-filter_complex", vo_mix_filter(diegetic_volume),
             "-map", "0:v:0", "-map", "[a]",
             "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
         ]
-    else:
-        cmd = [
-            _ffmpeg(), "-y", "-i", str(clip), "-i", str(voice),
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
-        ]
+    return [
+        exe, "-y", "-i", str(clip), "-i", str(voice),
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+        "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
+    ]
+
+
+def mux_voiceover(clip: Path, voice: Path, out: Path,
+                  diegetic_volume: float = DIEGETIC_DUCK) -> Path:
+    """Pone la VO en el clip. El video manda la duración (D-078; ver `mux_cmds`).
+
+    - Clip **con** audio diegético (sfx/ambiente de MMAudio o nativo, D-034):
+      **mezcla** la VO encima, bajando el diegético (`amix`), no lo reemplaza.
+    - Clip **mudo** (sin audio): la VO se vuelve su pista de audio, recortada
+      al final del video (`-shortest`).
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = mux_cmds(clip, voice, out, has_audio(clip), diegetic_volume, exe=ffmpeg_exe())
     subprocess.run(cmd, check=True, capture_output=True)
     return out

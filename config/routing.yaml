@@ -31,7 +31,7 @@ storyboard_backends:
   google:
     _meta:
       label: "Google"
-      desc: "Gemini imagen para keyframes; Gemini Flash para narrativa. Cero fal."
+      desc: "Gemini imagen para keyframes; narrativa Claude Haiku (via Gemini: diferida, D-078). Video sin fal."
       badge: "google"
       color: "teal"
     keyframe:

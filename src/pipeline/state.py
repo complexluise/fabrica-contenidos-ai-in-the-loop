@@ -16,9 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-import yaml
-
-from .project import Project, ProjectSpec, _resolve_under
+from .project import Project, ProjectSpec, read_yaml, resolve_under
 
 
 class Stage(str, Enum):
@@ -139,7 +137,9 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
         if s.class_ and s.class_ not in routing_classes:
             out.append({"scene": s.id, "kind": "unknown_class",
                         "msg": f"la clase '{s.class_}' no existe en el perfil; se enruta como 'standard'."})
-        if s.dialogue and not (s.voiceover or any(sh.voiceover for sh in s.shots)):
+        # D-078: cobertura EFECTIVA (incluye la herencia escena->primer plano);
+        # antes `s.voiceover` contaba como cubierto aunque jamás llegara al audio.
+        if s.dialogue and not any(sh.voiceover for sh in effective_shots(s)):
             out.append({"scene": s.id, "kind": "dialogue_no_voice",
                         "msg": "tiene diálogo pero ningún 'voiceover'; se verá como texto pero no se "
                                "escuchará (el TTS solo dobla 'voiceover')."})
@@ -222,39 +222,36 @@ def estimate_image_cost(n_scenes: int, n_per_scene: int, cost_per_image: float) 
     return round(max(0, n_scenes) * max(0, n_per_scene) * max(0.0, cost_per_image), 4)
 
 
-def _load_yaml(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-
 def derive_state(project: Project, spec: ProjectSpec, *, has_fal_key: bool) -> ProjectState:
     """Lee los artefactos del proyecto y deriva su estado. Barato; no genera nada."""
     scene_ids = [s.id for s in spec.scenes]
     designed = [name for name, ch in spec.characters.items() if ch.design]
 
-    casting_chosen = _load_yaml(project.dir / "casting.yaml")
+    casting_chosen = read_yaml(project.dir / "casting.yaml")
     casting = CastingState(
         needed=len(designed),
         chosen=sum(1 for n in designed if n in casting_chosen),
         has_candidates=(project.dir / "cast_candidates.yaml").exists(),
     )
 
-    selections = _load_yaml(project.selections_path)
+    selections = read_yaml(project.selections_path)
     keyframes = KeyframesState(
         total=len(scene_ids),
         # Cuenta elegido solo si el archivo EXISTE (resuelto project-relative): un
         # proyecto importado con selections de otra máquina no debe figurar "listo"
         # cuando los frames no están en disco (D-044).
         chosen=sum(1 for sid in scene_ids
-                   if sid in selections and _resolve_under(project.dir, selections[sid]).exists()),
+                   if sid in selections and resolve_under(project.dir, selections[sid]).exists()),
         has_candidates=project.candidates_path.exists(),
     )
 
     storyboard_signed = (project.dir / "storyboard.signed").exists()
 
     run = project.latest_run()
-    render = RenderState(done=run is not None, run_id=run.run_id if run is not None else None)
+    # D-078: render hecho = hay VIDEO FINAL (master o final). new_run() crea la
+    # carpeta al inicio, así que "existe un run" incluía runs que reventaron a mitad.
+    final = run.final_render() if run is not None else None
+    render = RenderState(done=final is not None, run_id=run.run_id if run is not None else None)
     export_done = (project.dir / "export").exists()
 
     stage = compute_stage(

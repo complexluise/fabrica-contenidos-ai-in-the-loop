@@ -260,8 +260,10 @@ def _deterministic_prompt(scene: Scene, characters: dict[str, Character] | None 
     return ", ".join(parts) or (scene.prompt or scene.id)
 
 
-def compile_prompt(scene: Scene, characters: dict[str, Character] | None = None) -> str:
-    """Compila el prompt visual desde la narrativa. Haiku; sin key, deterministico."""
+def compile_prompt(scene: Scene, characters: dict[str, Character] | None = None,
+                   model: str | None = None) -> str:
+    """Compila el prompt visual desde la narrativa. Haiku (o el modelo del perfil
+    narrativo, D-078); sin key, deterministico."""
     key = get_settings().anthropic_api_key
     if not key:
         logger.warning("prompts: sin ANTHROPIC_API_KEY -> prompt deterministico (degradado).")
@@ -273,7 +275,7 @@ def compile_prompt(scene: Scene, characters: dict[str, Character] | None = None)
         return _deterministic_prompt(scene, characters)
     client = anthropic.Anthropic(api_key=key)
     msg = client.messages.create(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=300,
         system=_SYSTEM,
         messages=[{"role": "user",
@@ -283,9 +285,10 @@ def compile_prompt(scene: Scene, characters: dict[str, Character] | None = None)
     return text or _deterministic_prompt(scene, characters)
 
 
-def sync_scene_prompt(scene: Scene, characters: dict[str, Character] | None = None) -> Scene:
+def sync_scene_prompt(scene: Scene, characters: dict[str, Character] | None = None,
+                      model: str | None = None) -> Scene:
     """Recompila el prompt y lo marca en-sintonia (auto, hash actualizado). Muta y devuelve."""
-    scene.prompt = compile_prompt(scene, characters)
+    scene.prompt = compile_prompt(scene, characters, model=model)
     scene.prompt_src_hash = scene.narrative_hash()
     scene.prompt_manual = False
     return scene

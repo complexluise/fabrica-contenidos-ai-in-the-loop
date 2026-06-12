@@ -1120,6 +1120,84 @@ economía de tomas. Ver [D-070]–[D-074].
 
 ---
 
+## Sprint 6.33 — Orden interno: el contrato del plano y la disciplina de costo (D-075..D-077)
+
+**Objetivo:** ejecutar los hallazgos de la auditoría de arquitectura (2026-06-12): separar el
+contrato narrativo del job de render (`ShotJob`), matar el segundo pipeline del modo `--brief`,
+cerrar las cuatro fugas de costo/latencia (default de perfil, gate bloqueante, identity Opus
+hardcodeado, costo de reintentos) y volver honestas las fronteras (nombres públicos, disciplina
+de cache sin excepciones, guard de slug). Ver [D-075], [D-076], [D-077].
+
+### Acceptance Criteria
+- [x] AC1 — `ShotJob` en contracts.py; `Strategy`/`QualityGate` operan sobre ShotJob; `Scene`
+  queda sin campos transitorios (`start_frame`, `negative_prompt`, `aspect`, `cfg_scale`,
+  `character_refs`); `job_to_request` reemplaza a `scene_to_request`. 🔬
+- [x] AC2 — Un solo pipeline: `run --brief` corre por `run_project` (proyecto efímero en `out/`),
+  respeta `--profile` y cachea; `_run_async` eliminado.
+- [x] AC3 — `DEFAULT_PROFILE` único en config.py, importado por CLI y server (adiós al `prod`
+  implícito del server); gastar más es opt-in explícito. 🔬
+- [x] AC4 — Gate sin bloqueo: llamadas Anthropic vía `to_thread`; `IdentitySignal` usa el
+  `vlm_model` del perfil (default Haiku). Router acumula costo/latencia de reintentos;
+  Cascade reporta `gate_reason` también al fallar. 🔬
+- [x] AC5 — Disciplina de cache: `pose_variants` con key completa + lookup (re-correr = $0);
+  studio incluye `aspect` en la key del keyframe (cierra D-071); scratch del keyframer con seed;
+  descargas de fal con uuid y borrado del crudo tras `cache_store`. 🔬
+- [x] AC6 — Fronteras: helpers compartidos sin guion bajo (`resolve_under`, `keyframe_inputs`,
+  `has_audio`, `probe_duration`, `FORMATS`, `build_default_signals`, `slugify`); `read_yaml()`
+  único; `load_config` parsea cada YAML una vez; `FinishConfig` en config.py; guard de slug en
+  el server (nada se resuelve/borra fuera de `projects/`). 🔬
+
+### Tasks
+- [x] T1 — ShotJob + limpieza de Scene + strategies/gate/runner/studio sobre el nuevo contrato. 🔬
+- [x] T2 — Modo brief como wrapper de `run_project`.
+- [x] T3 — Disciplina de costo (D-076): default único, gate async, identity por perfil, router. 🔬
+- [x] T4 — Disciplina de cache (D-077): pose_variants, aspect en keys, scratch, descargas. 🔬
+- [x] T5 — Fronteras e higiene (D-077): renombres, read_yaml, config 1-parse, slug guard, bodies
+  Pydantic livianos en el server.
+
+---
+
+> **Estado:** core en verde (**377 tests**). `Scene` vuelve a ser narrativa pura; el costo de una
+> corrida es el que el humano firmo en CUALQUIER superficie (CLI y server comparten default).
+> Pendiente de smoke real (autorizacion de presupuesto del usuario).
+
+---
+
+## Sprint 6.34 — El recorrido de ejecución: voz que no estira el film + checkpoints honestos (D-078)
+
+**Objetivo:** ejecutar los hallazgos del trace de ejecución (2026-06-12, verificación empírica
+en ffmpeg local, $0 de API): el desync por VO larga, la voz de escena que moría en silencio,
+el contexto D-067 ausente en los checkpoints, Opus/bloqueo en el clasificador, la config LLM
+muerta, el estado que mentía tras un run fallido y la disciplina restante. Ver [D-078].
+
+### Acceptance Criteria
+- [x] AC1 — El video manda la duración en AMBAS ramas del mux de VO (`-shortest` en la rama
+  muda); `mux_cmds` puro y testeado. Verificado de punta a punta con ffmpeg local. 🔬
+- [x] AC2 — `effective_shots` hereda `voiceover`/`caption` de escena al primer plano si ningún
+  plano los declara; `dialogue_no_voice` usa cobertura efectiva (sin falso negativo). 🔬
+- [x] AC3 — `world` + `ref_map` en TODA generación de stills del studio (keyframes por escena,
+  previews, variantes de pose); keys incorporan el mundo. 🔬
+- [x] AC4 — Clasificador a Haiku + `to_thread`; `cfg.storyboard.llm.model` cableado vía
+  `narrative_model()` (compile/describe/classify); preset google honesto. 🔬
+- [x] AC5 — `Run.final_render()` (master > final > None): el estado marca render hecho solo con
+  video final; server y export sirven el master. 🔬
+- [x] AC6 — Disciplina restante: contador monótono de seeds de candidatos; gate early-return
+  sin señales; `.env` preserva comentarios; export recorta por cola los `lands`; aspect en la
+  key del casting; `seconds_total` int (schema fal verificado). 🔬
+
+### Tasks
+- [x] T1 — Mux de VO + verificación empírica ffmpeg. 🔬
+- [x] T2 — Herencia escena→plano + advisory. 🔬
+- [x] T3 — Contexto D-067 en el studio. 🔬
+- [x] T4 — Clasificador + narrative_model + preset honesto. 🔬
+- [x] T5 — final_render + estado/server/export. 🔬
+- [x] T6 — Seeds, gate, .env, export lands, cast aspect, música int. 🔬
+
+> **Estado:** core en verde (**391 tests**). El desync por VO larga quedo verificado y
+> RE-verificado con ffmpeg local: clip 2s+VO 4s pasaba el film de 4s a 6.04s; post-fix el film
+> mide 4.02s. Cache keys de candidatos/previews/variantes cambian SOLO en proyectos con `world:`.
+> Smoke real con APIs sigue pendiente de autorizacion (presupuesto).
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

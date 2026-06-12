@@ -29,28 +29,13 @@ import re
 import subprocess
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from .config import FinishConfig  # noqa: F401 — re-export (D-077)
 
 logger = logging.getLogger(__name__)
 
 
-class FinishConfig(BaseModel):
-    """El "film stock" del estilo: ~8 escalares tuneables en el YAML (D-073)."""
-
-    enabled: bool = True
-    saturation: float = 0.9      # los colores de cine: saturados O luminosos, no ambos
-    contrast: float = 1.02
-    # Curva S con hombro fílmico: sombras levemente comprimidas, highlights con roll-off.
-    curve: str = "0/0 0.25/0.22 0.5/0.5 0.75/0.78 1/0.97"
-    vignette: bool = True
-    halation_alpha: float = 0.12  # casi invisible: los coloristas avisan que se nota = mal
-    halation_sigma: float = 30.0
-    halation_threshold: int = 200  # solo highlights altos (Y > umbral)
-    sharpen: float = 0.4
-    grain: int = 7                # noise alls= (5-10 ~ 10-15% de opacidad 35mm)
-    fps: int = 24                 # conformar TODO a una sola cadencia (mezclas = tell)
-    lufs: float = -14.0           # Instagram/TikTok
-    true_peak: float = -1.0
+# FinishConfig vive en config.py (D-077): la capa de config no depende de
+# un modulo de procesamiento. Se re-exporta aca por compatibilidad.
 
 
 # --- builders puros -----------------------------------------------------------
@@ -142,15 +127,15 @@ def apply_finish(src: Path, out: Path, fc: FinishConfig) -> Path:
     Pasada A: cadena visual + medición loudnorm; Pasada B: loudnorm lineal con
     lo medido. Si algo falla, devuelve `src` intacto (el finishing nunca tumba
     un render — mismo contrato best-effort que captions/música)."""
-    from .assemble import _ffmpeg, _has_audio
+    from .assemble import ffmpeg_exe, has_audio
 
     out.parent.mkdir(parents=True, exist_ok=True)
     graded = out.parent / f"_{out.stem}_graded.mp4"
 
     # Pasada A: look visual (+ medir loudnorm si hay audio, mismo decode).
-    cmd = [_ffmpeg(), "-y", "-i", str(src),
+    cmd = [ffmpeg_exe(), "-y", "-i", str(src),
            "-filter_complex", film_look_filter(fc), "-map", "[vout]"]
-    has_audio = _has_audio(src)
+    has_audio = has_audio(src)
     if has_audio:
         cmd += ["-map", "0:a", "-af", loudnorm_measure_filter(fc.lufs, fc.true_peak),
                 "-c:a", "aac"]
@@ -174,7 +159,7 @@ def apply_finish(src: Path, out: Path, fc: FinishConfig) -> Path:
         return out
 
     # Pasada B: mastering lineal con los valores medidos (video ya listo: copy).
-    cmd2 = [_ffmpeg(), "-y", "-i", str(graded),
+    cmd2 = [ffmpeg_exe(), "-y", "-i", str(graded),
             "-af", loudnorm_apply_filter(measured, fc.lufs, fc.true_peak),
             "-c:v", "copy", "-c:a", "aac", str(out)]
     proc2 = _run(cmd2)
@@ -189,12 +174,12 @@ def apply_finish(src: Path, out: Path, fc: FinishConfig) -> Path:
 
 def conform_speed(clip: Path, out: Path, speed: float, fps: int = 24) -> Path:
     """Conforma velocidad/cadencia de UN clip (I/O). Best-effort: fallo -> original."""
-    from .assemble import _ffmpeg, _has_audio
+    from .assemble import ffmpeg_exe, has_audio
 
     out.parent.mkdir(parents=True, exist_ok=True)
     vf, af = speed_filters(speed, fps)
-    cmd = [_ffmpeg(), "-y", "-i", str(clip), "-vf", vf]
-    if af and _has_audio(clip):
+    cmd = [ffmpeg_exe(), "-y", "-i", str(clip), "-vf", vf]
+    if af and has_audio(clip):
         cmd += ["-af", af]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out)]
     proc = _run(cmd)

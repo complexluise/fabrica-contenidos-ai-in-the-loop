@@ -142,3 +142,33 @@ def test_derive_sin_clave_es_sin_claves(tmp_path):
     proj = _project(tmp_path)
     spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
     assert derive_state(proj, spec, has_fal_key=False).stage is Stage.SIN_CLAVES
+
+
+# --- D-078: un run FALLIDO no es un render hecho ------------------------------
+
+def test_derive_render_ignora_run_sin_final(tmp_path):
+    proj = _project(tmp_path)
+    _sign(proj)
+    kf = proj.dir / "k.png"
+    kf.write_bytes(b"img")
+    proj.selections_path.write_text(yaml.safe_dump({"s1": "k.png"}), encoding="utf-8")
+    (proj.runs_dir / "20260612-000000-dead").mkdir(parents=True)  # run que reviento a mitad
+    spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
+    st = derive_state(proj, spec, has_fal_key=True)
+    assert st.render.done is False
+    assert st.stage is Stage.RENDER  # el estado NO miente (D-032)
+
+
+def test_derive_render_hecho_con_final(tmp_path):
+    proj = _project(tmp_path)
+    _sign(proj)
+    kf = proj.dir / "k.png"
+    kf.write_bytes(b"img")
+    proj.selections_path.write_text(yaml.safe_dump({"s1": "k.png"}), encoding="utf-8")
+    run_dir = proj.runs_dir / "20260612-000001-ok"
+    run_dir.mkdir(parents=True)
+    (run_dir / "final_9x16.mp4").write_bytes(b"v")
+    spec = _spec([Scene(id="s1", prompt="x", duration_s=5)])
+    st = derive_state(proj, spec, has_fal_key=True)
+    assert st.render.done is True
+    assert st.stage is Stage.PAQUETE

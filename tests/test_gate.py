@@ -96,3 +96,18 @@ def test_soft_mode_always_passes_but_keeps_scores():
 def test_strict_mode_keeps_verdict():
     rep = GateReport(passed=False, aesthetic=0.1)
     assert enforce_verdict(rep, enforce=True).passed is False
+
+
+# --- D-078: sin senales, el gate no decodifica NADA ----------------------------
+
+async def test_gate_with_no_signals_skips_decoding(tmp_path):
+    from pipeline.contracts import GenResult, ShotJob
+    from pipeline.gate import FusedGate
+
+    gate = FusedGate({}, signals=[], enforce=True)
+    job = ShotJob(id="s", prompt="p", duration_s=2)
+    res = GenResult(video_path=tmp_path / "no_existe.mp4", provider="x",
+                    cost_usd=0.0, latency_s=0.0)
+    rep = await gate.evaluate(job, res)
+    assert rep.passed is True
+    assert "sin señales configuradas" in rep.reason  # early-return, no "sin frame"

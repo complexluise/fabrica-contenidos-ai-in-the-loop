@@ -167,7 +167,20 @@ class Scene(BaseModel):                         # beat (D-028): agrupa planos; c
     keyframe: Path | None = None               # rellenado por L3 (plano 1 = ancla elegida)
     seed: int = 0                              # reroll: subirlo regenera SOLO esta escena
     ambience: str | None = None                # room tone del lugar — [EN] (V2A MMAudio, D-034)
-    character_refs: list[Path] = []            # transitorio: refs resueltas por el runner
+
+class ShotJob(BaseModel):                       # D-075: el TRABAJO de render de UN plano.
+    id: str                                    # Es lo que ven Strategy y QualityGate; Scene
+    prompt: str                                # queda como contrato narrativo puro (los campos
+    duration_s: float                          # "transitorios" de antes viven aca).
+    seed: int = 0
+    class_: SceneClass | None = None           # umbral del gate
+    requirements: SceneRequirements = SceneRequirements()
+    keyframe: Path | None = None               # destino (frame-0 en camara-actua; end en lands)
+    start_frame: Path | None = None            # apertura (solo planos `lands`, D-070)
+    negative_prompt: str | None = None         # D-072: negative de VIDEO del estilo
+    aspect: str | None = None                  # D-071: formato del spec
+    cfg_scale: float | None = None             # D-072: adherencia por plano
+    character_refs: list[Path] = []            # refs resueltas (IdentitySignal)
 
 # Plano 1 = el ANCLA que elige el humano (best-of-N, por escena). Planos 2+ se ENCADENAN: cada uno
 # edita (i2i) el keyframe del plano previo + su delta → coherencia visual (D-048). El KEYFRAME es
@@ -242,10 +255,10 @@ class Provider(Protocol):
     async def generate(self, req: GenRequest) -> GenResult: ...
 
 class QualityGate(Protocol):
-    async def evaluate(self, scene: Scene, result: GenResult) -> GateReport: ...
+    async def evaluate(self, job: ShotJob, result: GenResult) -> GateReport: ...
 
 class Strategy(Protocol):
-    async def run(self, scene: Scene, providers: list[Provider],
+    async def run(self, job: ShotJob, providers: list[Provider],
                   gate: QualityGate) -> GenResult: ...
 ```
 

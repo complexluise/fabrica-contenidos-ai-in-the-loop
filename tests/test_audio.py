@@ -32,21 +32,22 @@ def _spec(voice_id=None, scenes=None):
 
 
 def test_resolve_voice_scene_override_wins():
+    # D-075: resolve_voice recibe el voice_id efectivo, no un objeto-escena.
     scene = Scene(id="s", prompt="p", duration_s=4, voice_id="scene-voice")
     spec = _spec(voice_id="proj-voice")
-    assert resolve_voice(scene, spec) == "scene-voice"
+    assert resolve_voice(scene.voice_id, spec) == "scene-voice"
 
 
 def test_resolve_voice_falls_back_to_project_default():
     scene = Scene(id="s", prompt="p", duration_s=4)
     spec = _spec(voice_id="proj-voice")
-    assert resolve_voice(scene, spec) == "proj-voice"
+    assert resolve_voice(scene.voice_id, spec) == "proj-voice"
 
 
 def test_resolve_voice_falls_back_to_system_default():
     scene = Scene(id="s", prompt="p", duration_s=4)
     spec = _spec(voice_id=None)
-    assert resolve_voice(scene, spec) == DEFAULT_VOICE_ID
+    assert resolve_voice(scene.voice_id, spec) == DEFAULT_VOICE_ID
 
 
 # --- effective_caption (autocompletado desde la VO) -------------------------
@@ -106,3 +107,24 @@ def test_load_project_spec_parses_voiceover_and_voice(tmp_path: Path):
     assert spec.scenes[1].voice_id == "otra-voz"
     # el modelo por defecto soporta multilingüe (español)
     assert "multilingual" in DEFAULT_VOICE_MODEL or "turbo" in DEFAULT_VOICE_MODEL
+
+
+# --- D-078: el video manda la duracion en AMBAS ramas del mux -----------------
+
+def test_mux_cmds_mute_clip_video_rules_duration():
+    """Rama muda: sin -shortest, una VO mas larga que el plano estiraba el clip
+    y DESINCRONIZABA todo el film aguas abajo del concat (verificado: film de
+    4s salia de 6s). El video manda."""
+    from pipeline.audio import mux_cmds
+
+    cmd = mux_cmds("c.mp4", "v.mp3", "o.mp4", clip_has_audio=False)
+    assert "-shortest" in cmd
+
+
+def test_mux_cmds_diegetic_branch_mixes_video_first():
+    from pipeline.audio import mux_cmds
+
+    cmd = mux_cmds("c.mp4", "v.mp3", "o.mp4", clip_has_audio=True)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "duration=first" in fc          # el audio del CLIP manda la mezcla
+    assert "-shortest" not in cmd          # amix ya gobierna; -shortest sobra

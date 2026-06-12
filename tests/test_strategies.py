@@ -10,11 +10,12 @@ from pathlib import Path
 import pytest
 
 from pipeline.config import load_routing
-from pipeline.contracts import GateReport, GenResult, Scene, SceneRequirements
+from pipeline.contracts import GateReport, GenResult, SceneRequirements, ShotJob
 from pipeline.gate import gate_score
 from pipeline.strategies.cascade import Cascade
 from pipeline.strategies.ensemble import Ensemble
 from pipeline.strategies.dispatch import build_strategy, select_rule
+from pipeline.strategies.router import SmartRouter
 
 
 class FakeProvider:
@@ -43,13 +44,13 @@ class FakeGate:
     def __init__(self, scores):
         self.scores = scores
 
-    async def evaluate(self, scene, result):
+    async def evaluate(self, job, result):
         s = self.scores.get(result.provider, 0.0)
         return GateReport(passed=s >= 0.7, aesthetic=s, char_consistency=s, clip_adherence=s)
 
 
-def _scene(req=None):
-    return Scene(id="s", prompt="p", duration_s=4, requirements=req or SceneRequirements())
+def _job(req=None):
+    return ShotJob(id="s", prompt="p", duration_s=4, requirements=req or SceneRequirements())
 
 
 # --- gate_score -------------------------------------------------------------
@@ -67,7 +68,7 @@ def test_gate_score_monotonic_and_penalizes_artifacts():
 async def test_cascade_stops_at_first_passing_tier():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.4, "seedance": 0.9})  # kling falla, seedance pasa
-    res = await Cascade().run(_scene(), providers, gate)
+    res = await Cascade().run(_job(), providers, gate)
     assert res.provider == "seedance"
     assert res.raw_meta["gate_passed"] is True
     assert res.raw_meta["tiers_tried"] == ["kling", "seedance"]
@@ -76,7 +77,7 @@ async def test_cascade_stops_at_first_passing_tier():
 async def test_cascade_accumulates_cost_of_failed_tiers():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.4, "seedance": 0.9})
-    res = await Cascade().run(_scene(), providers, gate)
+    res = await Cascade().run(_job(), providers, gate)
     # paga ambos: 0.03*4 + 0.06*4 = 0.36
     assert res.cost_usd == pytest.approx(0.36)
 
@@ -84,7 +85,7 @@ async def test_cascade_accumulates_cost_of_failed_tiers():
 async def test_cascade_first_tier_passes_no_escalation():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.9})
-    res = await Cascade().run(_scene(), providers, gate)
+    res = await Cascade().run(_job(), providers, gate)
     assert res.provider == "kling"
     assert res.cost_usd == pytest.approx(0.12)  # solo kling
 
@@ -92,7 +93,7 @@ async def test_cascade_first_tier_passes_no_escalation():
 async def test_cascade_all_fail_marks_human_queue():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.2, "seedance": 0.3})
-    res = await Cascade().run(_scene(), providers, gate)
+    res = await Cascade().run(_job(), providers, gate)
     assert res.raw_meta["gate_passed"] is False
     assert res.raw_meta["needs_human"] is True
 
@@ -103,14 +104,14 @@ async def test_ensemble_picks_highest_score():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("veo", 0.5, {"i2v"}),
                  FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.75, "veo": 0.95, "seedance": 0.8})
-    res = await Ensemble().run(_scene(), providers, gate)
+    res = await Ensemble().run(_job(), providers, gate)
     assert res.provider == "veo"  # mejor score
 
 
 async def test_ensemble_cost_is_sum_of_all_candidates():
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("seedance", 0.06, {"i2v"})]
     gate = FakeGate({"kling": 0.8, "seedance": 0.9})
-    res = await Ensemble().run(_scene(), providers, gate)
+    res = await Ensemble().run(_job(), providers, gate)
     assert res.cost_usd == pytest.approx(0.36)  # 0.12 + 0.24
 
 
@@ -123,21 +124,21 @@ async def test_ensemble_tolerates_a_failing_provider():
     # Veo falla (sin key), pero kling/seedance sí: la escena no debe morir.
     providers = [BoomProvider("veo", 0.5, {"i2v"}), FakeProvider("kling", 0.03, {"i2v"})]
     gate = FakeGate({"kling": 0.8})
-    res = await Ensemble().run(_scene(), providers, gate)
+    res = await Ensemble().run(_job(), providers, gate)
     assert res.provider == "kling"
 
 
 async def test_ensemble_raises_when_all_providers_fail():
     providers = [BoomProvider("veo", 0.5, {"i2v"}), BoomProvider("kling", 0.03, {"i2v"})]
     with pytest.raises(Exception):
-        await Ensemble().run(_scene(), providers, FakeGate({}))
+        await Ensemble().run(_job(), providers, FakeGate({}))
 
 
 async def test_ensemble_filters_by_capability():
     # Escena con audio: solo veo lo soporta -> ensemble corre solo veo.
     providers = [FakeProvider("kling", 0.03, {"i2v"}), FakeProvider("veo", 0.5, {"i2v", "audio"})]
     gate = FakeGate({"veo": 0.9})
-    res = await Ensemble().run(_scene(SceneRequirements(needs_audio=True)), providers, gate)
+    res = await Ensemble().run(_job(SceneRequirements(needs_audio=True)), providers, gate)
     assert res.provider == "veo"
 
 
@@ -159,3 +160,24 @@ def test_build_strategy_returns_named_instance():
     assert build_strategy("cascade").name == "cascade"
     assert build_strategy("ensemble").name == "ensemble"
     assert build_strategy("router").name == "router"
+
+
+# --- D-076: el router acumula el costo de los reintentos -----------------------
+
+async def test_router_retry_accumulates_cost():
+    """El reintento por gate tambien se pago: cost_usd = suma de intentos
+    (antes el router descartaba el costo del intento fallido; cascade/ensemble
+    ya acumulaban — la telemetria subreportaba)."""
+    providers = [FakeProvider("kling", 0.03, {"i2v"})]
+    gate = FakeGate({"kling": 0.0})  # nunca pasa -> 1 reintento (max_retries=1)
+    res = await SmartRouter(max_retries=1).run(_job(), providers, gate)
+    assert res.raw_meta["attempts"] == 2
+    assert res.cost_usd == pytest.approx(0.24)  # 2 intentos x 0.03 x 4s
+
+
+async def test_router_single_attempt_cost_unchanged():
+    providers = [FakeProvider("kling", 0.03, {"i2v"})]
+    gate = FakeGate({"kling": 0.9})  # pasa a la primera
+    res = await SmartRouter(max_retries=1).run(_job(), providers, gate)
+    assert res.raw_meta["attempts"] == 1
+    assert res.cost_usd == pytest.approx(0.12)

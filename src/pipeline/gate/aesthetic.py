@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..contracts import Scene
+from ..contracts import ShotJob
 
 
 class AestheticSignal:
@@ -36,7 +36,7 @@ class AestheticSignal:
         self.head.load_state_dict(torch.load(weights_path, map_location="cpu"))
         self.head.eval()
 
-    async def score(self, frame: Path, scene: Scene) -> dict:
+    async def score(self, frame: Path, job: ShotJob) -> dict:
         from PIL import Image
 
         image = self.preprocess(Image.open(frame)).unsqueeze(0)

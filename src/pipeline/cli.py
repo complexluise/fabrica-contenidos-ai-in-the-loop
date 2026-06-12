@@ -7,28 +7,17 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
-from .assemble import concat_clips
-from .classifier import classify
+from .config import DEFAULT_PROFILE as _DEFAULT_PROFILE
 from .config import load_config
-from .contracts import Scene
-from .deliver import reframe
-from .gate import VLMGate
 from .ingest import load_brief
-from .keyframe import KeyframeGenerator
-from .providers.base import build_provider
-from .strategies.router import SmartRouter
-from .telemetry import SceneRecord, Telemetry
 
 app = typer.Typer(add_completion=False, help="Pipeline de video IA multi-modelo.")
 console = Console()
-
-_DEFAULT_PROFILE = "fal-ultra-cheap"
 
 
 def _cost_summary(label: str, n: int, est_per_scene: float, actual_usd: float | None = None) -> str:
@@ -71,57 +60,34 @@ def _main(
 
 
 async def _run_async(
-    brief: Path, config_dir: Path, style: str, fmt: str, out_dir: Path
+    brief: Path, config_dir: Path, style: str, fmt: str, out_dir: Path,
+    profile: str = _DEFAULT_PROFILE, concurrency: int = 1, voice: str | None = None,
 ) -> Path:
-    run_id = uuid.uuid4().hex[:8]
-    cfg = load_config(config_dir, style)
-    providers = [build_provider(p) for p in cfg.providers.values()]
-    gate = VLMGate(cfg.routing.thresholds)
-    keyframer = KeyframeGenerator(cfg.style, fmt=fmt)  # D-071
-    router = SmartRouter(max_retries=1)
-    telemetry = Telemetry(run_id)
+    """Modo smoke (D-075): el brief corre por el MISMO pipeline que un proyecto.
 
-    scenes: list[Scene] = load_brief(brief)
-    console.print(f"[bold]Run {run_id}[/] - {len(scenes)} escenas - estilo {style}")
+    Antes esto era un segundo orquestador (sin cache, sin planos, sin perfil —
+    y --profile se ignoraba en silencio). Ahora: proyecto efimero bajo
+    `out/<stem>/` que llama a `run_project` — cache incluida (re-smoke = $0).
+    """
+    from .project import Project, ProjectSpec
+    from .runner import run_project
 
-    clips: list[Path] = []
-    for scene in scenes:
-        scene.class_ = scene.class_ or classify(scene)
-        console.print(f"  - {scene.id} [{scene.class_}] -> keyframe")
-        scene.keyframe = await keyframer.generate(scene)
+    scenes = load_brief(brief)
+    slug = brief.stem
+    cfg = load_config(config_dir, style, profile=profile,
+                      voice_backend=voice or "kokoro")
+    spec = ProjectSpec(slug=slug, style=style, format=fmt, scenes=scenes)
+    project = Project(slug, root=out_dir)
+    project.dir.mkdir(parents=True, exist_ok=True)
+    console.print(f"[bold]Smoke {slug}[/] - {len(scenes)} escenas - estilo {style}"
+                  f" - perfil {profile} -> {project.dir}")
+    _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
 
-        result = await router.run(scene, providers, gate)
-        clips.append(result.video_path)
-
-        telemetry.record(
-            SceneRecord(
-                run_id=run_id,
-                scene_id=scene.id,
-                provider=result.provider,
-                strategy=router.name,
-                scene_class=scene.class_,
-                cost_usd=result.cost_usd,
-                latency_s=result.latency_s,
-                attempt=result.raw_meta.get("attempts", 1),
-                passed=result.raw_meta.get("gate_passed", True),
-            )
-        )
-        console.print(
-            f"    {result.provider} - ${result.cost_usd:.3f} - {result.latency_s:.1f}s"
-            f" - gate={'ok' if result.raw_meta.get('gate_passed', True) else 'fail'}"
-        )
-
-    stitched = concat_clips(clips, out_dir / "_stitched.mp4")
-    final = reframe(stitched, out_dir / f"final_{fmt.replace(':', 'x')}.mp4", fmt)
-
-    report = telemetry.write_report(out_dir / "run_report.json")
-    telemetry.close()
-
-    totals = telemetry.totals()
+    run, final, totals = await run_project(project, spec, cfg, concurrency=concurrency)
     console.print(
         f"\n[bold green]Listo[/] {final}\n"
-        f"  costo total: ${totals['total_cost_usd']:.3f}"
-        f" - latencia: {totals['total_latency_s']:.1f}s - reporte: {report}"
+        f"  run {run.run_id} - costo: ${totals['total_cost_usd']:.3f}"
+        f" - cache hits: {totals['cache_hits']}/{totals['attempts']}"
     )
     return final
 
@@ -455,9 +421,10 @@ def describe(
     """[L10] Ojos: Haiku describe/evalua cada plano del bundle -> descriptions.yaml (D-041)."""
     from .describe import describe_bundle
 
-    proj, _spec, _cfg = _load_project(project, projects_dir, config_dir)
+    proj, _spec, cfg = _load_project(project, projects_dir, config_dir)
+    from .config import narrative_model
     console.print(f"[bold]{project}[/] - describiendo planos con Haiku...")
-    path = describe_bundle(proj)
+    path = describe_bundle(proj, model=narrative_model(cfg.storyboard))
     console.print(
         f"\n[bold green]Listo[/] {path}\n"
         f"  por plano: description - on_message - usable - issues"
@@ -499,7 +466,7 @@ def prompts(
     from .project import write_spec
     from .prompt_compile import sync_scene_prompt
 
-    proj, spec, _cfg = _load_project(project, projects_dir, config_dir)
+    proj, spec, cfg = _load_project(project, projects_dir, config_dir)
     targets = [s for s in spec.scenes if (scene is None or s.id == scene)]
     if scene and not targets:
         console.print(f"[red]Escena '{scene}' no encontrada.[/]")
@@ -511,8 +478,9 @@ def prompts(
         return
 
     console.print(f"[bold]{project}[/] - compilando {len(todo)} prompt(s) desde la narrativa...")
+    from .config import narrative_model
     for s in todo:
-        sync_scene_prompt(s, spec.characters)
+        sync_scene_prompt(s, spec.characters, model=narrative_model(cfg.storyboard))
         console.print(f"  - {s.id}: {s.prompt[:72]}...")
     write_spec(spec, proj.spec_path)
     console.print(f"\n[bold green]Listo[/] {proj.spec_path} - {len(todo)} prompt(s) en sintonia.")
@@ -534,7 +502,8 @@ def run(
     """Genera un video. Default: perfil ultra-cheap para iterar barato; --profile prod para produccion."""
     try:
         if brief is not None:
-            asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir))
+            asyncio.run(_run_async(brief, config_dir, style, fmt, out_dir,
+                                   profile=profile, concurrency=concurrency, voice=voice))
         else:
             asyncio.run(_run_project_async(project, projects_dir, config_dir,
                                            profile=profile, concurrency=concurrency, voice=voice))

@@ -104,18 +104,19 @@ def _image_block(frame: Path) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
 
 
-def _describe_clip(client, clip: Path, context: str, duration: float) -> dict:
-    """Llama a Haiku con los frames del clip. I/O (smoke)."""
+def _describe_clip(client, clip: Path, context: str, duration: float,
+                   model: str | None = None) -> dict:
+    """Llama a Haiku (o al modelo del perfil narrativo, D-078). I/O (smoke)."""
     blocks = [_image_block(extract_frame(clip, t)) for t in _frame_times(duration)]
     msg = client.messages.create(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=400,
         messages=[{"role": "user", "content": [*blocks, {"type": "text", "text": describe_prompt(context)}]}],
     )
     return parse_description(msg.content[0].text)
 
 
-def describe_bundle(project: Project) -> Path:
+def describe_bundle(project: Project, model: str | None = None) -> Path:
     """Describe cada plano del bundle del ultimo run -> `descriptions.yaml`. I/O (smoke)."""
     run = project.latest_run()
     if run is None or not run.manifest_path.exists():
@@ -153,7 +154,7 @@ def describe_bundle(project: Project) -> Path:
         else:
             try:
                 entry.update(_describe_clip(client, clip, _plano_context(p),
-                                            float(p.get("duration_s") or 0)))
+                                            float(p.get("duration_s") or 0), model=model))
             except Exception as exc:  # noqa: BLE001 - best-effort por plano
                 logger.warning("describe: fallo en %s (%s); sin evaluar.", p["base"], exc)
                 entry.update(_empty_entry(f"describe_error: {exc}"))

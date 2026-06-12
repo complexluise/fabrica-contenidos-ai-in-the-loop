@@ -19,20 +19,21 @@ import yaml
 from .config import Config
 from .contact_sheet import build_contact_sheet, write_and_open
 from .keyframe import KeyframeGenerator, build_styled_prompt
-from .prompt_compile import compose_character_prompt, compose_keyframe_prompt
+from .prompt_compile import compose_character_prompt, compose_keyframe_prompt, compose_ref_map
 from .naming import readable_name, semantic_slug
 from .project import (
     Character,
     Project,
     ProjectSpec,
-    _resolve_under,
     cache_key,
     character_refs,
     effective_shots,
+    read_yaml,
     relativize,
     resolve_refs,
+    resolve_under,
 )
-from .runner import _keyframe_inputs, run_project
+from .runner import keyframe_inputs, run_project
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,15 @@ def _alias(project: Project, subdir: str, prefix: str, slug: str, idx: int, src:
     dest = dest_dir / readable_name(prefix, slug, idx, src.suffix or ".png")
     dest.write_bytes(Path(src).read_bytes())
     return dest
+
+
+def candidate_seed_offset(recorded, existing: int) -> int:
+    """Seed inicial para "mas candidatos" (D-078). Pura.
+
+    `len(existing)` retrocede cuando el humano BORRA candidatos -> reusar ese
+    seed devolvia (cache hit) la misma imagen recien descartada. El contador
+    persistido nunca retrocede; `max()` da compat con proyectos sin contador."""
+    return max(int(recorded or 0), int(existing))
 
 
 def parse_picks(items: list[str]) -> dict[str, int]:
@@ -94,10 +104,7 @@ def apply_casting(characters: dict[str, Character], casting: dict[str, str]) -> 
 
 
 def load_casting(project: Project) -> dict[str, str]:
-    path = project.dir / "casting.yaml"
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return read_yaml(project.dir / "casting.yaml")
 
 
 async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
@@ -122,6 +129,7 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
                 key = cache_key("cast", {
                     "character": name, "prompt": cast_prompt,
                     "refs": ref_sig, "ref_model": cfg.style.keyframe.ref_model, "seed": i,
+                    "aspect": spec.format,  # D-078: cambiar el formato regenera caras
                 })
                 hit = project.cache_lookup("cast", key, ".png")
                 if hit is not None:
@@ -153,7 +161,7 @@ def record_cast_picks(project: Project, picks: dict[str, int]) -> Path:
     cand_path = project.dir / "cast_candidates.yaml"
     if not cand_path.exists():
         raise RuntimeError("No hay candidatos de casting; corre 'pipeline cast <proj>' primero.")
-    candidates = yaml.safe_load(cand_path.read_text(encoding="utf-8")) or {}
+    candidates = read_yaml(cand_path)
     casting = load_casting(project)
     for name, idx in picks.items():
         cands = candidates.get(name)
@@ -182,7 +190,7 @@ def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
     """
     casting = load_casting(project)
     for name, path in faces.items():
-        resolved = _resolve_under(project.dir, path)
+        resolved = resolve_under(project.dir, path)
         if not resolved.exists():
             raise RuntimeError(f"La cara directa de '{name}' no existe: {resolved}")
         casting[name] = relativize(project.dir, resolved)  # portable (D-044)
@@ -208,19 +216,23 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
     scene_meta = []
     for scene in spec.scenes:
         refs = character_refs(scene, spec.characters)
-        scene.character_refs = refs
         refs_resolved = resolve_refs(project.dir, refs)
         ref_sig = sorted(str(r) for r in refs)
         anchor = effective_shots(scene)[0]
         anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
-        styled = build_styled_prompt(scene, cfg.style, anchor_ext)
+        # D-078: el MISMO contexto que usa el render (D-067) — antes el humano
+        # curaba anclas generadas SIN la biblia del mundo que el render SI usa.
+        styled = build_styled_prompt(scene, cfg.style, anchor_ext, world=spec.world)
         slug = semantic_slug(f"{scene.prompt} {anchor_ext}".strip())
         scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
 
     async def _one(scene, refs_resolved, ref_sig, anchor, styled, slug, i):
         """Genera un solo candidato bajo el semaforo."""
         async with sem:
-            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            # D-077: el aspecto entra a la key TAMBIEN aca (el runner ya lo hacia,
+            # D-071) — sin esto, cambiar el format del proyecto hacia cache-hit
+            # sobre stills del formato viejo.
+            inputs = keyframe_inputs(styled, cfg, ref_sig, aspect=spec.format)
             inputs["seed"] = i
             key = cache_key("keyframe", inputs)
             hit = project.cache_lookup("keyframes", key, ".png")
@@ -229,8 +241,11 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
                 stored = hit
             else:
                 logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
+                ref_map = (compose_ref_map(characters=list(scene.characters))
+                           if refs_resolved else None)  # D-067: refs CON NOMBRE
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=i, framing=compose_keyframe_prompt(anchor))
+                                               seed=i, framing=compose_keyframe_prompt(anchor),
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene.id, slug, i, stored)
             logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
@@ -290,27 +305,28 @@ async def gen_keyframes_scene(
     keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
                                   fmt=spec.format)  # D-071: stills en el formato del spec
     refs = character_refs(scene, spec.characters)
-    scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)
     ref_sig = sorted(str(r) for r in refs)
     anchor = effective_shots(scene)[0]
 
     anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
     framing = f"{anchor_ext}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor_ext
-    styled = build_styled_prompt(scene, cfg.style, framing)
+    styled = build_styled_prompt(scene, cfg.style, framing, world=spec.world)  # D-078
     slug = semantic_slug(f"{scene.prompt} {framing}".strip())
 
-    manifest: dict[str, list[str]] = {}
-    if project.candidates_path.exists():
-        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    manifest = read_yaml(project.candidates_path)
     existing = manifest.get(scene_id, [])
-    seed_offset = len(existing)  # seeds distintos = cache keys distintos
+    # D-078: contador monotono — "mas candidatos" jamas reusa un seed emitido
+    # (len(existing) retrocede al borrar candidatos; el contador no).
+    seeds_path = project.dir / "candidate_seeds.yaml"
+    seeds = read_yaml(seeds_path)
+    seed_offset = candidate_seed_offset(seeds.get(scene_id), len(existing))
 
     new_paths: list[str] = []
     for i in range(n):
         seed = seed_offset + i
         try:
-            inputs = _keyframe_inputs(styled, cfg, ref_sig)
+            inputs = keyframe_inputs(styled, cfg, ref_sig, aspect=spec.format)  # D-077
             inputs["seed"] = seed
             key = cache_key("keyframe", inputs)
             hit = project.cache_lookup("keyframes", key, ".png")
@@ -319,8 +335,11 @@ async def gen_keyframes_scene(
                 logger.info("[%s] keyframe seed=%d (cache hit)", scene_id, seed)
             else:
                 logger.info("[%s] keyframe seed=%d | generando...", scene_id, seed)
+                ref_map = (compose_ref_map(characters=list(scene.characters))
+                           if refs_resolved else None)  # D-067: refs CON NOMBRE
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=seed, framing=framing)
+                                               seed=seed, framing=framing,
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             _alias(project, "keyframes", scene_id, slug, seed, stored)
             new_paths.append(str(stored))
@@ -333,6 +352,8 @@ async def gen_keyframes_scene(
     project.candidates_path.write_text(
         yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+    seeds[scene_id] = seed_offset + n  # D-078: el contador avanza siempre
+    seeds_path.write_text(yaml.safe_dump(seeds, sort_keys=False), encoding="utf-8")
 
 
 async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Config,
@@ -347,18 +368,15 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
     if scene is None:
         raise ValueError(f"Escena '{scene_id}' no existe.")
     shots = effective_shots(scene)
-    sel = {}
-    if project.selections_path.exists():
-        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    sel = read_yaml(project.selections_path)
     anchor_rel = sel.get(scene_id)
     if not anchor_rel:
         raise RuntimeError(f"Primero elegí el encuadre ancla de '{scene_id}'.")
-    anchor = _resolve_under(project.dir, anchor_rel)
+    anchor = resolve_under(project.dir, anchor_rel)
 
     keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
                                   fmt=spec.format)  # D-071: stills en el formato del spec
     refs = character_refs(scene, spec.characters)
-    scene.character_refs = refs
     refs_resolved = resolve_refs(project.dir, refs)
 
     # Rutas ABSOLUTAS (como candidates.yaml; es una previsualizacion efimera, no la
@@ -375,6 +393,7 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
                 "scene": scene_id, "idx": idx, "prompt": kf_ext,
                 "anchor": relativize(project.dir, anchor), "seed": shot.seed,
                 "ref_model": cfg.style.keyframe.ref_model,
+                "world": spec.world,  # D-078: el mundo es identidad del still
             })
             hit = project.cache_lookup("keyframes", key, ".png")
             if hit is not None and not force:
@@ -382,8 +401,12 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
                 logger.info("[%s] plano %d (cache hit)", scene_id, idx + 1)
             else:
                 logger.info("[%s] plano %d | encadenando keyframe...", scene_id, idx + 1)
+                ref_map = compose_ref_map(
+                    source_label="this scene of the film" if chain_refs else None,
+                    characters=list(scene.characters)) if chain_refs else None
                 tmp = await keyframer.generate(scene, ref_images=chain_refs,
-                                               seed=shot.seed, framing=kf_ext)
+                                               seed=shot.seed, framing=kf_ext,
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene_id, f"plano{idx + 1}", idx, stored)
             out_paths.append(str(alias))
@@ -391,10 +414,8 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
         except Exception as exc:  # noqa: BLE001 — un plano que falla no tira la cadena
             logger.error("[%s] plano %d FALLO: %s", scene_id, idx + 1, exc)
 
-    previews: dict = {}
     pv_path = project.dir / "shot_previews.yaml"
-    if pv_path.exists():
-        previews = yaml.safe_load(pv_path.read_text(encoding="utf-8")) or {}
+    previews = read_yaml(pv_path)
     previews[scene_id] = out_paths
     pv_path.write_text(yaml.safe_dump(previews, sort_keys=False, allow_unicode=True),
                        encoding="utf-8")
@@ -416,9 +437,7 @@ def add_candidate_upload(project: Project, scene_id: str, data: bytes, suffix: s
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
 
-    manifest: dict[str, list[str]] = {}
-    if project.candidates_path.exists():
-        manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    manifest = read_yaml(project.candidates_path)
     existing = manifest.get(scene_id, [])
     if str(dest) not in existing:
         manifest[scene_id] = existing + [str(dest)]
@@ -439,10 +458,8 @@ def record_picks(project: Project, picks: dict[str, int]) -> Path:
     """Valida y persiste la elección humana (selections.yaml). Resumible."""
     if not project.candidates_path.exists():
         raise RuntimeError("No hay candidatos; corre 'pipeline keyframes <proj>' primero.")
-    candidates = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
-    selections = {}
-    if project.selections_path.exists():
-        selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    candidates = read_yaml(project.candidates_path)
+    selections = read_yaml(project.selections_path)
 
     for sid, idx in picks.items():
         cands = candidates.get(sid)
@@ -481,16 +498,16 @@ def verify_selections(project: Project) -> list[str]:
     en el render (T5/T14/D-055)."""
     if not project.selections_path.exists():
         return []
-    selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    selections = read_yaml(project.selections_path)
     return [sid for sid, p in selections.items()
-            if not _resolve_under(project.dir, p).exists()]
+            if not resolve_under(project.dir, p).exists()]
 
 
 def verify_casting(project: Project) -> list[str]:
     """Nombres de personaje cuya cara elegida apunta a un archivo inexistente (T10/D-055)."""
     casting = load_casting(project)
     return [name for name, p in casting.items()
-            if not _resolve_under(project.dir, p).exists()]
+            if not resolve_under(project.dir, p).exists()]
 
 
 def invalidate_shot_previews(project: Project, scene_ids: list[str]) -> list[str]:
@@ -500,7 +517,7 @@ def invalidate_shot_previews(project: Project, scene_ids: list[str]) -> list[str
     pv_path = project.dir / "shot_previews.yaml"
     if not pv_path.exists():
         return []
-    previews = yaml.safe_load(pv_path.read_text(encoding="utf-8")) or {}
+    previews = read_yaml(pv_path)
     dropped = [sid for sid in scene_ids if sid in previews]
     if dropped:
         for sid in dropped:
@@ -518,7 +535,7 @@ def delete_candidate(project: Project, scene_id: str, idx: int) -> dict:
     escena estaba elegida con el candidato borrado, se descarta esa selección."""
     if not project.candidates_path.exists():
         raise RuntimeError("No hay candidatos.")
-    manifest = yaml.safe_load(project.candidates_path.read_text(encoding="utf-8")) or {}
+    manifest = read_yaml(project.candidates_path)
     cands = manifest.get(scene_id)
     if not cands:
         raise ValueError(f"No hay candidatos para '{scene_id}'.")
@@ -531,7 +548,7 @@ def delete_candidate(project: Project, scene_id: str, idx: int) -> dict:
     )
     selection_dropped = False
     if project.selections_path.exists():
-        selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+        selections = read_yaml(project.selections_path)
         removed_rel = relativize(project.dir, removed)
         if selections.get(scene_id) == removed_rel:
             selections.pop(scene_id, None)
@@ -549,7 +566,7 @@ def prune_selections(project: Project, scene_ids: list[str]) -> list[str]:
     Devuelve los ids descartados. Reordenar no rompe (el id se conserva)."""
     if not project.selections_path.exists():
         return []
-    selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    selections = read_yaml(project.selections_path)
     valid = set(scene_ids)
     dropped = [sid for sid in selections if sid not in valid]
     if dropped:
@@ -574,16 +591,14 @@ async def render(project: Project, spec: ProjectSpec, cfg: Config,
     # selections.yaml y --keyframe son portables (relativos al proyecto).
     flag: dict[str, Path] = {}
     for sid, p in (keyframe_overrides or {}).items():  # error temprano si no existe
-        resolved = _resolve_under(project.dir, p)
+        resolved = resolve_under(project.dir, p)
         if not resolved.exists():
             raise RuntimeError(f"El keyframe directo de '{sid}' no existe: {resolved}")
         flag[sid] = resolved
 
-    selections = {}
-    if project.selections_path.exists():
-        selections = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
+    selections = read_yaml(project.selections_path)
 
-    merged: dict[str, Path] = {sid: _resolve_under(project.dir, p) for sid, p in selections.items()}
+    merged: dict[str, Path] = {sid: resolve_under(project.dir, p) for sid, p in selections.items()}
     merged.update(flag)  # el flag tiene precedencia (D-025)
 
     missing = [s.id for s in spec.scenes if s.id not in merged]
@@ -650,15 +665,10 @@ def _animatic_prep(project: Project, spec: ProjectSpec, cfg: Config):
     Las anclas (selections.yaml) entran sin exigir completitud: el animatic puede
     verse con anclas parciales (los destinos faltantes se generan/quedan None)."""
     from .keyframe import KeyframeGenerator
-    from .project import character_refs
 
-    overrides: dict[str, Path] = {}
-    if project.selections_path.exists():
-        sel = yaml.safe_load(project.selections_path.read_text(encoding="utf-8")) or {}
-        overrides = {sid: _resolve_under(project.dir, p) for sid, p in sel.items()
-                     if _resolve_under(project.dir, p).exists()}
-    for scene in spec.scenes:  # refs de personaje, como hace el runner
-        scene.character_refs = character_refs(scene, spec.characters)
+    sel = read_yaml(project.selections_path)
+    overrides = {sid: resolve_under(project.dir, p) for sid, p in sel.items()
+                 if resolve_under(project.dir, p).exists()}
     keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch",
                                   backend=cfg.storyboard.keyframe.backend,
                                   fmt=spec.format)  # D-071
@@ -706,12 +716,11 @@ def record_pose_pick(project: Project, shot_id: str, which: str, variant: Path) 
     `picked:<nombre>` -> cambiarla invalida el clip aguas abajo (cascada correcta)."""
     if which not in ("start", "destino"):
         raise ValueError("which debe ser 'start' o 'destino'.")
-    resolved = _resolve_under(project.dir, variant)
+    resolved = resolve_under(project.dir, variant)
     if not resolved.exists():
         raise RuntimeError(f"La variante elegida no existe: {resolved}")
     path = project.dir / "pose_picks.yaml"
-    picks = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
-    picks = picks or {}
+    picks = read_yaml(path)
     picks[f"{shot_id}/{which}"] = relativize(project.dir, resolved)
     path.write_text(yaml.safe_dump(picks, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
@@ -723,12 +732,11 @@ def record_take_pick(project: Project, shot_id: str, take: Path) -> Path:
     Mismo patrón que pose_picks: la toma elegida entra al render con key
     `picked:<nombre>` (cache-hit semántico, $0) y manda sobre el ranking del
     gate — el gate ordena, el humano decide (AI-in-the-Loop)."""
-    resolved = _resolve_under(project.dir, take)
+    resolved = resolve_under(project.dir, take)
     if not resolved.exists():
         raise RuntimeError(f"La toma elegida no existe: {resolved}")
     path = project.dir / "take_picks.yaml"
-    picks = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
-    picks = picks or {}
+    picks = read_yaml(path)
     picks[shot_id] = relativize(project.dir, resolved)
     path.write_text(yaml.safe_dump(picks, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
@@ -743,9 +751,8 @@ def shot_takes(project: Project, shot_id: str | None = None) -> dict[str, list[d
     run = project.latest_run()
     if run is None:
         return {}
-    manifest = yaml.safe_load(run.manifest_path.read_text(encoding="utf-8")) or {}
-    picks_path = project.dir / "take_picks.yaml"
-    picks = (yaml.safe_load(picks_path.read_text(encoding="utf-8")) or {}) if picks_path.exists() else {}
+    manifest = read_yaml(run.manifest_path)
+    picks = read_yaml(project.dir / "take_picks.yaml")
     out: dict[str, list[dict]] = {}
     for entry in manifest.get("scenes", []):
         sid = entry.get("id")
@@ -797,21 +804,37 @@ async def pose_variants(project: Project, spec: ProjectSpec, cfg: Config,
         ext = compose_keyframe_prompt(shot)
         prev_same_scene = boundaries[i - 1] if entry["idx"] > 0 else None
         source = (prev_same_scene or {}).get("destino")
-    refs = resolve_refs(project.dir, scene.character_refs)
+    refs = resolve_refs(project.dir, character_refs(scene, spec.characters))
     ref_images = ([Path(source)] if source else []) + refs
+    ref_sig = sorted(str(r) for r in ref_images)
 
-    from .project import cache_key
     out: list[Path] = []
     for k in range(n):
-        tmp = await keyframer.generate(scene, ref_images=ref_images, seed=1000 + k,
-                                       framing=ext)
-        vkey = cache_key("keyframe", {"variant_of": f"{shot_id}/{which}", "i": k,
-                                      "prompt": ext})
+        seed = 1000 + k
+        # D-077: era el UNICO flujo generativo sin lookup — cada invocacion pagaba
+        # N imagenes y las pisaba bajo la misma key. El invariante "re-correr = $0"
+        # no admite excepciones: key completa (seed/prompt/ref_model/refs) + lookup.
+        vkey = cache_key("keyframe", {
+            "variant_of": f"{shot_id}/{which}", "seed": seed, "prompt": ext,
+            "ref_model": cfg.style.keyframe.ref_model, "refs": ref_sig,
+            "world": spec.world,  # D-078: el mundo es identidad del still
+        })
+        hit = project.cache_lookup("keyframes", vkey, ".png")
+        if hit is not None:
+            out.append(hit)
+            continue
+        # D-078: misma derivacion que la pose real (_shot_boundaries): mundo +
+        # refs con nombre — las variantes deben PARECERSE a la tira que curas.
+        src_label = ("the previous moment of this film" if which == "start"
+                     else ("this scene of the film" if source else None))
+        ref_map = compose_ref_map(source_label=src_label,
+                                  characters=list(scene.characters)) if ref_images else None
+        tmp = await keyframer.generate(scene, ref_images=ref_images, seed=seed,
+                                       framing=ext, world=spec.world, ref_map=ref_map)
         out.append(project.cache_store("keyframes", vkey, tmp, ".png"))
 
     pool_path = project.dir / "pose_candidates.yaml"
-    pool = yaml.safe_load(pool_path.read_text(encoding="utf-8")) if pool_path.exists() else {}
-    pool = pool or {}
+    pool = read_yaml(pool_path)
     pool[f"{shot_id}/{which}"] = [relativize(project.dir, p) for p in out]
     pool_path.write_text(yaml.safe_dump(pool, sort_keys=False, allow_unicode=True),
                          encoding="utf-8")

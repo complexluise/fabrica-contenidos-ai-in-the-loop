@@ -106,7 +106,11 @@ class KeyframeGenerator:
         prompt = build_styled_prompt(scene, self.style, framing, world=world)
         if ref_map:  # D-067: las referencias entran CON NOMBRE (mata el identity-bleed)
             prompt = prompt + chr(10) + ref_map
-        return await self._render(prompt, ref_images, seed, self.out_dir / f"{scene.id}.png")
+        # D-077: el seed entra al nombre del scratch — N candidatos de la misma
+        # escena en vuelo NO comparten archivo (carrera latente que dependia del
+        # scheduling cooperativo de asyncio).
+        name = f"{scene.id}_s{seed}.png" if seed is not None else f"{scene.id}.png"
+        return await self._render(prompt, ref_images, seed, self.out_dir / name)
 
     async def generate_design(self, design_prompt: str, ref_images: list[Path],
                               seed: int | None = None) -> Path:

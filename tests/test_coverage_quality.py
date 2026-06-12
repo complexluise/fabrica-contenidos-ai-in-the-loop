@@ -278,8 +278,8 @@ def test_voice_resolution_prefers_shot_over_scene():
                        voice_id="voz_proyecto")
     assert effective_voice(scene, scene.shots[0]) == "voz_plano"   # el plano manda
     assert effective_voice(scene, scene.shots[1]) == "voz_escena"  # cae a la escena
-    plano = scene.model_copy(update={"voice_id": effective_voice(scene, scene.shots[1])})
-    assert resolve_voice(plano, spec) == "voz_escena"
+    # D-075: la voz efectiva viaja explicita (ya no hay Scene.model_copy de render).
+    assert resolve_voice(effective_voice(scene, scene.shots[1]), spec) == "voz_escena"
 
 
 # --- D-067: contexto canónico — el mundo, el estilo y las refs CON NOMBRE -----
@@ -357,14 +357,15 @@ async def test_ensemble_keeps_losing_takes():
     from pipeline.contracts import GateReport
 
     class FakeGate:
-        async def evaluate(self, scene, res):
+        async def evaluate(self, job, res):
             v = 0.9 if res.provider == "winner" else 0.2
-            return GateReport(scene_id=scene.id, passed=res.provider == "winner",
+            return GateReport(scene_id=job.id, passed=res.provider == "winner",
                               aesthetic=v, char_consistency=v, clip_adherence=v)
 
-    scene = Scene(id="s1", prompt="p", duration_s=4)
-    res = await Ensemble().run(scene, [FakeProv("winner", "/w.mp4"),
-                                       FakeProv("loser", "/l.mp4")], FakeGate())
+    from pipeline.contracts import ShotJob
+    job = ShotJob(id="s1", prompt="p", duration_s=4)  # D-075: el render ve ShotJob
+    res = await Ensemble().run(job, [FakeProv("winner", "/w.mp4"),
+                                     FakeProv("loser", "/l.mp4")], FakeGate())
     takes = res.raw_meta.get("alternate_takes")
     assert takes and takes[0]["provider"] == "loser"
     assert takes[0]["video_path"].endswith("l.mp4")
@@ -392,3 +393,25 @@ def test_gate_frame_times_sample_motion():
     assert len(ts) == 3 and ts[0] < ts[1] < ts[2]
     assert ts[0] >= 0.3 and ts[2] <= 4.7  # evita frames negros de borde
     assert frame_times(0.8) == [0.4]      # clip cortísimo: una sola muestra
+
+
+# --- D-078: dialogue_no_voice mira la cobertura EFECTIVA ----------------------
+
+def test_dialogue_advisory_satisfied_by_inherited_scene_voice():
+    """Escena con dialogue + voiceover de ESCENA y planos sin voz: la herencia
+    (effective_shots, D-078) la hace sonar -> NO debe avisar."""
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="p", duration_s=4, dialogue="hola", voiceover="hola",
+              shots=[Shot(action="a", duration_s=2), Shot(action="b", duration_s=2)]),
+    ])
+    kinds = {a["kind"] for a in signing_advisories(spec, _routing(), _providers())}
+    assert "dialogue_no_voice" not in kinds
+
+
+def test_dialogue_advisory_fires_without_any_voice():
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="p", duration_s=4, dialogue="hola",
+              shots=[Shot(action="a", duration_s=4)]),
+    ])
+    kinds = {a["kind"] for a in signing_advisories(spec, _routing(), _providers())}
+    assert "dialogue_no_voice" in kinds

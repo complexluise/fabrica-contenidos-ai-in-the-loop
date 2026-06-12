@@ -209,3 +209,17 @@ def test_update_project_prunes_orphan_selections(tmp_path):
     import yaml
     sel = yaml.safe_load((d / "selections.yaml").read_text(encoding="utf-8"))
     assert sel == {"s1": "a.png"}
+
+
+# --- D-078: guardar claves desde la UI no destruye el .env ---------------------
+
+def test_merge_env_lines_preserves_comments_and_foreign_keys():
+    from pipeline.server.app import merge_env_lines
+
+    lines = ["# mis claves (no borrar)", "FAL_KEY=vieja", "", "OTRA_VAR=x"]
+    out = merge_env_lines(lines, {"FAL_KEY": "nueva", "GOOGLE_API_KEY": "g"})
+    assert out[0] == "# mis claves (no borrar)"   # el comentario sobrevive
+    assert "FAL_KEY=nueva" in out
+    assert "OTRA_VAR=x" in out                     # las claves ajenas sobreviven
+    assert "GOOGLE_API_KEY=g" in out               # la nueva se agrega al final
+    assert "FAL_KEY=vieja" not in out

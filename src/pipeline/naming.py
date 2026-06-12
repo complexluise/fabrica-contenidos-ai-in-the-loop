@@ -2,7 +2,7 @@
 
 El humano mira, elige y **toma los archivos a mano** (D-021/D-025), así que la
 capa visible necesita un nombre legible — no el hash content-addressed, que
-sigue siendo la **verdad del caché** (D-013). `_slugify`/`readable_name` son
+sigue siendo la **verdad del caché** (D-013). `slugify`/`readable_name` son
 lógica pura (core testeable); la derivación con Claude es I/O (smoke).
 """
 
@@ -16,7 +16,7 @@ from .settings import get_settings
 _SLUG_MODEL = "claude-haiku-4-5-20251001"  # el modelo más barato (D-026)
 
 
-def _slugify(text: str, max_words: int = 4) -> str:
+def slugify(text: str, max_words: int = 4) -> str:
     """Texto -> slug ascii corto (snake_case). Determinista, sin I/O."""
     norm = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     words = re.findall(r"[a-z0-9]+", norm.lower())
@@ -29,8 +29,8 @@ def readable_name(prefix: str, slug: str, idx: int, ext: str) -> str:
 
 
 def semantic_slug(text: str) -> str:
-    """Slug descriptivo de un prompt. Claude (Haiku) si hay key; si no, `_slugify`."""
-    return _slug_via_llm(text) or _slugify(text)
+    """Slug descriptivo de un prompt. Claude (Haiku) si hay key; si no, `slugify`."""
+    return _slug_via_llm(text) or slugify(text)
 
 
 def _slug_via_llm(text: str) -> str | None:  # pragma: no cover - I/O externo
@@ -58,6 +58,6 @@ def _slug_via_llm(text: str) -> str | None:  # pragma: no cover - I/O externo
                 }
             ],
         )
-        return _slugify(msg.content[0].text)  # sanea aunque el modelo agregue ruido
+        return slugify(msg.content[0].text)  # sanea aunque el modelo agregue ruido
     except Exception:
         return None

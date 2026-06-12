@@ -29,7 +29,7 @@ from pipeline.keyframe import image_size_args
 from pipeline.project import Project, ProjectSpec
 from pipeline.prompt_compile import compose_video_prompt, ensure_motion_endpoint
 from pipeline.providers.fal_kling import video_arguments
-from pipeline.runner import _keyframe_inputs, pick_end_frame_provider
+from pipeline.runner import keyframe_inputs, pick_end_frame_provider
 from pipeline.state import signing_advisories
 
 CONFIG_DIR = Path("config")
@@ -134,8 +134,8 @@ def test_image_size_args_by_model_family():
 def test_keyframe_inputs_carry_aspect():
     """Cambiar el formato invalida el still (antes salían cuadrados para 9:16)."""
     cfg = load_config(CONFIG_DIR, "lego")
-    a = _keyframe_inputs("p", cfg, [], aspect="9:16")
-    b = _keyframe_inputs("p", cfg, [], aspect="1:1")
+    a = keyframe_inputs("p", cfg, [], aspect="9:16")
+    b = keyframe_inputs("p", cfg, [], aspect="1:1")
     assert a != b and a["aspect"] == "9:16"
 
 
