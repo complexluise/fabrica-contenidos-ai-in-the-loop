@@ -251,3 +251,20 @@ def mark_synced(scene: Scene) -> Scene:
     scene.prompt_src_hash = scene.narrative_hash()
     scene.prompt_manual = False
     return scene
+
+
+def compose_ref_map(source_label: str | None = None, characters: list[str] | None = None) -> str:
+    """Mapa de referencias CON NOMBRE para los modelos de edición (D-067). Pura.
+
+    Kontext/nano-banana reciben una pila de imágenes anónimas: sin este mapa no
+    saben cuál es el set, cuál es la cara de quién — de ahí los vestuarios
+    cruzados. El orden del mapa DEBE coincidir con el orden real de ref_images."""
+    lines = ["Reference images, in order:"]
+    i = 1
+    if source_label:
+        lines.append(f"image {i} = {source_label} (continue this exact look and set);")
+        i += 1
+    for name in characters or []:
+        lines.append(f"image {i} = {name} (keep this EXACT face and outfit for {name});")
+        i += 1
+    return " ".join(lines)

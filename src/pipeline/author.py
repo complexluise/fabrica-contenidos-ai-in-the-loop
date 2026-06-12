@@ -65,6 +65,7 @@ lo ve/oye la audiencia) o [EN] (inglés, alimenta a un modelo de IA):
 {{
   "title": "[ES] título corto y evocador",
   "brief": "[ES] 2-3 frases: tono + arco narrativo + intención emocional",
+  "world": "[EN] la BIBLIA del mundo: UNA descripción canónica del set/luz/clima/paleta que comparten TODAS las escenas (2-3 frases). Viaja a cada prompt: no la repitas en los prompts de escena.",
   "style": "lego",
   "format": "9:16",
   "characters": {{
@@ -126,8 +127,16 @@ en inglés, es un ERROR. Los enums (camera/tone/transition) van tal cual.
 
 **`class`** — jerarquía: `hero` (clímax, máx 2) · `standard` (la mayoría) · `volume` (transiciones).
 
-**`prompt`** (scene base, [EN]) — el setting + personajes + atmósfera que la ESCENA comparte; es la
-base sobre la que cada plano suma su encuadre. Sin diálogo, sin movimiento de cámara.
+**`world`** (la biblia, [EN]) — el universo se describe UNA vez y viaja a cada prompt (ingeniería de
+contexto, D-067). Los `prompt` de escena NO re-describen el set: solo lo que esa escena AGREGA.
+
+**`prompt`** (scene base, [EN]) — lo que la ESCENA agrega al mundo: qué personajes, qué pasa, qué
+atmósfera puntual. Sin re-describir el set (eso vive en `world`), sin diálogo, sin cámara.
+
+**ACCIONES EJECUTABLES** — escribí `action` que un modelo de video PUEDE hacer: movimientos físicos
+simples y de UN beat (caer, girar, extender, chocar), siluetas fuertes, causa visible. NO escribas
+interacciones finas de objetos ("atrapa la palabra y el brillo muere entre sus dedos"): el modelo
+improvisa y rompe la coherencia. El impacto emocional va al CORTE y al SONIDO, no a la actuación.
 
 **`shots`** — cada plano es un ARTEFACTO (pensá como director de fotografía):
 • `intention` [ES]: la función dramática. Cada plano existe por una razón.
@@ -200,6 +209,7 @@ class ProjectDraft(BaseModel):
 
     title: str = "Proyecto sin título"
     brief: str = ""
+    world: str = ""
     style: str = "lego"
     format: str = "9:16"
     characters: dict[str, Character] = Field(default_factory=dict)
@@ -217,6 +227,7 @@ class ProjectDraft(BaseModel):
             characters=self.characters,
             title=self.title,
             brief=self.brief,
+            world=self.world or None,
         )
 
 

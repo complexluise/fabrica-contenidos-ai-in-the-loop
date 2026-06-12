@@ -73,6 +73,7 @@ class ProjectSpec:
     brief: str | None = None  # brief del proyecto (para el guion de export, D-029)
     storyboard_backend: str = "fal"  # backend de imagen activo (D-053): "fal" | "google"
     voice_backend: str = "kokoro"  # backend de voz/TTS activo (D-058): "kokoro" | "elevenlabs"
+    world: str | None = None  # D-067: la biblia del MUNDO [EN] — set/luz/clima canónicos que viajan a CADA prompt
 
 
 def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
@@ -117,6 +118,7 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
         brief=data.get("brief"),
         storyboard_backend=data.get("storyboard_backend", "fal"),
         voice_backend=data.get("voice_backend", "kokoro"),
+        world=data.get("world"),
     )
 
 
@@ -268,6 +270,8 @@ def spec_to_dict(spec: ProjectSpec) -> dict:
         data["storyboard_backend"] = spec.storyboard_backend
     if spec.voice_backend and spec.voice_backend != "kokoro":
         data["voice_backend"] = spec.voice_backend
+    if spec.world:
+        data["world"] = spec.world
     if spec.music:
         data["music"] = str(spec.music)
     if spec.voice_id:

@@ -103,3 +103,4 @@ es continua entre archivos.
 | D-064 | Notas de dirección corte #3: subtítulos IG + coherencia extrema por ancla + keys posicionales | Vigente |
 | D-065 | Voz por PLANO: dos hablantes conviven en una escena (plano → escena → proyecto → motor) | Vigente |
 | D-066 | Timeouts duros en todo fal + fallos best-effort visibles (nada cuelga, nada muere mudo) | Vigente |
+| D-067 | Ingeniería de contexto: biblia del mundo + estilo al video + referencias con nombre | Vigente |
