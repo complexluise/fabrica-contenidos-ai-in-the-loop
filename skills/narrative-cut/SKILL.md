@@ -37,7 +37,12 @@ determinista — [D-042]).
 ## Flujo (export → describe → graphics → montar → revisar)
 
 ```bash
-# 1. Bundle limpio desde el último run
+# 0. Tomas (D-074): si los planos tienen `takes: N`, lista las variantes y
+#    fija la mejor ANTES de exportar (la elegida manda sobre el ranking del gate)
+uv run pipeline takes <slug>                       # tomas por plano + scores
+uv run pipeline pick-take <slug> s2=cache/takes/<archivo>.mp4
+
+# 1. Bundle limpio desde el último run (incluye export/takes/ — la cobertura pagada)
 uv run pipeline export <slug>
 
 # 2. Ojos: Haiku evalúa cada plano (usable / en-mensaje / roto)
@@ -100,4 +105,6 @@ del bundle al `final_cut.mp4`.
 pipeline export --help
 pipeline describe --help
 pipeline graphics --help
+pipeline takes --help
+pipeline pick-take --help
 -->

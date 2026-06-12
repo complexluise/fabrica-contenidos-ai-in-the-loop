@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 API-only multi-model **AI video generation pipeline**. Orchestrates Kling / Seedance / Veo (video) and Flux / nano-banana (keyframes) through **fal.ai**, with a Claude-vision Quality Gate, content-addressed caching, and **"AI-in-the-Loop" human checkpoints** (a human picks the character face and the keyframe among N candidates). Default style is LEGO; style is parametrizable.
 
-Authoritative docs (read these before large changes): `SPEC.md` (architecture + contracts), `ROADMAP.md` (sprints + acceptance criteria), `docs/decisiones/` (numbered ADRs, max 10 per file — the *why* behind every choice).
+Authoritative docs (read these before large changes): `SPEC.md` (architecture + contracts), `ROADMAP.md` (sprints + acceptance criteria), `docs/decisiones/` (numbered ADRs, max 10 per file — the *why* behind every choice). For authoring shots/prompts, `docs/oficio-video-ai.md` holds the sourced craft rules (i2v prompt dialect, brickfilm grammar, finishing recipe, takes economy) behind D-070..D-074.
 
 ## Commands
 
@@ -35,9 +35,11 @@ uv run pipeline run x --brief briefs/foo.yaml # loose smoke to out/, no project/
 ```bash
 uv run pipeline cast <slug> --n 4   →  pick-cast <slug> juan=2     # character face
 uv run pipeline keyframes <slug> --n 4  →  pick <slug> s1=0 s2=3   # framing per scene
+uv run pipeline animatic <slug>                                     # the film as stills, before video money
 uv run pipeline render <slug>                                       # video from chosen keyframes
+uv run pipeline takes <slug>  →  pick-take <slug> s2=<path>         # curate among N takes (D-074)
 ```
-`cast`/`keyframes` generate N candidates and auto-open an **HTML contact sheet**; the human selects by index. Selections persist in the project (`selections.yaml` / `casting.yaml`), so the flow is non-blocking and resumable — this matters because generation is slow (keyframe ~30-60s, video 1-3 min). Re-running already-generated work is **free** (cache).
+`cast`/`keyframes` generate N candidates and auto-open an **HTML contact sheet**; the human selects by index. Selections persist in the project (`selections.yaml` / `casting.yaml` / `pose_picks.yaml` / `take_picks.yaml`), so the flow is non-blocking and resumable — this matters because generation is slow (keyframe ~30-60s, video 1-3 min). Re-running already-generated work is **free** (cache).
 
 ## Architecture (the parts that span files)
 
@@ -57,7 +59,9 @@ L1 Ingest → L2 Classifier → L3 Keyframe → L4 Providers → L5 Orchestrator
 
 - **Project / cache / runs model (`project.py`).** A project is `projects/<slug>/`. Caching is **content-addressed**: `cache_key(step, inputs)` = sha256[:16], cached at project level in `cache/`. Each run is an **immutable manifest** in `runs/<run_id>/`. A `.meta.json` sidecar preserves provenance + gate scores even on cache hits. Bumping a scene's `seed` is the "reroll" — it changes the cache key and regenerates **only that scene**.
 
-- **Interactive studio (`studio.py` + `runner.py` + `contact_sheet.py`).** `studio.py` implements cast/keyframes/animatic/pick/render against project state. `runner.py::run_project` runs the **boundary-pose animatic** (D-060): every shot is defined by TWO generated stills — a **start pose** (the opening, derived by image-editing the previous shot's destination, crossing scene boundaries → element continuity even across cuts) and the **destination** (the chosen/chained keyframe — where the clip LANDS, not frame-0). Phase A generates/caches all stills (cheap, sequential); Phase B interpolates start→destination per shot (Kling `end_image_url`) **in parallel** (D-039 semaphore). Trim keeps the **tail** (the landing lives in the last frame). Per-shot try/except so **one failed shot does not abort the run**; it raises only if *every* shot fails. `pipeline animatic <slug>` shows the whole film as poses before any video money is spent. Captions (`post.py::burn_lower_third`) and background music (`assemble.py::concat_clips(..., music=...)`) are best-effort.
+- **Interactive studio (`studio.py` + `runner.py` + `contact_sheet.py`).** `studio.py` implements cast/keyframes/animatic/pick/render against project state. `runner.py::run_project` runs the **"camera acts" engine** (D-070, replacing D-060's universal interpolation — which, it turned out, never executed: **fal silently ignores unknown params**, and `end_image_url` doesn't exist on Kling 2.1 standard). Default per shot: i2v **from the chosen destination still** (the human's pick IS frame-0), prompt in the motion dialect (`shot.motion`, D-072 — camera instruction first, speed adverb, endpoint; never re-describe the scene), trim keeps the **head**. `shot.lands: true` opts into REAL interpolation (start pose → destination via `tail_image_url` on an `end_frame`-capable provider, e.g. `kling_pro`, 3× cost); trim keeps the **tail**. Start poses are generated **only for lands shots**. `shot.media: still` renders the shot as Ken Burns over the destination ($0 video); `shot.takes: N` generates N cached takes, gate-ranked, human overrides via `take_picks.yaml`. After concat+reframe, `finish.py` applies the style's **film stock** (grade → grain → loudnorm −14 LUFS, D-073, $0, best-effort). Per-shot try/except so **one failed shot does not abort the run**; it raises only if *every* shot fails. `pipeline animatic <slug>` shows the whole film as poses before any video money is spent. Captions (`post.py::burn_lower_third`) and background music (`assemble.py::concat_clips(..., music=...)`) are best-effort.
+
+- **fal gotcha (the D-070 lesson, expensive to relearn).** fal endpoints **silently ignore unknown request params** — a misnamed param means you pay for a run that does something else, with no error. Before relying on any fal param, verify it exists on the EXACT endpoint variant (standard vs pro differ: end-frame is `tail_image_url`, pro-only). Provider capabilities in `providers.yaml` (e.g. `end_frame`) are the guard: `FalProvider` refuses to send an end image to an incapable model.
 
 - **CLI as the public surface (`cli.py`).** Typer app with an `@app.callback()` so `run` is an explicit subcommand. **Skills and external agents target the CLI contract, not internal classes** (see D-023) — when changing a subcommand name, flag, or output format, update `skills/*/SKILL.md` and expect `tests/test_skills_contract.py` to catch drift. Internal `src/pipeline/` objects are freely refactorable; the CLI is versioned and defended.
 
