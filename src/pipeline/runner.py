@@ -33,6 +33,7 @@ from .gate import FusedGate
 from .keyframe import KeyframeGenerator, build_styled_prompt
 from .prompt_compile import (
     compose_keyframe_prompt,
+    compose_ref_map,
     compose_start_pose_prompt,
     compose_video_prompt,
 )
@@ -155,7 +156,8 @@ async def ensure_boundary_stills(project, spec: ProjectSpec, cfg: Config, keyfra
             keyframe_overrides=keyframe_overrides, pose_picks=pose_picks,
             prev_destino=prev_destino, prev_destino_key=prev_destino_key,
             scene_prev_kf=scene_prev_kf, scene_prev_key=scene_prev_key,
-            scene_anchor=scene_anchor, scene_anchor_key=scene_anchor_key, dry=dry)
+            scene_anchor=scene_anchor, scene_anchor_key=scene_anchor_key,
+            world=spec.world, dry=dry)
         out.append(boundary)
         # Las KEYS avanzan SIEMPRE (identidad pura/posicional de la cadena): un fallo
         # de generación deja el ARCHIVO en None pero no corre las keys aguas abajo —
@@ -172,7 +174,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
                            prev_destino, prev_destino_key,
                            scene_prev_kf, scene_prev_key,
                            scene_anchor=None, scene_anchor_key=None,
-                           dry: bool = False) -> dict:
+                           world: str | None = None, dry: bool = False) -> dict:
     """Las dos poses frontera de UN plano (destino + start). Cacheadas."""
     from .project import _resolve_under
     pose_picks = pose_picks or {}
@@ -184,7 +186,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     # Las KEYS se computan SIEMPRE (puras); la generación puede fallar y solo
     # afecta al ARCHIVO (None) — la identidad de la cadena no depende del runtime.
     kf_ext = compose_keyframe_prompt(shot)
-    styled = build_styled_prompt(scene, cfg.style, kf_ext)
+    styled = build_styled_prompt(scene, cfg.style, kf_ext, world=world)
     chain_refs: list = []
     kf_inputs = _keyframe_inputs(styled, cfg, ref_sig)
     if idx > 0 and cfg.style.keyframe.ref_model:
@@ -207,9 +209,13 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
             try:
                 logger.info("[%s] %s | generando destino%s...", shot_id, scene.class_,
                             " (encadenado)" if chain_refs else "")
+                refs_for_gen = (chain_refs + refs_io) if chain_refs else refs_io
+                ref_map = compose_ref_map(
+                    source_label="this scene of the film" if chain_refs else None,
+                    characters=list(scene.characters)) if refs_for_gen else None
                 tmp = await keyframer.generate(
-                    scene, ref_images=(chain_refs + refs_io) if chain_refs else refs_io,
-                    framing=kf_ext)
+                    scene, ref_images=refs_for_gen, framing=kf_ext,
+                    world=world, ref_map=ref_map)
                 destino = project.cache_store("keyframes", kf_key, tmp, ".png")
                 cost += cfg.style.keyframe.cost_per_image
             except Exception as exc:  # noqa: BLE001 — el fallo no corre la cadena
@@ -232,7 +238,7 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     # el ancla es su propio destino). Coherencia extrema: el look elegido manda.
     anchor, anchor_key = (scene_anchor, scene_anchor_key) if idx > 0 else (destino, kf_key)
     start_ext = compose_start_pose_prompt(shot, transition_in)
-    start_styled = build_styled_prompt(scene, cfg.style, start_ext)
+    start_styled = build_styled_prompt(scene, cfg.style, start_ext, world=world)
     start_inputs = _keyframe_inputs(start_styled, cfg, ref_sig)
     start_inputs["role"] = "start_pose"        # namespace: no colisiona con destinos
     start_inputs["chain_from"] = source_key    # cambiar el destino previo invalida este
@@ -243,10 +249,14 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
         try:
             logger.info("[%s] generando pose de apertura (animatic)...", shot_id)
             start_refs = [source]
+            src_label = "the previous moment of this film"
             if anchor is not None and anchor != source:
                 start_refs.append(anchor)
+                src_label += "; image 2 = the look of THIS scene (continue it)"
+            ref_map = compose_ref_map(source_label=src_label,
+                                      characters=list(scene.characters))
             tmp = await keyframer.generate(scene, ref_images=start_refs + refs_io,
-                                           framing=start_ext)
+                                           framing=start_ext, world=world, ref_map=ref_map)
             start = project.cache_store("keyframes", start_key, tmp, ".png")
             cost += cfg.style.keyframe.cost_per_image
         except Exception as exc:  # noqa: BLE001 — el fallo no corre la cadena
@@ -281,12 +291,16 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
 
     # Escena efectiva del plano: prompt + MOVIMIENTO del plano (D-048/A1), audio/seed del plano.
     video_ext = compose_video_prompt(shot)
-    eff_prompt = scene.prompt if not video_ext else f"{scene.prompt}, {video_ext}"
+    # D-067: el modelo de VIDEO recibe el MISMO contexto que las imágenes — el
+    # template de estilo + la biblia del mundo (antes le llegaba el prompt crudo:
+    # Kling nunca supo que esto era toy photography). El negative también viaja.
+    eff_prompt = build_styled_prompt(scene, cfg.style, video_ext, world=spec.world)
     plano = scene.model_copy(update={
         "id": shot_id, "prompt": eff_prompt, "duration_s": shot.duration_s,
         "keyframe": keyframe, "seed": shot.seed, "start_frame": start_frame,
         "voiceover": shot.voiceover, "caption": shot.caption, "character_refs": refs_io,
         "voice_id": effective_voice(scene, shot),  # D-065: el plano manda sobre la escena
+        "negative_prompt": cfg.style.negative_prompt or None,  # D-067
     })
 
     # --- L5 video (cacheado) ---

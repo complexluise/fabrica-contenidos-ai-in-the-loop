@@ -239,7 +239,7 @@ async def test_scene_anchor_feeds_every_pose_of_the_scene(tmp_path):
     cfg = load_config(CONFIG_DIR, "lego")
     img = tmp_path / "gen.png"; img.write_bytes(b"\x89PNG")
     calls = []
-    async def gen(scene, ref_images=None, seed=None, framing=""):
+    async def gen(scene, ref_images=None, seed=None, framing="", **kw):
         calls.append((scene.id, framing, set(map(str, ref_images or []))))
         return img
     from types import SimpleNamespace
@@ -286,3 +286,44 @@ def test_voice_resolution_prefers_shot_over_scene():
     assert effective_voice(scene, scene.shots[1]) == "voz_escena"  # cae a la escena
     plano = scene.model_copy(update={"voice_id": effective_voice(scene, scene.shots[1])})
     assert resolve_voice(plano, spec) == "voz_escena"
+
+
+# --- D-067: contexto canónico — el mundo, el estilo y las refs CON NOMBRE -----
+
+def test_world_bible_roundtrips_and_feeds_styled_prompt():
+    from pipeline.project import spec_from_dict, spec_to_dict
+    from pipeline.keyframe import build_styled_prompt
+    spec = spec_from_dict({
+        "world": "one rain-soaked LEGO rooftop, green Matrix code glow in every puddle",
+        "scenes": [{"id": "s1", "prompt": "the duel", "duration_s": 5}],
+    }, "t")
+    assert "rain-soaked" in spec.world
+    assert spec_to_dict(spec)["world"].startswith("one rain-soaked")
+    cfg = load_config(CONFIG_DIR, "lego")
+    styled = build_styled_prompt(spec.scenes[0], cfg.style, "wide shot", world=spec.world)
+    assert "rain-soaked" in styled and "the duel" in styled  # el mundo viaja a CADA prompt
+
+
+def test_ref_map_names_every_reference():
+    from pipeline.prompt_compile import compose_ref_map
+    m = compose_ref_map(source_label="the previous moment of this film",
+                        characters=["Cepeda", "Espriella"])
+    assert "image 1" in m and "previous moment" in m
+    assert "image 2" in m and "Cepeda" in m and "EXACT face" in m
+    assert "image 3" in m and "Espriella" in m
+
+
+def test_video_prompt_carries_style_and_world():
+    from pipeline.keyframe import build_styled_prompt
+    cfg = load_config(CONFIG_DIR, "lego")
+    scene = Scene(id="s1", prompt="he deflects the strike", duration_s=4)
+    styled = build_styled_prompt(scene, cfg.style, "fast deflection", world="LEGO rooftop in rain")
+    # el prompt de VIDEO ahora pasa por el MISMO template de estilo que las imágenes
+    assert "LEGO" in styled and "rooftop in rain" in styled
+
+
+def test_kling_receives_negative_prompt():
+    from pipeline.providers.fal_kling import video_arguments
+    args = video_arguments("p", seed=None, init_url="u", end_url=None,
+                           negative="blurry, morphing, extra limbs")
+    assert args["negative_prompt"] == "blurry, morphing, extra limbs"

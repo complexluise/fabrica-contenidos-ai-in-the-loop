@@ -1017,6 +1017,32 @@ elegir (no solo regenerar). Ver [D-062]/[D-063].
 
 ---
 
+## Sprint 6.29 — Ingeniería de contexto (D-067)
+
+**Objetivo:** el hint del usuario — "la consistencia está dada por el contexto" — confirmado:
+el video recibía el prompt crudo (sin estilo ni negative), no había biblia del mundo, y las
+referencias viajaban anónimas. Cada llamada a un modelo recibe ahora la información PERTINENTE.
+Ver [D-067].
+
+### Acceptance Criteria
+- [x] AC1 — `ProjectSpec.world` (round-trip) viaja a CADA prompt vía `build_styled_prompt(world=)`. 🔬
+- [x] AC2 — El VIDEO pasa por el mismo template de estilo + mundo; `negative_prompt` llega a Kling. 🔬
+- [x] AC3 — `compose_ref_map`: referencias CON NOMBRE en los prompts de edición (mata el identity-bleed). 🔬
+- [x] AC4 — El autor emite `world` una vez + regla de ACCIONES EJECUTABLES (un beat, física simple).
+- [ ] AC5 — Smoke real (pendiente de autorización del usuario: las keys cambian → regeneración completa).
+
+### Tasks (orden test-first)
+- [x] T6.29.1 — Tests (red): world round-trip+prompt, ref_map, video estilizado, negative a Kling. 🔬 ✅
+- [x] T6.29.2 — project/keyframe/prompt_compile/contracts/common/fal_kling/runner/author. 🔬 ✅
+- [x] T6.29.3 — `world` aplicado a esquiva + ADR D-067 + índice. ✅
+
+> **Estado:** core en verde (**333 tests**, +4). El examen profundo del flujo (rough cut ≠ final,
+> edición como etapa, cobertura del ensemble, gate ciego al movimiento, gramática brickfilm) queda
+> registrado en la conversación y en D-067; las decisiones de la etapa de EDICIÓN (D-068+) se
+> planifican con el usuario.
+
+---
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

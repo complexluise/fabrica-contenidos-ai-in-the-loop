@@ -42,7 +42,8 @@ def _extract_image_bytes(response) -> bytes | None:
     return None
 
 
-def build_styled_prompt(scene: Scene, style: StyleConfig, framing: str = "") -> str:
+def build_styled_prompt(scene: Scene, style: StyleConfig, framing: str = "",
+                        world: str | None = None) -> str:
     """Inyecta el prompt de la escena (+ el framing del plano) en el template de estilo.
 
     `framing` EXTIENDE el prompt de la escena (D-028): el plano hereda el setting
@@ -50,6 +51,8 @@ def build_styled_prompt(scene: Scene, style: StyleConfig, framing: str = "") -> 
     de caché estable hacia atrás).
     """
     base = scene.prompt if not framing else f"{scene.prompt}, {framing}"
+    if world:  # D-067: la biblia del mundo viaja a CADA prompt (cero deriva de set)
+        base = f"{world}. {base}"
     return style.prompt_template.format(scene_prompt=base).strip()
 
 
@@ -69,8 +72,11 @@ class KeyframeGenerator:
         out_dir.mkdir(parents=True, exist_ok=True)
 
     async def generate(self, scene: Scene, ref_images: list[Path] | None = None,
-                       seed: int | None = None, framing: str = "") -> Path:
-        prompt = build_styled_prompt(scene, self.style, framing)
+                       seed: int | None = None, framing: str = "",
+                       world: str | None = None, ref_map: str | None = None) -> Path:
+        prompt = build_styled_prompt(scene, self.style, framing, world=world)
+        if ref_map:  # D-067: las referencias entran CON NOMBRE (mata el identity-bleed)
+            prompt = prompt + chr(10) + ref_map
         return await self._render(prompt, ref_images, seed, self.out_dir / f"{scene.id}.png")
 
     async def generate_design(self, design_prompt: str, ref_images: list[Path],

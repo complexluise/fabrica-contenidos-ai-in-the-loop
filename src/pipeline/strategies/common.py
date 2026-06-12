@@ -24,11 +24,13 @@ def scene_to_request(scene: Scene) -> GenRequest:
             duration_s=scene.duration_s,
             init_image=scene.start_frame,
             end_image=scene.keyframe,
+            negative_prompt=scene.negative_prompt,
             seed=scene.seed,
         )
     return GenRequest(
         prompt=scene.prompt,
         duration_s=scene.duration_s,
         init_image=scene.keyframe,
+        negative_prompt=scene.negative_prompt,
         seed=scene.seed,
     )
