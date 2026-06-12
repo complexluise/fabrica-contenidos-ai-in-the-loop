@@ -518,9 +518,9 @@ def create_app(projects_dir: Path = Path("projects"),
         out["est_cost_per_image_usd"] = _cfg.storyboard.est_cost_per_image_usd  # T15
         # D-061: avance del animatic (solo lectura, cero costo) para la espina/página.
         try:
-            from ..studio import animatic_strip
+            from ..studio import animatic_strip, count_missing_poses
             strip = await animatic_strip(project, spec, _cfg)
-            missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
+            missing = count_missing_poses(strip)  # D-080: sin poses fantasma
             out["animatic"] = {
                 "total": len(strip), "ready": sum(1 for e in strip if e["ready"]),
                 "missing_poses": missing,
@@ -670,11 +670,11 @@ def create_app(projects_dir: Path = Path("projects"),
         costo estimado de completar lo que falta. Mismas cache keys que el render."""
         from ..project import resolve_under
         from ..state import billing_summary
-        from ..studio import animatic_strip
+        from ..studio import animatic_strip, count_missing_poses
 
         project, spec, cfg = load(slug)
         strip = await animatic_strip(project, spec, cfg)
-        missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
+        missing = count_missing_poses(strip)  # D-080: sin poses fantasma
         # D-063: pool de variantes + la elegida, por pose.
         from ..project import read_yaml
         pool = read_yaml(project.dir / "pose_candidates.yaml")

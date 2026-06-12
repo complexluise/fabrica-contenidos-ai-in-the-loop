@@ -1,5 +1,5 @@
 <script>
-  import { get, put, post, humanError, bufToBase64 } from "../lib/api.js";
+  import { get, put, post, runJob, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
 
   let { slug } = $props();
@@ -36,7 +36,12 @@
   function loadShot(sh) {
     return {
       intention: sh.intention || "", action: sh.action || "",
+      motion: sh.motion || "",                      // D-072: el dialecto de movimiento
       framing: sh.framing || "", duration_s: sh.duration_s ?? 3,
+      lands: !!sh.lands,                            // D-070: aterriza en su pose (3x)
+      media: sh.media || "video",                   // D-074: video | still
+      takes: sh.takes ?? 1,                         // D-074: tomas para curar
+      speed: sh.speed ?? null,                      // D-073: conformado de velocidad
       transition: sh.transition || null,
       camera: { ...newCamera(), ...(sh.camera || {}) },
       visual: { ...newVisual(), ...(sh.visual || {}), palette: sh.visual?.palette || [] },
@@ -174,25 +179,22 @@
     }
   }
 
-  async function generateMusic() {
+  function generateMusic() {
     if (!musicPrompt.trim()) return;
     musicErr = ""; musicBusy = true;
-    try {
-      const job = await post(`/api/projects/${slug}/music/generate`,
-        { prompt: musicPrompt, duration_s: total || 30 });
-      // Poll until done
-      let done = false;
-      while (!done) {
-        await new Promise(r => setTimeout(r, 2500));
-        const j = await get(`/api/jobs/${job.job_id}`);
-        if (j.status === "done") { music = j.result?.url || null; done = true; }
-        else if (j.status === "error") { musicErr = j.error || "Error generando musica"; done = true; }
-      }
-    } catch (e) {
-      musicErr = humanError(e);
-    } finally {
-      musicBusy = false;
-    }
+    // D-080: por runJob (SSE), como todo lo demás. El poll a mano usaba
+    // `job.job_id` (el server devuelve `id`) y esperaba "error" (es "failed"):
+    // la música fallaba SIEMPRE en la UI aunque el job saliera bien.
+    runJob(`/api/projects/${slug}/music/generate`, {
+      body: { prompt: musicPrompt, duration_s: total || 30 },
+      onDone: async (status, jobId) => {
+        musicBusy = false;
+        if (status !== "done") { musicErr = `Terminó como: ${status}.`; return; }
+        const j = await get(`/api/jobs/${jobId}`).catch(() => null);
+        music = j?.result?.url || null;
+      },
+      onError: (e) => { musicBusy = false; musicErr = humanError(e); },
+    });
   }
 
   // D-053: cambiar backend persiste inmediatamente
@@ -219,7 +221,11 @@
         visual_intensity: s.visual_intensity ?? null,            // D-047
         shots: s.shots.map((sh) => ({
           intention: sh.intention || null, action: sh.action || null,  // D-047
+          motion: sh.motion || null,                                    // D-072
           framing: sh.framing || "", duration_s: Number(sh.duration_s) || 1,
+          lands: !!sh.lands, media: sh.media || "video",                // D-070/D-074
+          takes: Math.min(6, Math.max(1, Number(sh.takes) || 1)),       // D-074
+          speed: Number(sh.speed) > 0 ? Number(sh.speed) : null,        // D-073
           camera: { ...sh.camera }, visual: cleanVisual(sh.visual),     // D-047
           transition: sh.transition || null,
           voiceover: sh.voiceover || null, caption: sh.caption || null,
@@ -418,6 +424,28 @@
                 <input class="intention-in" bind:value={sh.intention} oninput={touch}
                        placeholder="intención: qué comunica este plano (función dramática)" />
 
+                <!-- D-072: el dialecto de movimiento — SIN esto el video cae al
+                     tweening legacy (la causa #1 documentada de planos muertos) -->
+                <textarea class="motion-in" bind:value={sh.motion} oninput={touch} rows="2"
+                          placeholder="movimiento [EN]: qué se mueve, qué tan rápido, dónde termina — p.ej. 'the camera orbits him quickly, then settles' (15-40 palabras)"></textarea>
+
+                <!-- D-070/D-073/D-074: los knobs del motor -->
+                <div class="engine-row">
+                  <label class="eng-check" title="Interpola apertura → destino con provider end-frame (Kling PRO, ~3x el costo). Por defecto la cámara actúa desde el destino.">
+                    <input type="checkbox" bind:checked={sh.lands} onchange={touch} /> aterriza
+                  </label>
+                  <select bind:value={sh.media} onchange={touch} title="still = Ken Burns sobre el destino, $0 de video (D-074)">
+                    <option value="video">video</option>
+                    <option value="still">still ($0)</option>
+                  </select>
+                  <label class="eng-num" title="Tomas a generar para curar (D-074); el gate las ordena, vos elegís">
+                    tomas <input type="number" min="1" max="6" bind:value={sh.takes} oninput={touch} />
+                  </label>
+                  <label class="eng-num" title="1.1–1.3 corrige la flotación AI (D-073); vacío = sin conformar">
+                    vel. <input type="number" min="0.5" max="2" step="0.05" bind:value={sh.speed} oninput={touch} placeholder="—" />
+                  </label>
+                </div>
+
                 <!-- Cámara: gramática del shot-list -->
                 <div class="cam-row">
                   <select bind:value={sh.camera.size} onchange={touch} title="tamaño de plano">
@@ -501,9 +529,13 @@
               {/if}
               <div class="shots-chips">
                 {#each s.shots as sh, j}
-                  <span class="chip">
+                  <span class="chip" class:warn-chip={sh.media === "video" && !sh.motion}>
                     <span class="chip-n">P{j + 1}</span>
                     <span class="chip-dur">{sh.duration_s}s</span>
+                    {#if sh.media === "video" && !sh.motion}<span class="chip-alert" title="Sin frase de movimiento (D-072): el video caerá al tweening legacy. Editá y escribila.">sin motion</span>{/if}
+                    {#if sh.lands}<span class="chip-vo" title="Interpola apertura → destino (3x)">aterriza</span>{/if}
+                    {#if sh.media === "still"}<span class="chip-vo" title="Still con Ken Burns ($0)">still</span>{/if}
+                    {#if (sh.takes ?? 1) > 1}<span class="chip-vo" title="Tomas para curar">x{sh.takes}</span>{/if}
                     {#if sh.sfx}<span class="chip-sfx" title={sh.sfx}>♪</span>{/if}
                     {#if sh.voiceover}<span class="chip-vo" title={sh.voiceover}>vo</span>{/if}
                     {#if sh.caption}<span class="chip-vo" title={sh.caption}>cc</span>{/if}
@@ -1020,4 +1052,21 @@
   .intensity-range { flex: 1; max-width: 220px; accent-color: var(--red); }
   .intensity-val { font-size: 12px; color: var(--ink); min-width: 30px; }
   .intensity-hint { font-size: 11px; }
+
+  /* D-080: el motor visible en el editor */
+  .motion-in {
+    width: 100%; margin: 6px 0 0; font-size: 13px; line-height: 1.45;
+    border: 1.5px dashed var(--blue); background: var(--blue-wash); border-radius: var(--r-sm);
+    padding: 7px 10px; resize: vertical;
+  }
+  .engine-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 7px 0 2px; font-size: 12px; }
+  .eng-check { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--red-deep); cursor: pointer; }
+  .eng-num { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-soft); font-weight: 600; }
+  .eng-num input { width: 58px; font-family: var(--font-mono); font-size: 12px; }
+  .engine-row select { font-size: 12px; }
+  .chip-alert {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    background: var(--warn-wash); color: #9a6b00; border-radius: 999px; padding: 0 6px;
+  }
+  .warn-chip { border-color: #e0c089; }
 </style>

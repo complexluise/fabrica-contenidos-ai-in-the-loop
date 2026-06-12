@@ -372,7 +372,7 @@
                placeholder="ajuste opcional: 'más cerrado', 'de perfil', 'menos rojo'…"
                disabled={anyBusy} />
         <button class="small machine" onclick={() => generateScene(sceneId)}
-                disabled={anyBusy || !hasFal}>
+                disabled={anyBusy || !canGen}>
           {busyScene ? "Generando…" : "+ variantes"}
         </button>
         <label class="small ghost upload-lbl" class:disabled={anyBusy}>

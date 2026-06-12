@@ -14,7 +14,8 @@
 
   let current = $derived(studio.projects.find((p) => p.slug === studio.slug) || null);
   let next = $derived(nextStep(studio.status));
-  let keysOk = $derived(studio.status?.keys?.fal_key);
+  // D-080: sin status (cargando / sin proyecto) no se grita "faltan claves".
+  let keysOk = $derived(studio.status ? !!studio.status.keys?.fal_key : true);
 
   // --- gestión de proyectos (#3) ---
   let styles = $state(["lego"]);
@@ -114,7 +115,7 @@
     <nav class="spine">
       {#each STAGES as s, i}
         {@const state = stageState(s.id)}
-        {@const isCurrent = next && next.tab === s.id && studio.tab !== s.id}
+        {@const isCurrent = next && next.tab === s.id && studio.tab !== s.id && state !== "done"}
         <button
           class="step actor-{s.actor} state-{state}"
           class:active={studio.tab === s.id}

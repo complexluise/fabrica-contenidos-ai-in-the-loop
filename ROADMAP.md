@@ -1221,6 +1221,34 @@ la decisión de NO agregar una base de datos general queda documentada. Ver [D-0
 > llena con el proximo run pagado. Runs pre-D-079 quedan en sus run_report.json (backfill:
 > diferido).
 
+---
+
+## Sprint 6.36 — La superficie se sincroniza con el motor (D-080)
+
+**Objetivo:** ejecutar la auditoría del frontend (verificada en vivo): el Inicio al bucle real
+de 7 etapas (muere la pestaña fantasma "elegir" y su pantalla en blanco), las poses fantasma
+del animatic (D-070 propagado a `missing_poses`), la música rota, el motor D-070..D-074 visible
+en el editor (motion/lands/takes/media/speed) y la plata (D-079) en Producción. Ver [D-080].
+
+### Acceptance Criteria
+- [x] AC1 — Inicio derivado de STAGES + stepDone; cero `goTo` a pestañas inexistentes;
+  "siguiente" nunca pulsa sobre un paso hecho.
+- [x] AC2 — `count_missing_poses` (pura): apertura solo cuenta en planos `lands`; ambos
+  endpoints la usan; el Animatic narra cámara-actúa y marca lands/still. 🔬
+- [x] AC3 — Música por runJob (job.id + estado real); generar música funciona de punta a punta.
+- [x] AC4 — El editor de planos expone motion/lands/takes/media/speed; chips en modo lectura.
+- [x] AC5 — Panel de costos (D-079) en Producción; default fal-ultra-cheap; colores completos.
+- [x] AC6 — Menores: canGen en variantes, numeración desde STAGES, refresh al navegar.
+
+### Tasks
+- [x] T1 — Inicio + studio.svelte.js + App. 
+- [x] T2 — count_missing_poses + Animatic re-narrado. 🔬
+- [x] T3 — Música runJob; editor de planos D-072/D-074; costos en Producción; menores.
+
+> **Estado:** core en verde (**399 tests**). Verificado en vivo (Edge headless): las 6
+> estaciones del Inicio enrutan a contenido real (cero pantallas en blanco) y el animatic de
+> esquiva paso de pedir 21 poses fantasma a 10 reales. Capturas antes/despues en _ux_shots/.
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

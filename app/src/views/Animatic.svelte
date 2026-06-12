@@ -126,7 +126,8 @@
   <h1>Animatic</h1>
   <p class="lede">
     <span title={GLOSARIO.animatic}>La película completa en poses</span>, <b class="r">antes</b> de pagar
-    el video. Cada plano va de su <b>apertura</b> a su <b>destino</b>; el render interpola entre ellas.
+    el video. Por defecto <b>la cámara actúa</b> desde el destino elegido (un solo still);
+    los planos <span class="lands-chip">aterriza</span> interpolan apertura → destino (D-070).
     Si una pose no convence, descartala y regenerá — solo esa.
   </p>
 </header>
@@ -204,11 +205,13 @@
           <div class="shot card" class:pending={!e.ready}>
             <div class="shot-h">
               <span class="shot-id">{e.shot_id}</span>
+              {#if e.lands}<span class="lands-chip" title="Interpola apertura → destino (provider end-frame, 3x)">aterriza</span>{/if}
+              {#if e.media === "still"}<span class="still-chip" title="Still con Ken Burns: $0 de video (D-074)">still</span>{/if}
               <span class="dur">{e.duration_s}s</span>
             </div>
             <div class="poses">
-              {#each ["start", "destino"] as which, wi}
-                {#if wi === 1}<span class="arrow">→</span>{/if}
+              {#each (e.lands ? ["start", "destino"] : ["destino"]) as which, wi}
+                {#if e.lands && wi === 1}<span class="arrow">→</span>{/if}
                 {@const img = which === "start" ? e.start : e.destino}
                 {@const variants = e[`${which}_variants`] || []}
                 {@const vBusy = variantsBusy === `${e.shot_id}/${which}`}
@@ -293,7 +296,13 @@
   .shot.pending { border: 1.5px dashed var(--warn, #e0a93b); }
   .shot-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
   .shot-id { font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
-  .dur { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+  .dur { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); margin-left: auto; }
+  .lands-chip, .still-chip {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 1px 7px; border-radius: 999px; line-height: 1.6;
+  }
+  .lands-chip { background: var(--red-wash); color: var(--red-deep); border: 1px solid var(--red); }
+  .still-chip { background: var(--paper-2); color: var(--ink-soft); border: 1px solid var(--line-2); }
   .poses { display: flex; align-items: center; gap: 7px; }
   .pose { position: relative; display: flex; flex-direction: column; gap: 3px; line-height: 0; }
   .pose img { display: block; width: 96px; height: 96px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--line-2); }

@@ -82,3 +82,21 @@ async def test_strip_lands_shot_requires_both_poses(tmp_path):
     s1 = strip[0]
     assert s1["lands"] is True
     assert s1["destino"] and s1["start"] is None and s1["ready"] is False
+
+
+# --- D-080: las poses fantasma -------------------------------------------------
+
+def test_count_missing_poses_ignores_camera_acts_openings():
+    """Tras D-070 la apertura existe SOLO en planos lands. Contarla en los demas
+    prometia 'completar' poses que el motor jamas genera (el boton del Animatic
+    pedia 21 poses fantasma y el contador no bajaba nunca)."""
+    from pipeline.studio import count_missing_poses
+
+    strip = [
+        {"destino": "d.png", "start": None, "lands": False},   # camara-actua completa: 0
+        {"destino": None,    "start": None, "lands": False},   # falta el destino: 1
+        {"destino": "d.png", "start": None, "lands": True},    # lands sin apertura: 1
+        {"destino": "d.png", "start": "s.png", "lands": True}, # lands completa: 0
+        {"destino": None,    "start": None, "lands": True},    # lands sin nada: 2
+    ]
+    assert count_missing_poses(strip) == 4

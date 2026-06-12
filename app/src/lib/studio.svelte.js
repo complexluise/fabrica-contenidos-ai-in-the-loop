@@ -93,6 +93,7 @@ export async function refreshStatus() {
 
 export function goTo(tab) {
   studio.tab = tab;
+  refreshStatus(); // D-080: navegar re-lee el estado (la espina nunca miente)
   if (typeof window !== "undefined") window.scrollTo({ top: 0 });
 }
 
