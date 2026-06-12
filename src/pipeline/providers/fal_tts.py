@@ -38,6 +38,7 @@ class FalTTS:
 
     async def synthesize(self, text: str, voice_id: str, out_path: Path) -> Path:
         """Genera audio de `text` con `voice_id` (nombre de voz Kokoro) y lo guarda."""
+        import asyncio
         import fal_client
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,9 +46,13 @@ class FalTTS:
         voice = voice_id or DEFAULT_VOICE
         client = fal_client.AsyncClient(key=self._fal_key)
 
-        result = await client.subscribe(
-            self.model,
-            arguments={"prompt": text, "voice": voice, "speed": 0.95},
+        # Timeout duro (D-066): una cola trabada no debe colgar el render.
+        result = await asyncio.wait_for(
+            client.subscribe(
+                self.model,
+                arguments={"prompt": text, "voice": voice, "speed": 0.95},
+            ),
+            timeout=120,
         )
 
         audio_url = _extract_url(result)

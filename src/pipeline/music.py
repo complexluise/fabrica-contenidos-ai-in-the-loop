@@ -25,15 +25,21 @@ async def generate_music_fal(
     """Genera musica con stable-audio (fal) y la guarda en out_path (.wav)."""
     import fal_client
 
+    import asyncio
+
     client = fal_client.AsyncClient(key=fal_key)
     logger.info("Generando musica: %.0fs | %s", duration_s, prompt[:80])
-    result = await client.subscribe(
-        FAL_MUSIC_MODEL,
-        arguments={
-            "prompt": prompt,
-            "seconds_total": min(float(duration_s), 190.0),  # limite del modelo
-            "steps": steps,
-        },
+    # Timeout duro (D-066): una cola trabada no debe colgar el flujo entero.
+    result = await asyncio.wait_for(
+        client.subscribe(
+            FAL_MUSIC_MODEL,
+            arguments={
+                "prompt": prompt,
+                "seconds_total": min(float(duration_s), 190.0),  # limite del modelo
+                "steps": steps,
+            },
+        ),
+        timeout=300,
     )
     audio_url = _extract_audio_url(result)
     out_path.parent.mkdir(parents=True, exist_ok=True)

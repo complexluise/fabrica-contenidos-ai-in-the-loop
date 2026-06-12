@@ -350,8 +350,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
                 audio_cost = round(mm.cost_per_second * shot.duration_s, 4)  # solo si se generó
             diegetic_applied = True
             audio_provider = mm.name
-        except Exception:
-            pass  # sin diegético antes que perder el plano
+        except Exception as exc:  # best-effort, pero VISIBLE (D-066): nada de fallos mudos
+            logger.warning("[%s] sin audio diegético (%s): %s", shot_id, type(exc).__name__, exc)
 
     # --- L7 caption del plano (best-effort) ---
     cap = effective_caption(plano)
@@ -359,8 +359,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
         try:
             clip_path = burn_lower_third(clip_path, run.dir / "captioned" / f"{shot_id}.mp4",
                                          cap, fontfile=default_font())
-        except Exception:
-            pass  # sin caption antes que perder el plano
+        except Exception as exc:
+            logger.warning("[%s] sin caption (%s): %s", shot_id, type(exc).__name__, exc)
 
     # --- L7 voz en off del plano (best-effort, cacheada) ---
     vo_applied = False
@@ -378,8 +378,8 @@ async def _render_shot(*, project, spec, cfg, run, gate, tts, mm,
                 tts_cost = round(getattr(tts, "cost_per_char", 0.0) * len(plano.voiceover), 6)
             clip_path = mux_voiceover(clip_path, vo_file, run.dir / "voiced" / f"{shot_id}.mp4")
             vo_applied = True
-        except Exception:
-            pass  # sin VO antes que perder el plano
+        except Exception as exc:
+            logger.warning("[%s] sin voz en off (%s): %s", shot_id, type(exc).__name__, exc)
 
     record = SceneRecord(
         run_id=run.run_id, scene_id=shot_id, provider=result.provider,
