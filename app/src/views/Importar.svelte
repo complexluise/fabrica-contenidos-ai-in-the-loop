@@ -1,7 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { get, runJob, humanError } from "../lib/api.js";
+  import { get, humanError } from "../lib/api.js";
   import { studio, goTo, loadProjects, setSlug } from "../lib/studio.svelte.js";
+  import { jobState } from "../lib/jobs.svelte.js";
 
   let text = $state("");
   let slug = $state("");
@@ -9,9 +10,8 @@
   let styles = $state(["lego"]);
   let fileName = $state("");
   let dragging = $state(false);
-  let busy = $state(false);
-  let log = $state([]);
   let err = $state("");
+  const imp = jobState();  // D-081: el ciclo de job, una sola implementacion
 
   const noKey = $derived(studio.status && !studio.status.keys?.anthropic_api_key);
 
@@ -39,23 +39,16 @@
     readFile(e.dataTransfer?.files?.[0]);
   }
 
-  async function importar() {
+  function importar() {
     err = "";
-    log = [];
     if (!text.trim()) {
       err = "Pegá o subí un texto primero.";
       return;
     }
-    busy = true;
-    runJob("/api/projects/import", {
+    imp.run("/api/projects/import", {
       body: { text, slug: slug.trim() || undefined, style },
-      onLine: (l) => (log = [...log, l]),
       onDone: async (status, jobId) => {
-        busy = false;
-        if (status !== "done") {
-          err = "La importación falló. Revisá el detalle de arriba.";
-          return;
-        }
+        if (status !== "done") return;  // imp.err ya lo cuenta
         const detail = await get(`/api/jobs/${jobId}`);
         const newSlug = detail.result?.slug;
         await loadProjects();
@@ -63,10 +56,6 @@
           await setSlug(newSlug);
           goTo("storyboard"); // a editar el borrador propuesto
         }
-      },
-      onError: (e) => {
-        busy = false;
-        err = humanError(e);
       },
     });
   }
@@ -127,16 +116,16 @@
 </div>
 
 <div class="bar">
-  <button class="primary" onclick={importar} disabled={busy || !text.trim() || noKey}>
-    {busy ? "Descomponiendo…" : "Importar → borrador"}
+  <button class="primary" onclick={importar} disabled={imp.busy || !text.trim() || noKey}>
+    {imp.busy ? "Descomponiendo…" : "Importar → borrador"}
   </button>
   <span class="muted">La IA propone; vos editás antes de generar nada.</span>
 </div>
 
-{#if err}<p class="error">{err}</p>{/if}
+{#if err || imp.err}<p class="error">{err || imp.err}</p>{/if}
 
-{#if log.length}
-  <pre class="log">{log.join("\n")}</pre>
+{#if imp.log.length}
+  <pre class="log">{imp.log.join("\n")}</pre>
 {/if}
 
 <style>

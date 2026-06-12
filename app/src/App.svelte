@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
-           createProject, deleteProject } from "./lib/studio.svelte.js";
+           createProject, deleteProject, parseHash, initRouting, writeHash } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
@@ -26,7 +26,17 @@
   let pmErr = $state("");
 
   onMount(async () => {
+    const want = parseHash();   // D-081: F5 conserva proyecto y pestaña
     await loadProjects();
+    if (want) {
+      if (want.slug && want.slug !== studio.slug
+          && studio.projects.some((p) => p.slug === want.slug)) {
+        await setSlug(want.slug);
+      }
+      studio.tab = want.tab;
+    }
+    writeHash();
+    initRouting();
     try {
       const s = await get("/api/styles");
       if (s?.length) { styles = s; newStyle = s.includes("lego") ? "lego" : s[0]; }
@@ -168,7 +178,9 @@
   <main>
     {#if studio.error}
       <p class="error">{studio.error}</p>
-    {:else if studio.tab === "importar"}
+    {:else}
+    {#key studio.slug}
+    {#if studio.tab === "importar"}
       <Importar />
     {:else if studio.tab === "ajustes"}
       <Ajustes />
@@ -190,6 +202,8 @@
       <Animatic slug={studio.slug} />
     {:else if studio.tab === "producir"}
       <Produccion slug={studio.slug} />
+    {/if}
+    {/key}
     {/if}
   </main>
 </div>

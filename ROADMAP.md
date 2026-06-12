@@ -1249,6 +1249,31 @@ en el editor (motion/lands/takes/media/speed) y la plata (D-079) en Producción.
 > estaciones del Inicio enrutan a contenido real (cero pantallas en blanco) y el animatic de
 > esquiva paso de pedir 21 poses fantasma a 10 reales. Capturas antes/despues en _ux_shots/.
 
+---
+
+## Sprint 6.37 — El frontend se vuelve Svelte de verdad (D-081)
+
+**Objetivo:** ejecutar la revisión de prácticas con el principio situado (duplicar píxeles es
+barato; duplicar VERDAD produce los bugs de des-sincronización que venimos matando): mutación
+directa de `$state` (mueren 32 spread-clones), `{#key slug}` (mueren los resets manuales),
+`jobState()` único (mueren 8 copias del ciclo de job), `picksFromDisk()` compartido,
+`components/` solo donde hay verdad compartida real, y routing por hash. Ver [D-081].
+
+### Acceptance Criteria
+- [x] AC1 — Cero spread-clones de reactividad; los 2 restantes son merges legítimos.
+- [x] AC2 — `{#key studio.slug}` en App: cambiar de proyecto remonta las vistas; cero resets
+  manuales de estado.
+- [x] AC3 — `jobState()` en lib: cero `runJob` directo en vistas (8 copias muertas).
+- [x] AC4 — `components/` (LightTable, GenerateBar, BackendToggle, ViewHeader, WarnStrip,
+  WarnBanner, Progress, SaveBar) con snippets de Svelte 5; Casting y Encuadres reescritas
+  sobre las piezas. El Storyboard NO se parte (sin duplicación = sin motivo).
+- [x] AC5 — Routing por hash `#/<slug>/<tab>`: F5 y atrás conservan el lugar (verificado en
+  vivo: 7 pestañas + F5 + back + cambio de proyecto, cero errores de página).
+
+> **Estado:** verificado en vivo con Edge headless; build limpio; paridad visual confirmada
+> con capturas (_ux_shots/d081/). El patrón queda demostrado: la próxima vista se escribe
+> componiendo, no copiando.
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,
