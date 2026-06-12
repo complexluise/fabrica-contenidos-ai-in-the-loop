@@ -3,6 +3,9 @@
   import { get, humanError } from "../lib/api.js";
   import { studio, goTo, loadProjects, setSlug } from "../lib/studio.svelte.js";
   import { jobState } from "../lib/jobs.svelte.js";
+  import JobLog from "../components/JobLog.svelte";
+  import ViewHeader from "../components/ViewHeader.svelte";
+  import WarnStrip from "../components/WarnStrip.svelte";
 
   let text = $state("");
   let slug = $state("");
@@ -61,20 +64,15 @@
   }
 </script>
 
-<header class="head">
-  <div class="eyebrow">Paso 1 · la IA propone</div>
-  <h1>Importar un guion</h1>
-  <p class="lede muted">
-    Pegá o subí tu texto. La IA lo descompone en un <b>borrador</b> de proyecto
+<ViewHeader eyebrow="Paso 1 · la IA propone" title="Importar un guion">
+  Pegá o subí tu texto. La IA lo descompone en un <b>borrador</b> de proyecto
     (título, sinopsis y escenas); después lo editás y firmás en el Storyboard.
-  </p>
-</header>
+</ViewHeader>
 
 {#if noKey}
-  <div class="warn-strip">
+  <WarnStrip actionLabel="Ir a Ajustes →" onaction={() => goTo("ajustes")}>
     <b>Falta la clave de Anthropic.</b> La descomposición usa Claude.
-    <button class="small" onclick={() => goTo("ajustes")}>Ir a Ajustes →</button>
-  </div>
+  </WarnStrip>
 {/if}
 
 <div
@@ -124,21 +122,12 @@
 
 {#if err || imp.err}<p class="error">{err || imp.err}</p>{/if}
 
-{#if imp.log.length}
-  <pre class="log">{imp.log.join("\n")}</pre>
+{#if imp.busy || imp.log.length}
+  <JobLog log={imp.log} />
 {/if}
 
 <style>
-  .head { margin-bottom: 16px; }
-  .head h1 { margin: 5px 0 6px; }
-  .lede { font-size: 16px; max-width: 64ch; }
 
-  .warn-strip {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    background: var(--warn-wash); border: 1.5px solid #e0c089; color: #6b4a12;
-    border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px;
-  }
-  .warn-strip button { margin-left: auto; }
 
   .drop {
     border: 2px dashed var(--line-2); border-radius: var(--r-lg);
@@ -165,10 +154,4 @@
   .field select { min-width: 140px; }
 
   .bar { margin-top: 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .muted { color: var(--ink-soft); }
-  .log {
-    margin-top: 16px; background: #1c1814; color: #e8e2d8; border-radius: var(--r);
-    padding: 14px 16px; font-size: 12.5px; line-height: 1.55; max-height: 280px; overflow: auto;
-    white-space: pre-wrap;
-  }
 </style>

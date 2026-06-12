@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { get, post, put, humanError, bufToBase64 } from "../lib/api.js";
-  import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
+  import { studio, goTo, refreshStatus, nextStep } from "../lib/studio.svelte.js";
   import { jobState } from "../lib/jobs.svelte.js";
 
   let { slug } = $props();
@@ -619,13 +619,13 @@
             <div class="rf-kf-row">
               {#if kfUrl}
                 <img class="rf-thumb" src={kfUrl} alt="keyframe {s.id}" />
-                <button class="small ghost" onclick={() => goTo("elegir")}>Cambiar →</button>
+                <button class="small ghost" onclick={() => goTo("encuadres")}>Cambiar →</button>
               {:else if hasCands}
                 <span class="muted" style="font-size:12px">◈ candidatos listos —</span>
-                <button class="small machine" onclick={() => goTo("elegir")}>Elegir →</button>
+                <button class="small machine" onclick={() => goTo("encuadres")}>Elegir →</button>
               {:else}
                 <span class="muted" style="font-size:12px">◇ sin keyframe —</span>
-                <button class="small ghost" onclick={() => goTo("elegir")}>Generar →</button>
+                <button class="small ghost" onclick={() => goTo("encuadres")}>Generar →</button>
               {/if}
             </div>
 
@@ -641,7 +641,7 @@
     {#if signed && !dirty}
       <!-- Firmado: el foco YA NO es firmar, es avanzar al siguiente paso -->
       <span class="signed-seal">✓ Plan firmado</span>
-      <button class="primary cta go" onclick={() => goTo("elegir")}>Siguiente: Elegir →</button>
+      <button class="primary cta go" onclick={() => goTo(nextStep(studio.status)?.tab || "casting")}>Siguiente paso →</button>
       <button class="ghost small" onclick={() => save(true)} disabled={saving}>
         {saving ? "Firmando…" : "Volver a firmar"}
       </button>

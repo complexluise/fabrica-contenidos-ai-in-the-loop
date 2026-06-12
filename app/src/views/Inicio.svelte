@@ -5,6 +5,8 @@
   // pestaña que ya no existe (pantalla en blanco).
   import { studio, goTo, nextStep, stepDone, refreshStatus, STAGES } from "../lib/studio.svelte.js";
   import { onMount } from "svelte";
+  import StageNode from "../components/StageNode.svelte";
+  import WarnStrip from "../components/WarnStrip.svelte";
 
   let st = $derived(studio.status);
   let next = $derived(nextStep(st));
@@ -53,10 +55,9 @@
 </header>
 
 {#if st && !st.keys?.fal_key}
-  <div class="warn-strip">
+  <WarnStrip actionLabel="Ir a Configuración →" onaction={() => goTo("ajustes")}>
     <b>Primero: configurá tus claves.</b> Sin la clave de fal.ai no se puede generar nada.
-    <button class="small" onclick={() => goTo("ajustes")}>Ir a Configuración →</button>
-  </div>
+  </WarnStrip>
 {/if}
 
 <!-- siguiente paso: una sola recomendacion grande -->
@@ -94,7 +95,7 @@
     <button class="station" class:done class:next={next && next.tab === s.id && !done}
             onclick={() => goTo(s.id)}>
       <div class="st-top">
-        <span class="num actor-{s.actor}">{done ? "✓" : s.n}</span>
+        <StageNode n={s.n} actor={s.actor} {done} size={28} />
         {#if tone}<span class="badge {tone}">{who}</span>{/if}
       </div>
       <h3>{s.label}</h3>
@@ -112,12 +113,6 @@
   .manifesto .r { color: var(--red-deep); font-style: normal; }
   .manifesto i { color: var(--ink); }
 
-  .warn-strip {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    background: var(--warn-wash); border: 1.5px solid #e0c089; color: #6b4a12;
-    border-radius: var(--r); padding: 12px 16px; margin-bottom: 22px;
-  }
-  .warn-strip button { margin-left: auto; }
 
   /* siguiente paso */
   .next {
@@ -145,17 +140,8 @@
   .station.next { border-color: var(--red); }
   .station.done { background: linear-gradient(180deg, var(--card), var(--ok-wash) 320%); }
   .st-top { display: flex; align-items: center; justify-content: space-between; }
-  .num {
-    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
-    font-family: var(--font-mono); font-weight: 700; font-size: 13px;
-    border: 2px solid var(--line-2); color: var(--ink-soft); background: var(--paper);
-  }
-  .num.actor-tu { border-color: var(--red); color: var(--red-deep); }
-  .num.actor-ia { border-color: var(--blue); color: var(--blue-deep); }
-  .station.done .num { background: var(--ok); border-color: var(--ok); color: #fff; }
   .station h3 { margin: 2px 0 0; }
   .desc { font-size: 13px; color: var(--ink-2); margin: 0; min-height: 2.6em; }
   .st-foot { font-size: 12px; color: var(--ink-soft); border-top: 1px dashed var(--line); padding-top: 8px; }
 
-  .muted { color: var(--ink-soft); }
 </style>

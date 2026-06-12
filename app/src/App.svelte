@@ -3,6 +3,7 @@
   import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
            createProject, deleteProject, parseHash, initRouting, writeHash } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
+  import StageNode from "./components/StageNode.svelte";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
@@ -133,18 +134,8 @@
           onclick={() => goTo(s.id)}
         >
           {#if i > 0}<span class="rail" class:last={i === STAGES.length - 1}></span>{/if}
-          <span class="node">
-            {#if state === "done"}
-              <svg viewBox="0 0 16 16" class="tick"><path d="M3 8.5l3.2 3L13 4.5"
-                fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
-                stroke-linejoin="round"/></svg>
-            {:else if s.id === "inicio"}
-              <svg viewBox="0 0 16 16" class="home"><path d="M2.5 7.5L8 3l5.5 4.5V13a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z"
-                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-            {:else}
-              {s.n}
-            {/if}
-          </span>
+          <StageNode n={s.n} actor={s.actor} done={state === "done"}
+                     icon={s.id === "inicio" ? "home" : ""} />
           <span class="txt">
             <span class="lbl">{s.label}</span>
             <span class="sub">{s.sub}</span>
@@ -277,33 +268,13 @@
     background: var(--line-2);
   }
 
-  .node {
-    position: relative;
-    z-index: 1;
-    width: 30px;
-    height: 30px;
-    flex-shrink: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    border: 2px solid var(--line-2);
-    background: var(--paper);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--ink-soft);
-  }
-  .tick, .home { width: 16px; height: 16px; }
 
   /* color por actor (quien decide en ese paso) */
-  .step.actor-tu .node  { border-color: var(--red);  color: var(--red-deep); }
-  .step.actor-ia .node  { border-color: var(--blue); color: var(--blue-deep); }
 
   /* hecho = relleno */
-  .step.state-done .node { background: var(--ok); border-color: var(--ok); color: #fff; }
 
   /* paso actual = anillo pulsante */
-  .step.current .node { animation: pulse 1.8s ease-in-out infinite; }
+  .step.current :global(.stage-node) { animation: sb-pulse 1.8s ease-in-out infinite; }
   .step.current .lbl::after {
     content: "siguiente";
     margin-left: 8px;
@@ -318,7 +289,7 @@
     border-radius: 999px;
     vertical-align: middle;
   }
-  @keyframes pulse {
+  @keyframes -global-sb-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(214, 64, 42, 0.5); }
     50% { box-shadow: 0 0 0 6px rgba(214, 64, 42, 0); }
   }

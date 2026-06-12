@@ -255,3 +255,11 @@ textarea { resize: vertical; line-height: 1.55; }
 /* scrollbar discreta */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; border: 3px solid var(--paper); }
+
+/* --- utilidades compartidas (D-081): pixeles comunes, UNA sola vez --------- */
+.muted { color: var(--ink-soft); }
+.empty { padding: 30px; text-align: center; margin-top: 16px; }
+.empty p { margin: 4px 0; }
+.note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
+.group { margin: 14px 0 22px; }
+.group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 16px; }

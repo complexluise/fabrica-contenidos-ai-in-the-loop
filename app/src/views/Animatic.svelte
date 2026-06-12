@@ -8,6 +8,7 @@
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
   import { jobState } from "../lib/jobs.svelte.js";
   import Progress from "../components/Progress.svelte";
+  import ViewHeader from "../components/ViewHeader.svelte";
 
   let { slug } = $props();
   let data = $state(null);      // { strip, total, ready, missing_poses, est_missing_cost_usd }
@@ -112,16 +113,12 @@
   let playerImg = $derived(playerShot ? (playPose === "start" ? playerShot.start : playerShot.destino) : null);
 </script>
 
-<header class="head">
-  <div class="eyebrow">Paso 5 · vos decidís</div>
-  <h1>Animatic</h1>
-  <p class="lede">
-    <span title={GLOSARIO.animatic}>La película completa en poses</span>, <b class="r">antes</b> de pagar
+<ViewHeader eyebrow="Paso 5 · vos decidís" title="Animatic">
+  <span title={GLOSARIO.animatic}>La película completa en poses</span>, <b class="r">antes</b> de pagar
     el video. Por defecto <b>la cámara actúa</b> desde el destino elegido (un solo still);
     los planos <span class="lands-chip">aterriza</span> interpolan apertura → destino (D-070).
     Si una pose no convence, descartala y regenerá — solo esa.
-  </p>
-</header>
+</ViewHeader>
 
 {#if data}
   <div class="generate card">
@@ -257,10 +254,6 @@
 {/if}
 
 <style>
-  .head { margin-bottom: 18px; }
-  .head h1 { margin: 5px 0 8px; }
-  .lede { max-width: 58ch; color: var(--ink-2); font-size: 16px; }
-  .lede .r { color: var(--red-deep); }
   .generate { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; padding: 16px 20px; margin-bottom: 14px; }
   .gen-l { flex: 1; min-width: 240px; }
   .gen-help { font-size: 13px; margin: 4px 0 0; }
@@ -313,7 +306,6 @@
 
   .savebar { position: sticky; bottom: 0; margin-top: 26px; padding: 16px 0 8px; background: linear-gradient(0deg, var(--paper) 60%, transparent); display: flex; align-items: center; gap: 14px; }
   .saved-seal { font-size: 13px; font-weight: 700; color: var(--ok); background: var(--ok-wash); border-radius: 999px; padding: 6px 14px; }
-  .muted { color: var(--ink-soft); }
 
   /* D-062: la plata visible */
   .billing { color: var(--ink-2); }
