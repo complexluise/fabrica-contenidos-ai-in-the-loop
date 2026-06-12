@@ -141,10 +141,4 @@
 {/if}
 
 <style>
-  .note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
-  .group { margin: 14px 0 22px; }
-  .group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 16px; }
-  .empty { padding: 30px; text-align: center; margin-top: 16px; }
-  .empty p { margin: 4px 0; }
-  .muted { color: var(--ink-soft); }
 </style>

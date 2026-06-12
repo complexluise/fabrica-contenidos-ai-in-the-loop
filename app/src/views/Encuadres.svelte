@@ -391,9 +391,6 @@
   .bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; margin-bottom: 14px; background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r-sm); }
   .bulk-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
   .bulk-msg { font-size: 12.5px; color: var(--ok); font-weight: 600; }
-  .note { background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: var(--r); padding: 9px 14px; font-size: 14px; }
-  .group { margin: 14px 0 22px; }
-  .group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 16px; }
   .scene-id { font-family: var(--font-mono); color: var(--blue-deep); }
   .scene-ctrl { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
   .tweak-in { flex: 1; min-width: 200px; font-size: 13px; padding: 5px 10px; background: var(--paper-2); border-color: var(--line); border-radius: var(--r-sm); }
@@ -423,7 +420,4 @@
   .frame-in { flex: 1; font-size: 12.5px; padding: 4px 8px; background: var(--card); border-color: var(--line); border-radius: var(--r-sm); color: var(--ink-2); }
   .prompts-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .saved-ok { color: var(--ok); font-size: 12px; font-weight: 600; }
-  .empty { padding: 30px; text-align: center; margin-top: 16px; }
-  .empty p { margin: 4px 0; }
-  .muted { color: var(--ink-soft); }
 </style>

@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import ViewHeader from "../components/ViewHeader.svelte";
   import { get, put, humanError } from "../lib/api.js";
   import { goTo, refreshStatus, nextStep, studio } from "../lib/studio.svelte.js";
 
@@ -37,14 +38,10 @@
   let next = $derived(nextStep(studio.status));
 </script>
 
-<header class="head">
-  <div class="eyebrow">Configuración · setup</div>
-  <h1>Configuración</h1>
-  <p class="lede">
-    Tus claves de API. Se guardan en un archivo <code>.env</code> <b>local</b> — nunca salen de tu máquina.
+<ViewHeader eyebrow="Configuración · setup" title="Configuración">
+  Tus claves de API. Se guardan en un archivo <code>.env</code> <b>local</b> — nunca salen de tu máquina.
     Dejá un campo vacío para no cambiarlo.
-  </p>
-</header>
+</ViewHeader>
 
 <div class="fields">
   {#each fields as [key, label, required, help]}
@@ -70,9 +67,6 @@
 {#if err}<p class="error">{err}</p>{/if}
 
 <style>
-  .head { margin-bottom: 20px; }
-  .head h1 { margin: 5px 0 8px; }
-  .lede { max-width: 60ch; color: var(--ink-2); font-size: 16px; }
 
   .fields { display: flex; flex-direction: column; gap: 14px; max-width: 580px; }
   .field { padding: 16px 18px; }
@@ -84,5 +78,4 @@
 
   .bar { margin-top: 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .ok-msg { color: var(--ok); font-weight: 600; }
-  .muted { color: var(--ink-soft); }
 </style>

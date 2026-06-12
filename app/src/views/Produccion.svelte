@@ -3,6 +3,9 @@
   import { get } from "../lib/api.js";
   import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
   import { jobState } from "../lib/jobs.svelte.js";
+  import JobLog from "../components/JobLog.svelte";
+  import ViewHeader from "../components/ViewHeader.svelte";
+  import WarnStrip from "../components/WarnStrip.svelte";
 
   let { slug } = $props();
   // D-081: un jobState por trabajo — el ciclo busy/log/err vive UNA vez en lib.
@@ -11,7 +14,6 @@
   let cur = $derived(jobs[active]);
   let running = $derived(jobs.render.busy ? "render" : jobs.export.busy ? "export" : "");
   let err = $derived(jobs.render.err || jobs.export.err);
-  let showLog = $state(true);
   let profile = $state("fal-ultra-cheap");  // D-076: el mismo default que el motor
   let concurrency = $state(3);
   let profiles = $state([]);   // cargados desde /api/profiles
@@ -84,21 +86,16 @@
   }
 </script>
 
-<header class="head">
-  <div class="eyebrow">Paso 6 · la IA ejecuta</div>
-  <h1>Producir</h1>
-  <p class="lede">
-    Ya elegiste todo. Ahora la maquina arma el video plano a plano
+<ViewHeader eyebrow="Paso 6 · la IA ejecuta" title="Producir">
+  Ya elegiste todo. Ahora la maquina arma el video plano a plano
     (<span title="corte de referencia, no el definitivo">rough cut</span>) y prepara
     el paquete para quien edita.
-  </p>
-</header>
+</ViewHeader>
 
 {#if !ready && !renderDone}
-  <div class="warn-strip">
+  <WarnStrip actionLabel="Ir a Encuadres" onaction={() => goTo("encuadres")}>
     <b>Te faltan elecciones.</b> Confirmá los encuadres de cada escena antes de renderizar.
-    <button class="small" onclick={() => goTo("encuadres")}>Ir a Encuadres</button>
-  </div>
+  </WarnStrip>
 {/if}
 
 {#if costs && costs.scenes > 0}
@@ -220,33 +217,10 @@
 
 {#if err}<p class="error">{err}</p>{/if}
 
-<div class="log-wrap">
-  <button class="log-toggle eyebrow" onclick={() => (showLog = !showLog)}>
-    {showLog ? "▾" : "▸"} Registro en vivo
-  </button>
-  {#if showLog}
-    <div class="log mono">
-      {#if cur.log.length === 0}
-        <span class="muted">El progreso aparece aca mientras la maquina trabaja…</span>
-      {:else}
-        {#each cur.log as l}<div>{l}</div>{/each}
-      {/if}
-    </div>
-  {/if}
-</div>
+<JobLog log={cur.log} />
 
 <style>
-  .head { margin-bottom: 18px; }
-  .head h1 { margin: 5px 0 8px; }
-  .lede { max-width: 58ch; color: var(--ink-2); font-size: 16px; }
-  .lede span[title] { border-bottom: 1.5px dotted var(--ink-soft); cursor: help; }
 
-  .warn-strip {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    background: var(--warn-wash); border: 1.5px solid #e0c089; color: #6b4a12;
-    border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px;
-  }
-  .warn-strip button { margin-left: auto; }
 
   .steps { display: flex; flex-direction: column; gap: 14px; }
   .step { padding: 18px 20px; }
@@ -302,15 +276,6 @@
   .hint { font-size: 13px; margin: 10px 0 0; }
   .ok-line { color: var(--ok); margin: 12px 0 0; font-weight: 600; }
 
-  .log-wrap { margin-top: 22px; }
-  .log-toggle { background: transparent; border: none; padding: 4px 0; cursor: pointer; box-shadow: none; }
-  .log-toggle:hover { color: var(--ink); box-shadow: none; }
-  .log {
-    margin-top: 8px; background: #211c16; color: #d8cdb8; border: 1px solid var(--line-2);
-    border-radius: var(--r); padding: 14px 16px; min-height: 130px; max-height: 420px;
-    overflow: auto; font-size: 12.5px; line-height: 1.65; white-space: pre-wrap;
-  }
-  .muted { color: var(--ink-soft); }
 
   /* D-079: la plata visible donde se gasta */
   .costs { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 14px; }
