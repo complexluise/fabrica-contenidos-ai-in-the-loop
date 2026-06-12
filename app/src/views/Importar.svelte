@@ -73,7 +73,7 @@
 </script>
 
 <header class="head">
-  <div class="eyebrow">Paso 2 · la IA propone</div>
+  <div class="eyebrow">Paso 1 · la IA propone</div>
   <h1>Importar un guion</h1>
   <p class="lede muted">
     Pegá o subí tu texto. La IA lo descompone en un <b>borrador</b> de proyecto

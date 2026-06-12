@@ -65,3 +65,6 @@ dist/
 build/
 # Espacio de trabajo de recortes (material generado, D-079 fix)
 _recut/
+
+# Capturas de auditoria UX (material de trabajo)
+_ux_shots/

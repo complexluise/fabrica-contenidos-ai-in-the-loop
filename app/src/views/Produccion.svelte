@@ -1,7 +1,8 @@
 <script>
   import { onMount } from "svelte";
   import { runJob, humanError } from "../lib/api.js";
-  import { studio, goTo, refreshStatus, stepDone } from "../lib/studio.svelte.js";
+  import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
+  import { get } from "../lib/api.js";
 
   let { slug } = $props();
   let running = $state(""); // "render" | "export" | ""
@@ -9,7 +10,7 @@
   let kindStatus = $state({ render: "", export: "" });
   let err = $state("");
   let showLog = $state(true);
-  let profile = $state("proto");
+  let profile = $state("fal-ultra-cheap");  // D-076: el mismo default que el motor
   let concurrency = $state(3);
   let profiles = $state([]);   // cargados desde /api/profiles
 
@@ -18,7 +19,9 @@
   let renderDone = $derived(!!st?.render?.done);
   let exportDone = $derived(!!st?.export?.done);
   let finalUrl = $derived(st?.render?.final_url || null);
-  let ready = $derived(stepDone("elegir", st));
+  // D-080: "elegir" no existe mas — la verdad es el stage del motor.
+  let ready = $derived(st ? PIPELINE_ORDER.indexOf(st.stage) > PIPELINE_ORDER.indexOf("encuadres") : false);
+  let costs = $state(null);  // D-079: el libro mayor, visible donde se gasta
   let selectedProfile = $derived(profiles.find(p => p.key === profile) ?? null);
 
   const SPEEDS = [
@@ -32,6 +35,9 @@
     green:  { bg: "#dcfce7", fg: "#166534" },
     yellow: { bg: "#fef3c7", fg: "#92400e" },
     blue:   { bg: "#dbeafe", fg: "#1e40af" },
+    orange: { bg: "#ffedd5", fg: "#9a3412" },
+    teal:   { bg: "#ccfbf1", fg: "#115e59" },
+    cyan:   { bg: "#cffafe", fg: "#155e75" },
     gray:   { bg: "#f3f4f6", fg: "#374151" },
   };
 
@@ -40,7 +46,12 @@
     return `background:${c.bg};color:${c.fg}`;
   }
 
+  async function loadCosts() {
+    try { costs = await get(`/api/costs`); } catch { costs = null; }
+  }
+
   onMount(async () => {
+    loadCosts();  // D-079: la plata visible
     try {
       const res = await fetch("/api/profiles");
       profiles = await res.json();
@@ -68,6 +79,7 @@
         running = ""; kindStatus = { ...kindStatus, [kind]: s };
         if (s !== "done") err = `Termino como: ${s}. Revisa el registro.`;
         await refreshStatus();
+        loadCosts();  // D-079: lo que acaba de costar, al instante
       },
       onError: (e) => { running = ""; kindStatus = { ...kindStatus, [kind]: "error" }; err = humanError(e); },
     });
@@ -75,7 +87,7 @@
 </script>
 
 <header class="head">
-  <div class="eyebrow">Paso 4 · la IA ejecuta</div>
+  <div class="eyebrow">Paso 6 · la IA ejecuta</div>
   <h1>Producir</h1>
   <p class="lede">
     Ya elegiste todo. Ahora la maquina arma el video plano a plano
@@ -86,8 +98,22 @@
 
 {#if !ready && !renderDone}
   <div class="warn-strip">
-    <b>Te faltan elecciones.</b> Vuelve a <i>Elegir</i> y confirma los encuadres antes de renderizar.
-    <button class="small" onclick={() => goTo("elegir")}>Ir a Elegir</button>
+    <b>Te faltan elecciones.</b> Confirmá los encuadres de cada escena antes de renderizar.
+    <button class="small" onclick={() => goTo("encuadres")}>Ir a Encuadres</button>
+  </div>
+{/if}
+
+{#if costs && costs.scenes > 0}
+  <div class="costs card" title="El libro mayor de costos (D-079): out/telemetry.sqlite">
+    <span class="eyebrow">La plata</span>
+    <span class="costs-total">gastado: <b>${costs.total_usd.toFixed(2)}</b></span>
+    {#if costs.by_project?.[slug] != null}
+      <span class="costs-proj">este proyecto: <b>${costs.by_project[slug].toFixed(2)}</b></span>
+    {/if}
+    <span class="costs-bd muted">
+      video ${costs.breakdown.video_usd.toFixed(2)} · imágenes ${costs.breakdown.keyframe_usd.toFixed(2)}
+      · sfx ${costs.breakdown.sfx_usd.toFixed(2)} · voz ${costs.breakdown.tts_usd.toFixed(2)}
+    </span>
   </div>
 {/if}
 
@@ -287,4 +313,10 @@
     overflow: auto; font-size: 12.5px; line-height: 1.65; white-space: pre-wrap;
   }
   .muted { color: var(--ink-soft); }
+
+  /* D-079: la plata visible donde se gasta */
+  .costs { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 14px; }
+  .costs-total b, .costs-proj b { font-family: var(--font-mono); color: var(--ink); }
+  .costs-total, .costs-proj { font-size: 13px; }
+  .costs-bd { font-size: 11.5px; }
 </style>

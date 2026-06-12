@@ -1,5 +1,9 @@
 <script>
-  import { studio, goTo, nextStep, stepDone, refreshStatus } from "../lib/studio.svelte.js";
+  // [D-080] El Inicio proyecta el bucle REAL: las mismas 7 etapas del sidebar,
+  // derivadas de STAGES + stepDone (la fuente unica es el motor, D-032). Antes
+  // mostraba el modelo viejo de 4 estaciones y su "Elegir" llevaba a una
+  // pestaña que ya no existe (pantalla en blanco).
+  import { studio, goTo, nextStep, stepDone, refreshStatus, STAGES } from "../lib/studio.svelte.js";
   import { onMount } from "svelte";
 
   let st = $derived(studio.status);
@@ -8,43 +12,35 @@
 
   onMount(refreshStatus);
 
-  // estado por estacion: `done` lo decide el motor (stepDone sobre status.stage);
-  // el `detail` (X/Y) es presentacion, lee los contadores del status.
-  function station(id) {
-    if (!st) return { done: false, detail: "—", actor: "tu" };
-    const done = stepDone(id, st);
-    if (id === "importar") {
-      const d = stepDone(id, st);
-      return { done: d, detail: d ? "plan firmado" : "proyecto creado, sin firmar", actor: "ia" };
-    }
+  // Las estaciones = STAGES sin el propio Inicio. El "done" lo decide el motor
+  // (stepDone); el detail (X/Y) es presentacion sobre los contadores del status.
+  let stations = $derived(STAGES.filter((s) => s.id !== "inicio"));
+
+  function detail(id) {
+    if (!st) return "—";
+    if (id === "importar") return "borrador creado";
     if (id === "storyboard")
-      return {
-        done: !!st.storyboard?.signed,
-        detail: st.storyboard?.signed ? "plan firmado" : `${st.scenes_total} escenas · sin firmar`,
-        actor: "tu",
-      };
-    if (id === "elegir") {
-      const c = st.casting || {}, k = st.keyframes || {};
-      const parts = [];
-      if (c.needed > 0) parts.push(`casting ${c.chosen}/${c.needed}`);
-      parts.push(`encuadres ${k.chosen}/${k.total}`);
-      return { done, detail: parts.join(" · "), actor: "tu" };
+      return st.storyboard?.signed ? "plan firmado" : `${st.scenes_total} escenas · sin firmar`;
+    if (id === "casting") {
+      const c = st.casting || {};
+      return c.needed > 0 ? `caras ${c.chosen}/${c.needed}` : "sin personajes con diseño";
     }
-    if (id === "producir") {
-      const detail = !st.render?.done ? "sin render" : !st.export?.done ? "falta paquete" : "video + paquete";
-      return { done, detail, actor: "ia" };
+    if (id === "encuadres") {
+      const k = st.keyframes || {};
+      return `elegidos ${k.chosen}/${k.total}`;
     }
-    return { done: false, detail: "", actor: "tu" };
+    if (id === "animatic") {
+      const a = st.animatic;
+      if (!a || !a.total) return "sin planos todavía";
+      const extra = a.missing_poses > 0 ? ` · faltan ${a.missing_poses} poses` : "";
+      return `planos listos ${a.ready}/${a.total}${extra}`;
+    }
+    if (id === "producir")
+      return !st.render?.done ? "sin render" : !st.export?.done ? "video listo · falta paquete" : "video + paquete";
+    return "";
   }
 
-  const STATIONS = [
-    { id: "importar",   n: 1, label: "Importar",   desc: "Pegá un texto; la IA arma el borrador." },
-    { id: "storyboard", n: 2, label: "Storyboard", desc: "Editá y firmá el plan, plano a plano." },
-    { id: "elegir",     n: 3, label: "Elegir",     desc: "La IA genera opciones; vos elegís." },
-    { id: "producir",   n: 4, label: "Producir",   desc: "Se arma el video y el paquete." },
-  ];
-
-  const actorBadge = { tu: ["red", "vos decidís"], ia: ["blue", "la IA hace"], lee: ["", "leer"] };
+  const actorBadge = { tu: ["red", "vos decidís"], ia: ["blue", "la IA hace"], lee: ["", ""] };
 </script>
 
 <header class="hero">
@@ -89,20 +85,21 @@
   </div>
 {/if}
 
-<!-- el bucle, estacion por estacion -->
+<!-- el bucle, etapa por etapa: las MISMAS 7 del sidebar (D-080) -->
 <div class="eyebrow stations-h">El recorrido completo</div>
 <div class="stations">
-  {#each STATIONS as s}
-    {@const stt = station(s.id)}
-    {@const [tone, who] = actorBadge[stt.actor]}
-    <button class="station" class:done={stt.done} class:next={next && next.tab === s.id} onclick={() => goTo(s.id)}>
+  {#each stations as s (s.id)}
+    {@const done = stepDone(s.id, st)}
+    {@const [tone, who] = actorBadge[s.actor] || ["", ""]}
+    <button class="station" class:done class:next={next && next.tab === s.id && !done}
+            onclick={() => goTo(s.id)}>
       <div class="st-top">
-        <span class="num actor-{stt.actor}">{stt.done ? "✓" : s.n}</span>
+        <span class="num actor-{s.actor}">{done ? "✓" : s.n}</span>
         {#if tone}<span class="badge {tone}">{who}</span>{/if}
       </div>
       <h3>{s.label}</h3>
-      <p class="desc">{s.desc}</p>
-      <div class="st-foot mono">{stt.detail}</div>
+      <p class="desc">{s.sub}</p>
+      <div class="st-foot mono">{detail(s.id)}</div>
     </button>
   {/each}
 </div>

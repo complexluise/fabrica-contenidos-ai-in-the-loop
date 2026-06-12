@@ -709,6 +709,22 @@ async def animatic_strip(project: Project, spec: ProjectSpec, cfg: Config) -> li
     return out
 
 
+def count_missing_poses(strip: list[dict]) -> int:
+    """Poses que el render REALMENTE va a generar y faltan (D-080). Pura.
+
+    El destino cuenta siempre; la apertura SOLO en planos `lands` (D-070).
+    Contar la apertura de los planos cámara-actúa prometía "completar" poses
+    que el motor jamás genera: el botón del Animatic pedía N poses fantasma,
+    con costo estimado, y el contador no bajaba nunca."""
+    n = 0
+    for e in strip:
+        if not e.get("destino"):
+            n += 1
+        if e.get("lands") and not e.get("start"):
+            n += 1
+    return n
+
+
 def record_pose_pick(project: Project, shot_id: str, which: str, variant: Path) -> Path:
     """[D-063] Fija la VARIANTE elegida de una pose (pose_picks.yaml, portable D-044).
 
