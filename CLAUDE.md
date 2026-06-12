@@ -28,7 +28,8 @@ There is no linter/formatter configured. Tests are the only gate.
 **Autonomous** — one shot, AI decides everything:
 ```bash
 uv run pipeline run <slug>                    # resolves projects/<slug>/project.yaml, uses cache
-uv run pipeline run x --brief briefs/foo.yaml # loose smoke to out/, no project/cache
+uv run pipeline run x --brief briefs/foo.yaml # smoke: ephemeral project under out/<stem>/ —
+                                              # SAME pipeline as a project (cache, --profile), D-075
 ```
 
 **Interactive (AI-in-the-Loop)** — staged, resumable, human picks at checkpoints:
@@ -49,13 +50,13 @@ L1 Ingest → L2 Classifier → L3 Keyframe → L4 Providers → L5 Orchestrator
 → L6 Quality Gate (Claude vision) → L7 Assembly → L8 Delivery        (L9 Telemetry, cross-cutting)
 ```
 
-- **Contracts first (`contracts.py`).** `Scene`, `GenResult`, `GateReport` plus `Provider`/`QualityGate`/`Strategy` Protocols. Everything else depends on these, not on concrete classes. Pydantic v2.
+- **Contracts first (`contracts.py`).** `Scene` (pure narrative), `ShotJob` (the render job for ONE shot — what `Strategy`/`QualityGate` actually receive, D-075), `GenResult`, `GateReport` plus `Provider`/`QualityGate`/`Strategy` Protocols. Everything else depends on these, not on concrete classes. Pydantic v2. Do NOT add runtime/generation fields to `Scene` — they belong on `ShotJob`.
 
 - **Provider abstraction (`providers/`).** All real video/image generation goes through `fal_client.AsyncClient` (submit + poll, `upload_file` for i2v `image_url`) — **never** raw httpx POST to fal. `build_provider` constructs from `config/providers.yaml`. `google_veo.py` needs `google-genai` and is **unvalidated against the real API**.
 
 - **Strategies / orchestrator (`strategies/`).** Three strategies select cost-vs-quality: `router` (cheapest eligible), `cascade` (escalate tiers, accumulate cost, mark `needs_human` if all fail), `ensemble` (best-of-N in parallel, gate-ranked). `dispatch.py` reads `config/routing.yaml` to map scene **class** (`hero`→ensemble, `standard`→router, `volume`→cascade) to a strategy + provider list. Strategies are **tolerant of provider failure** (`asyncio.gather(..., return_exceptions=True)`) — one dead provider must not abort a scene.
 
-- **Quality Gate (`gate/`).** Pluggable signals fused by weighted mean (`fusion.py`): `VLMSignal` (Claude multimodal vision) and `IdentitySignal` are active; `clip.py`/`aesthetic.py` are **dormant** behind the `[vision]` extra. Per "AI-in-the-Loop", the gate is a **ranker/assistant**, not an autonomous pass/fail — it orders the N candidates so the human picks faster. It is **soft by default** (`enforce: false` in routing.yaml): it scores and records but does not regenerate. Without `ANTHROPIC_API_KEY` the gate is permissive (never blocks).
+- **Quality Gate (`gate/`).** Pluggable signals fused by weighted mean (`fusion.py`): `VLMSignal` (Claude multimodal vision) and `IdentitySignal` are active; `clip.py`/`aesthetic.py` are **dormant** behind the `[vision]` extra. The profile's `vlm_model` governs BOTH active signals (D-076); all Anthropic/Gemini calls go through `asyncio.to_thread` (sync clients must never block the event loop). Per "AI-in-the-Loop", the gate is a **ranker/assistant**, not an autonomous pass/fail — it orders the N candidates so the human picks faster. It is **soft by default** (`enforce: false` in routing.yaml): it scores and records but does not regenerate. Without `ANTHROPIC_API_KEY` the gate is permissive (never blocks).
 
 - **Project / cache / runs model (`project.py`).** A project is `projects/<slug>/`. Caching is **content-addressed**: `cache_key(step, inputs)` = sha256[:16], cached at project level in `cache/`. Each run is an **immutable manifest** in `runs/<run_id>/`. A `.meta.json` sidecar preserves provenance + gate scores even on cache hits. Bumping a scene's `seed` is the "reroll" — it changes the cache key and regenerates **only that scene**.
 
@@ -68,6 +69,7 @@ L1 Ingest → L2 Classifier → L3 Keyframe → L4 Providers → L5 Orchestrator
 ## Configuration & secrets
 
 - `config/providers.yaml` (models + per-second costs), `config/routing.yaml` (class→strategy, gate thresholds, `enforce`), `config/styles/<style>.yaml` (prompt template, `ref_model`).
+- **`config.DEFAULT_PROFILE` (`fal-ultra-cheap`) is THE default everywhere** — CLI and server import it (D-076). Spending more than ultra-cheap is always an explicit human opt-in (`--profile` / `body.profile`); never silently default to `prod`.
 - Secrets via `.env` (gitignored), read by `settings.py` (pydantic-settings v2). `FAL_KEY` is **required**; `ANTHROPIC_API_KEY` recommended (script decomposition, classifier, gate); `GOOGLE_API_KEY` optional (Veo).
 - Generated images/videos are **not** committed.
 

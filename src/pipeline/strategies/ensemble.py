@@ -9,26 +9,26 @@ from __future__ import annotations
 
 import asyncio
 
-from ..contracts import GenResult, QualityGate, Scene
+from ..contracts import GenResult, QualityGate, ShotJob
 from ..gate import gate_score, report_scores
-from .common import eligible_providers, scene_to_request
+from .common import eligible_providers, job_to_request
 
 
 class Ensemble:
     name = "ensemble"
 
-    async def run(self, scene: Scene, providers: list, gate: QualityGate) -> GenResult:
-        elig = eligible_providers(scene, providers)
+    async def run(self, job: ShotJob, providers: list, gate: QualityGate) -> GenResult:
+        elig = eligible_providers(job, providers)
         if not elig:
-            raise ValueError(f"Ensemble: ningún provider cumple los requisitos de {scene.id}.")
+            raise ValueError(f"Ensemble: ningún provider cumple los requisitos de {job.id}.")
 
-        req = scene_to_request(scene)
+        req = job_to_request(job)
         # Tolerante: un provider que falla (p.ej. Veo sin key) no tumba la escena.
         gen = await asyncio.gather(*(p.generate(req) for p in elig), return_exceptions=True)
         results = [r for r in gen if not isinstance(r, BaseException)]
         if not results:
-            raise RuntimeError(f"Ensemble: todos los providers fallaron para {scene.id}.")
-        reports = await asyncio.gather(*(gate.evaluate(scene, r) for r in results))
+            raise RuntimeError(f"Ensemble: todos los providers fallaron para {job.id}.")
+        reports = await asyncio.gather(*(gate.evaluate(job, r) for r in results))
 
         total_cost = round(sum(r.cost_usd for r in results), 4)
         wall_latency = round(max(r.latency_s for r in results), 3)  # corren en paralelo

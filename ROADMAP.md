@@ -1120,6 +1120,47 @@ economía de tomas. Ver [D-070]–[D-074].
 
 ---
 
+## Sprint 6.33 — Orden interno: el contrato del plano y la disciplina de costo (D-075..D-077)
+
+**Objetivo:** ejecutar los hallazgos de la auditoría de arquitectura (2026-06-12): separar el
+contrato narrativo del job de render (`ShotJob`), matar el segundo pipeline del modo `--brief`,
+cerrar las cuatro fugas de costo/latencia (default de perfil, gate bloqueante, identity Opus
+hardcodeado, costo de reintentos) y volver honestas las fronteras (nombres públicos, disciplina
+de cache sin excepciones, guard de slug). Ver [D-075], [D-076], [D-077].
+
+### Acceptance Criteria
+- [x] AC1 — `ShotJob` en contracts.py; `Strategy`/`QualityGate` operan sobre ShotJob; `Scene`
+  queda sin campos transitorios (`start_frame`, `negative_prompt`, `aspect`, `cfg_scale`,
+  `character_refs`); `job_to_request` reemplaza a `scene_to_request`. 🔬
+- [x] AC2 — Un solo pipeline: `run --brief` corre por `run_project` (proyecto efímero en `out/`),
+  respeta `--profile` y cachea; `_run_async` eliminado.
+- [x] AC3 — `DEFAULT_PROFILE` único en config.py, importado por CLI y server (adiós al `prod`
+  implícito del server); gastar más es opt-in explícito. 🔬
+- [x] AC4 — Gate sin bloqueo: llamadas Anthropic vía `to_thread`; `IdentitySignal` usa el
+  `vlm_model` del perfil (default Haiku). Router acumula costo/latencia de reintentos;
+  Cascade reporta `gate_reason` también al fallar. 🔬
+- [x] AC5 — Disciplina de cache: `pose_variants` con key completa + lookup (re-correr = $0);
+  studio incluye `aspect` en la key del keyframe (cierra D-071); scratch del keyframer con seed;
+  descargas de fal con uuid y borrado del crudo tras `cache_store`. 🔬
+- [x] AC6 — Fronteras: helpers compartidos sin guion bajo (`resolve_under`, `keyframe_inputs`,
+  `has_audio`, `probe_duration`, `FORMATS`, `build_default_signals`, `slugify`); `read_yaml()`
+  único; `load_config` parsea cada YAML una vez; `FinishConfig` en config.py; guard de slug en
+  el server (nada se resuelve/borra fuera de `projects/`). 🔬
+
+### Tasks
+- [x] T1 — ShotJob + limpieza de Scene + strategies/gate/runner/studio sobre el nuevo contrato. 🔬
+- [x] T2 — Modo brief como wrapper de `run_project`.
+- [x] T3 — Disciplina de costo (D-076): default único, gate async, identity por perfil, router. 🔬
+- [x] T4 — Disciplina de cache (D-077): pose_variants, aspect en keys, scratch, descargas. 🔬
+- [x] T5 — Fronteras e higiene (D-077): renombres, read_yaml, config 1-parse, slug guard, bodies
+  Pydantic livianos en el server.
+
+---
+
+> **Estado:** core en verde (**377 tests**). `Scene` vuelve a ser narrativa pura; el costo de una
+> corrida es el que el humano firmo en CUALQUIER superficie (CLI y server comparten default).
+> Pendiente de smoke real (autorizacion de presupuesto del usuario).
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

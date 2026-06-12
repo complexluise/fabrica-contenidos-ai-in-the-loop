@@ -13,14 +13,14 @@ import subprocess
 from pathlib import Path
 
 
-def _ffmpeg() -> str:
+def ffmpeg_exe() -> str:
     exe = shutil.which("ffmpeg")
     if not exe:
         raise RuntimeError("ffmpeg no esta en el PATH. Instalalo para ensamblar.")
     return exe
 
 
-def _has_audio(clip: Path) -> bool:
+def has_audio(clip: Path) -> bool:
     """True si el clip tiene al menos una pista de audio (via ffprobe)."""
     probe = shutil.which("ffprobe")
     if not probe:
@@ -98,11 +98,11 @@ def _normalize(clip: Path, out: Path, video_size: tuple[int, int] | None = None)
         vfilter = ["-vf", (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30")]
         vcodec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
-    if _has_audio(clip):
-        cmd = [_ffmpeg(), "-y", "-i", str(clip),
+    if has_audio(clip):
+        cmd = [ffmpeg_exe(), "-y", "-i", str(clip),
                *vfilter, *vcodec, "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out)]
     else:
-        cmd = [_ffmpeg(), "-y",
+        cmd = [ffmpeg_exe(), "-y",
                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                "-i", str(clip),
                *vfilter, "-map", "1:v:0", "-map", "0:a", *vcodec, "-c:a", "aac",
@@ -111,7 +111,7 @@ def _normalize(clip: Path, out: Path, video_size: tuple[int, int] | None = None)
     return out
 
 
-def _probe_duration(clip: Path) -> float | None:
+def probe_duration(clip: Path) -> float | None:
     """Duración del clip en segundos (via ffprobe), o None si no se puede medir."""
     probe = shutil.which("ffprobe")
     if not probe:
@@ -132,11 +132,11 @@ def trim_to(clip: Path, out: Path, duration_s: float) -> Path:
     Para cuando el provider impone un mínimo (p.ej. ~5s) y el plano pide menos. Si
     ffprobe no está o el clip ya cabe, devuelve el clip original (no re-encode).
     """
-    dur = _probe_duration(clip)
+    dur = probe_duration(clip)
     if dur is None or dur <= duration_s + 0.1:
         return clip
     out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [_ffmpeg(), "-y", "-i", str(clip), "-t", f"{duration_s}",
+    cmd = [ffmpeg_exe(), "-y", "-i", str(clip), "-t", f"{duration_s}",
            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
     return out
@@ -155,13 +155,13 @@ def trim_to_tail(clip: Path, out: Path, duration_s: float) -> Path:
     Para clips intercalados start→destino: el destino vive en el último frame, así
     que se descarta la cabeza. Si el clip ya cabe (o no se puede medir), se devuelve
     intacto (conservador, como `trim_to`)."""
-    dur = _probe_duration(clip)
+    dur = probe_duration(clip)
     if dur is None or dur <= duration_s + 0.1:
         return clip
     out.parent.mkdir(parents=True, exist_ok=True)
     start = tail_start(dur, duration_s)
     # -ss DESPUÉS de -i: seek exacto por decodificación (clips cortos, costo trivial).
-    cmd = [_ffmpeg(), "-y", "-i", str(clip), "-ss", f"{start:.3f}",
+    cmd = [ffmpeg_exe(), "-y", "-i", str(clip), "-ss", f"{start:.3f}",
            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
     return out
@@ -172,7 +172,7 @@ def last_frame_cmd(clip: Path, out: Path) -> list[str]:
 
     `-sseof -0.1` busca desde el final (rápido, sin decodificar todo); `-update 1`
     sobreescribe hasta quedarse con el último frame decodificado de ese tramo."""
-    return [_ffmpeg(), "-y", "-sseof", "-0.1", "-i", str(clip),
+    return [ffmpeg_exe(), "-y", "-sseof", "-0.1", "-i", str(clip),
             "-frames:v", "1", "-update", "1", "-q:v", "2", str(out)]
 
 
@@ -183,7 +183,7 @@ def extract_last_frame(clip: Path, out: Path) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(last_frame_cmd(clip, out), check=False, capture_output=True)
     if not out.exists():
-        cmd = [_ffmpeg(), "-y", "-i", str(clip), "-update", "1", "-q:v", "2", str(out)]
+        cmd = [ffmpeg_exe(), "-y", "-i", str(clip), "-update", "1", "-q:v", "2", str(out)]
         subprocess.run(cmd, check=True, capture_output=True)
     return out
 
@@ -214,7 +214,7 @@ def still_to_clip(image: Path, out: Path, duration_s: float,
                   move: str = "push_in") -> Path:
     """Convierte un still en un clip con Ken Burns (I/O ffmpeg, D-074)."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [_ffmpeg(), "-y", "-loop", "1", "-i", str(image),
+    cmd = [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(image),
            "-t", f"{duration_s}", "-vf", ken_burns_filter(duration_s, size, fps, move),
            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -262,7 +262,7 @@ def concat_clips(clips: list[Path], out_path: Path, music: Path | None = None,
 
     concat_out = out_path if music is None else out_path.parent / "_concat_tmp.mp4"
     cmd = [
-        _ffmpeg(), "-y", "-f", "concat", "-safe", "0",
+        ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0",
         "-i", str(list_file), "-c", "copy", str(concat_out),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -274,7 +274,7 @@ def concat_clips(clips: list[Path], out_path: Path, music: Path | None = None,
             f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]"
         )
         cmd = [
-            _ffmpeg(), "-y", "-i", str(concat_out), "-i", str(music),
+            ffmpeg_exe(), "-y", "-i", str(concat_out), "-i", str(music),
             "-filter_complex", fil_complex,
             "-map", "0:v:0", "-map", "[a]",
             "-c:v", "copy", "-c:a", "aac", str(out_path),

@@ -27,7 +27,7 @@ class FalProvider(BaseProvider):
 
     async def _call(self, req: GenRequest):
         url = await self._submit_fal(req)
-        out_path = await self._download(url, req)
+        out_path = await self._download(url)
         return out_path, {"backend": "fal", "model": self.model, "remote_url": url}
 
     async def _submit_fal(self, req: GenRequest) -> str:
@@ -69,10 +69,15 @@ class FalProvider(BaseProvider):
         )
         return _extract_video_url(result)
 
-    async def _download(self, url: str, req: GenRequest) -> Path:
+    async def _download(self, url: str) -> Path:
+        # D-076: scratch con uuid (hash() esta salteado por proceso — el nombre no
+        # era determinista). El runner copia el clip a la cache del proyecto y
+        # BORRA este crudo; out/clips ya no crece para siempre.
+        import uuid
+
         out_dir = Path("out/clips")
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{self.name}_{abs(hash((url, req.prompt))) & 0xFFFFFF:06x}.mp4"
+        out_path = out_dir / f"{self.name}_{uuid.uuid4().hex[:8]}.mp4"
         async with httpx.AsyncClient(timeout=600) as client:
             resp = await client.get(url)
             resp.raise_for_status()

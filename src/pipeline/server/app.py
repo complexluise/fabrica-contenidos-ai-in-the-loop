@@ -15,9 +15,59 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+from ..config import DEFAULT_PROFILE
 from ..settings import get_settings
 from .jobs import JobManager
+
+
+# --- Bodies tipados (D-077). `update_project` queda como dict a proposito:
+# su semantica es de MERGE PARCIAL campo a campo (D-033/D-047) y un modelo
+# con defaults no distingue "no vino" de "vino vacio".
+class CreateProjectBody(BaseModel):
+    title: str = ""
+    style: str = "lego"
+    slug: str = ""
+
+
+class ImportBody(BaseModel):
+    text: str = ""
+    slug: str = ""
+    style: str = ""
+
+
+class CompileBody(BaseModel):
+    scene_id: str = ""
+    force: bool = False
+
+
+class ShotsBody(BaseModel):
+    force: bool = False
+    backend: str | None = None
+
+
+class UploadBody(BaseModel):
+    data: str = ""
+    filename: str = ""
+
+
+class MusicGenBody(BaseModel):
+    prompt: str = ""
+    duration_s: float = 30.0
+
+
+class PicksBody(BaseModel):
+    picks: dict[str, int] = {}
+
+
+class RenderBody(BaseModel):
+    profile: str = DEFAULT_PROFILE  # D-076: gastar mas es opt-in explicito
+    concurrency: int = 1
+
+
+class PosePickBody(BaseModel):
+    path: str = ""
 
 _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
          "elevenlabs_api_key": "ELEVENLABS_API_KEY", "google_api_key": "GOOGLE_API_KEY"}
@@ -38,9 +88,9 @@ def _available_styles(config_dir: Path) -> list[str]:
 
 def _unique_slug(base: str, projects_dir: Path) -> str:
     """Slug de proyecto único y filesystem-safe (no pisa una carpeta existente)."""
-    from ..naming import _slugify
+    from ..naming import slugify
 
-    base = _slugify(base) or "proyecto"
+    base = slugify(base) or "proyecto"
     slug, i = base, 2
     while (projects_dir / slug).exists():
         slug, i = f"{base}_{i}", i + 1
@@ -55,12 +105,24 @@ def create_app(projects_dir: Path = Path("projects"),
     jobs = JobManager()
 
     # --- helpers ----------------------------------------------------------
-    def load(slug: str, profile: str = "prod"):
-        from ..config import load_config
-        from ..project import Project, load_project_spec
-        from ..studio import apply_casting, load_casting
+    def safe_project(slug: str):
+        """Resuelve el proyecto verificando que quede DENTRO de projects/ (D-077).
+
+        Sin esto, un slug con separadores (`..%5C..` en Windows) escapaba del
+        arbol — y `DELETE` hace rmtree. Una linea de guard, cero framework."""
+        from ..project import Project
 
         project = Project(slug, root=projects_dir)
+        if project.dir.parent != projects_dir.resolve():
+            raise HTTPException(422, f"Slug invalido: '{slug}'.")
+        return project
+
+    def load(slug: str, profile: str = DEFAULT_PROFILE):
+        from ..config import load_config
+        from ..project import load_project_spec
+        from ..studio import apply_casting, load_casting
+
+        project = safe_project(slug)
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
@@ -161,17 +223,17 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- administrar proyectos: crear / borrar (#3, Fase 2.5) -------------
     @app.post("/api/projects")
-    def create_project(body: dict):
+    def create_project(body: CreateProjectBody):
         """Crea un proyecto **en blanco** (además del import): título + estilo,
         sin escenas. Devuelve el slug (único, derivado del título si no se pasa)."""
-        from ..project import Project, ProjectSpec, write_spec
+        from ..project import ProjectSpec, write_spec
 
-        title = (body.get("title") or "").strip() or "Nuevo proyecto"
-        style = (body.get("style") or "lego").strip()
+        title = body.title.strip() or "Nuevo proyecto"
+        style = (body.style or "lego").strip()
         if style not in _available_styles(config_dir):
             raise HTTPException(422, f"Estilo desconocido: '{style}'.")
-        slug = _unique_slug((body.get("slug") or "").strip() or title, projects_dir)
-        project = Project(slug, root=projects_dir)
+        slug = _unique_slug(body.slug.strip() or title, projects_dir)
+        project = safe_project(slug)
         write_spec(
             ProjectSpec(slug=slug, style=style, format="9:16", title=title, scenes=[]),
             project.spec_path,
@@ -184,9 +246,7 @@ def create_app(projects_dir: Path = Path("projects"),
         la UI confirma antes. Devuelve el slug borrado."""
         import shutil
 
-        from ..project import Project
-
-        project = Project(slug, root=projects_dir)
+        project = safe_project(slug)  # D-077: rmtree JAMAS fuera de projects/
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         shutil.rmtree(project.dir)
@@ -194,20 +254,20 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- entrada desde la app: importar -> storyboard (D-033, Fase 2) -----
     @app.post("/api/projects/import")
-    async def import_project(body: dict):
+    async def import_project(body: ImportBody):
         """Texto libre -> borrador de proyecto (la IA propone). Job/SSE: devuelve el
         slug creado. La UI lee el .md/.txt client-side y manda el texto acá."""
         import logging
 
         from .. import author
         from ..naming import semantic_slug
-        from ..project import Project, write_spec
+        from ..project import write_spec
 
-        text = (body.get("text") or "").strip()
+        text = body.text.strip()
         if not text:
             raise HTTPException(422, "Pegá o subí un texto para importar.")
-        desired = (body.get("slug") or "").strip()
-        style = (body.get("style") or "").strip()
+        desired = body.slug.strip()
+        style = body.style.strip()
         if style and style not in _available_styles(config_dir):
             raise HTTPException(422, f"Estilo desconocido: '{style}'.")
         log = logging.getLogger("pipeline")
@@ -218,7 +278,7 @@ def create_app(projects_dir: Path = Path("projects"),
             if style:  # estilo elegido en la UI gana sobre el default del borrador (#10)
                 draft.style = style
             slug = _unique_slug(desired or semantic_slug(draft.title), projects_dir)
-            project = Project(slug, root=projects_dir)
+            project = safe_project(slug)
             write_spec(draft.to_spec(slug), project.spec_path)
             log.info("Proyecto '%s' creado: %d escenas.", slug, len(draft.scenes))
             return {"slug": slug, "title": draft.title, "scenes": len(draft.scenes)}
@@ -231,10 +291,10 @@ def create_app(projects_dir: Path = Path("projects"),
         de cada escena; valida con Pydantic (422 si algo no cierra) y aplica el
         guard de selecciones (D-022) si se renombraron/eliminaron escenas."""
         from ..contracts import Scene
-        from ..project import Project, load_project_spec, write_spec
+        from ..project import load_project_spec, write_spec
         from ..studio import prune_selections
 
-        project = Project(slug, root=projects_dir)
+        project = safe_project(slug)
         if not project.spec_path.exists():
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
@@ -347,7 +407,7 @@ def create_app(projects_dir: Path = Path("projects"),
                 "characters": characters, "scenes": scenes}
 
     @app.post("/api/projects/{slug}/prompts/compile")
-    async def compile_prompts(slug: str, body: dict = {}):
+    async def compile_prompts(slug: str, body: CompileBody | None = None):
         """Compila el prompt visual desde la narrativa (D-046). Sincrono (Haiku via
         to_thread). Body: { scene_id?, force? }. Con scene_id compila ESA escena
         (override explicito del humano); sin el, compila las desactualizadas
@@ -356,8 +416,9 @@ def create_app(projects_dir: Path = Path("projects"),
         from ..prompt_compile import sync_scene_prompt
 
         project, spec, _cfg = load(slug)
-        scene_id = (body.get("scene_id") or "").strip() or None
-        force = bool(body.get("force"))
+        body = body or CompileBody()
+        scene_id = body.scene_id.strip() or None
+        force = body.force
         targets = [s for s in spec.scenes if (scene_id is None or s.id == scene_id)]
         if scene_id and not targets:
             raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
@@ -375,7 +436,7 @@ def create_app(projects_dir: Path = Path("projects"),
                               "prompt_stale": s.prompt_stale} for s in todo]}
 
     @app.post("/api/projects/{slug}/shots/{scene_id}")
-    async def gen_shot_previews(slug: str, scene_id: str, body: dict = {}):
+    async def gen_shot_previews(slug: str, scene_id: str, body: ShotsBody | None = None):
         """D-048/A4: genera (encadenados) los keyframes de los planos 2+ de la escena
         desde el ancla elegida, para previsualizar coherencia. Job/SSE."""
         from .. import studio
@@ -383,8 +444,9 @@ def create_app(projects_dir: Path = Path("projects"),
         project, spec, cfg = load(slug)
         if not any(s.id == scene_id for s in spec.scenes):
             raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
-        force = bool(body.get("force"))
-        backend = (body.get("backend") or None)  # D-051: fal | google (toggle de Elegir)
+        body = body or ShotsBody()
+        force = body.force
+        backend = body.backend  # D-051: fal | google (toggle de Elegir)
 
         async def coro():
             paths = await studio.preview_shot_keyframes(project, spec, cfg, scene_id,
@@ -397,32 +459,23 @@ def create_app(projects_dir: Path = Path("projects"),
     def candidates(slug: str):
         project, _spec, _cfg = load(slug)
 
+        from ..project import read_yaml
         from ..studio import is_upload
 
         def read(path: Path) -> dict:
-            if not path.exists():
-                return {}
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            return {k: [file_url(p) for p in v] for k, v in data.items()}
+            return {k: [file_url(p) for p in v] for k, v in read_yaml(path).items()}
 
         def sources(path: Path) -> dict:
             """Origen de cada candidato: "upload" (humano) | "ia" (T11/D-055)."""
-            if not path.exists():
-                return {}
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            return {k: ["upload" if is_upload(p) else "ia" for p in v] for k, v in data.items()}
-
-        def load_yaml(path: Path) -> dict:
-            if not path.exists():
-                return {}
-            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            return {k: ["upload" if is_upload(p) else "ia" for p in v]
+                    for k, v in read_yaml(path).items()}
 
         return {"keyframes": read(project.candidates_path),
                 "keyframe_sources": sources(project.candidates_path),  # T11
                 "cast": read(project.dir / "cast_candidates.yaml"),
                 "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
-                "selections": load_yaml(project.selections_path),
-                "cast_selections": load_yaml(project.dir / "casting.yaml")}
+                "selections": read_yaml(project.selections_path),
+                "cast_selections": read_yaml(project.dir / "casting.yaml")}
 
     @app.get("/api/projects/{slug}/status")
     async def project_status(slug: str):
@@ -495,7 +548,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("keyframes", f"{slug}/{scene_id}", coro()).to_dict()
 
     @app.post("/api/projects/{slug}/candidates/{scene_id}/upload")
-    async def upload_candidate(slug: str, scene_id: str, body: dict):
+    async def upload_candidate(slug: str, scene_id: str, body: UploadBody):
         """Sube una imagen como candidato manual (base64 en JSON).
 
         Body: { "data": "<base64>", "filename": "foto.png" }
@@ -508,10 +561,10 @@ def create_app(projects_dir: Path = Path("projects"),
         project, spec, _cfg = load(slug)
         if not any(s.id == scene_id for s in spec.scenes):
             raise HTTPException(404, f"Escena '{scene_id}' no encontrada.")
-        raw = (body.get("data") or "").strip()
+        raw = body.data.strip()
         if not raw:
             raise HTTPException(422, "Falta 'data' (base64 de la imagen).")
-        filename = body.get("filename") or "upload.png"
+        filename = body.filename or "upload.png"
         suffix = Path(filename).suffix.lower() or ".png"
         if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
             raise HTTPException(422, f"Formato no soportado: {suffix}. Usá PNG, JPG o WEBP.")
@@ -537,7 +590,7 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(422, str(exc))
 
     @app.post("/api/projects/{slug}/music/upload")
-    async def upload_music(slug: str, body: dict):
+    async def upload_music(slug: str, body: UploadBody):
         """Sube un archivo de audio como música de fondo (base64 en JSON).
 
         Body: { "data": "<base64>", "filename": "pista.mp3" }
@@ -547,10 +600,10 @@ def create_app(projects_dir: Path = Path("projects"),
         from .. import studio
 
         project, spec, _cfg = load(slug)
-        raw = (body.get("data") or "").strip()
+        raw = body.data.strip()
         if not raw:
             raise HTTPException(422, "Falta 'data' (base64 del audio).")
-        filename = body.get("filename") or "music.mp3"
+        filename = body.filename or "music.mp3"
         suffix = Path(filename).suffix.lower() or ".mp3"
         if suffix not in {".mp3", ".wav", ".ogg", ".m4a", ".aac"}:
             raise HTTPException(422, f"Formato no soportado: {suffix}.")
@@ -565,7 +618,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"url": file_url(dest), "file": dest.name}
 
     @app.post("/api/projects/{slug}/music/generate")
-    async def generate_music(slug: str, body: dict):
+    async def generate_music(slug: str, body: MusicGenBody):
         """Genera música con stable-audio (fal.ai). Job/SSE.
 
         Body: { "prompt": "...", "duration_s": 30 }
@@ -574,10 +627,10 @@ def create_app(projects_dir: Path = Path("projects"),
         from ..music import generate_music_fal
 
         project, spec, _cfg = load(slug)
-        prompt = (body.get("prompt") or "").strip()
+        prompt = body.prompt.strip()
         if not prompt:
             raise HTTPException(422, "Falta 'prompt' para generar la música.")
-        duration_s = float(body.get("duration_s") or 30.0)
+        duration_s = float(body.duration_s or 30.0)
         s = get_settings()
         if not s.fal_key:
             raise HTTPException(503, "FAL_KEY no configurada.")
@@ -595,7 +648,7 @@ def create_app(projects_dir: Path = Path("projects"),
     async def get_animatic(slug: str):
         """La tira del animatic en SOLO LECTURA (cero costo): poses por plano +
         costo estimado de completar lo que falta. Mismas cache keys que el render."""
-        from ..project import _resolve_under
+        from ..project import resolve_under
         from ..state import billing_summary
         from ..studio import animatic_strip
 
@@ -603,19 +656,18 @@ def create_app(projects_dir: Path = Path("projects"),
         strip = await animatic_strip(project, spec, cfg)
         missing = sum((0 if e["start"] else 1) + (0 if e["destino"] else 1) for e in strip)
         # D-063: pool de variantes + la elegida, por pose.
-        def _read_yaml(p: Path) -> dict:
-            return (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
-        pool = _read_yaml(project.dir / "pose_candidates.yaml")
-        picks = _read_yaml(project.dir / "pose_picks.yaml")
+        from ..project import read_yaml
+        pool = read_yaml(project.dir / "pose_candidates.yaml")
+        picks = read_yaml(project.dir / "pose_picks.yaml")
         for e in strip:  # paths -> URLs servibles
             e["start"] = file_url(e["start"]) if e["start"] else None
             e["destino"] = file_url(e["destino"]) if e["destino"] else None
             for which in ("start", "destino"):
                 key = f"{e['shot_id']}/{which}"
                 e[f"{which}_variants"] = [
-                    file_url(_resolve_under(project.dir, p))
+                    file_url(resolve_under(project.dir, p))
                     for p in (pool.get(key) or [])
-                    if _resolve_under(project.dir, p).exists()
+                    if resolve_under(project.dir, p).exists()
                 ]
                 e[f"{which}_picked"] = key in picks
         return {"strip": strip,
@@ -687,14 +739,14 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("pose_variants", f"{slug}/{shot_id}/{which}", coro()).to_dict()
 
     @app.post("/api/projects/{slug}/animatic/{shot_id}/{which}/pick")
-    async def pick_pose(slug: str, shot_id: str, which: str, body: dict):
+    async def pick_pose(slug: str, shot_id: str, which: str, body: PosePickBody):
         """[D-063] Fija la variante elegida (key `picked:` -> cascada de cache correcta).
 
         Body: { "path": "<url o ruta de la variante>" }"""
         from ..studio import record_pose_pick
 
         project, spec, cfg = load(slug)
-        raw = str(body.get("path") or "")
+        raw = body.path
         # acepta la URL servida (/files/<slug>/...) o una ruta project-relative
         rel = raw.split(f"/files/{slug}/", 1)[-1] if f"/files/{slug}/" in raw else raw
         path = record_pose_pick(project, shot_id, which, Path(rel))
@@ -713,12 +765,15 @@ def create_app(projects_dir: Path = Path("projects"),
         return jobs.spawn("cast", slug, coro()).to_dict()
 
     @app.post("/api/projects/{slug}/render")
-    async def render(slug: str, body: dict = {}):
+    async def render(slug: str, body: RenderBody | None = None):
         from .. import studio
 
-        profile = (body.get("profile") or "prod")
-        concurrency = int(body.get("concurrency") or 1)
-        project, spec, cfg = load(slug, profile=profile)
+        body = body or RenderBody()
+        # D-076: mismo default que el CLI (ultra-cheap). El server default-eaba
+        # "prod" (ensemble Veo + gate Opus): la misma accion costaba ~15x segun
+        # la superficie. Gastar mas es opt-in: body.profile explicito.
+        project, spec, cfg = load(slug, profile=body.profile)
+        concurrency = int(body.concurrency or 1)
 
         async def coro():
             run, final, totals = await studio.render(project, spec, cfg,
@@ -741,19 +796,19 @@ def create_app(projects_dir: Path = Path("projects"),
 
     # --- selección (síncrona) --------------------------------------------
     @app.post("/api/projects/{slug}/pick")
-    def pick(slug: str, body: dict):
+    def pick(slug: str, body: PicksBody):
         from ..studio import record_picks
 
         project, _spec, _cfg = load(slug)
-        path = record_picks(project, {k: int(v) for k, v in (body.get("picks") or {}).items()})
+        path = record_picks(project, dict(body.picks))
         return {"saved": str(path)}
 
     @app.post("/api/projects/{slug}/pick-cast")
-    def pick_cast(slug: str, body: dict):
+    def pick_cast(slug: str, body: PicksBody):
         from ..studio import record_cast_picks
 
         project, _spec, _cfg = load(slug)
-        path = record_cast_picks(project, {k: int(v) for k, v in (body.get("picks") or {}).items()})
+        path = record_cast_picks(project, dict(body.picks))
         return {"saved": str(path)}
 
     # --- jobs: estado + stream -------------------------------------------

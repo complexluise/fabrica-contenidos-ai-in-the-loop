@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from ..contracts import Scene
+from ..contracts import ShotJob
 from ..settings import get_settings
 from .fusion import parse_judge_metrics
 
@@ -59,11 +59,11 @@ class VLMSignal:
     def __init__(self, vlm_model: str | None = _DEFAULT_MODEL):
         self._model = vlm_model  # None -> señal deshabilitada
 
-    async def score_frames(self, frames: list[Path], scene: Scene) -> dict:
+    async def score_frames(self, frames: list[Path], job: ShotJob) -> dict:
         """D-069: juzga el CLIP viendo los frames cronológicos (movimiento incluido)."""
         if not self._model:
             return {}
-        prompt = _MOTION_PROMPT.format(n=len(frames), prompt=scene.prompt[:600])
+        prompt = _MOTION_PROMPT.format(n=len(frames), prompt=job.prompt[:600])
         if self._model.startswith("gemini"):
             return await self._judge_google_frames(frames, prompt)
         key = get_settings().anthropic_api_key
@@ -73,8 +73,13 @@ class VLMSignal:
             import anthropic
         except ImportError:  # pragma: no cover
             return {}
+        import asyncio
+
         client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(
+        # D-076: el cliente Anthropic es sincrono — sin to_thread bloquea el
+        # event loop entero (planos en vuelo + SSE del Studio). Simetria con Gemini.
+        msg = await asyncio.to_thread(
+            client.messages.create,
             model=self._model,
             max_tokens=300,
             messages=[{
@@ -96,22 +101,25 @@ class VLMSignal:
             from google.genai import types
         except ImportError:  # pragma: no cover
             return {}
+        import asyncio
+
         client = genai.Client(api_key=key)
         parts = [types.Part.from_bytes(data=f.read_bytes(), mime_type="image/png")
                  for f in frames]
-        resp = client.models.generate_content(
+        resp = await asyncio.to_thread(  # D-076: nunca bloquear el loop
+            client.models.generate_content,
             model=self._model, contents=[*parts, prompt])
         metrics, _reason = parse_judge_metrics(resp.text or "")
         return metrics
 
-    async def score(self, frame: Path, scene: Scene) -> dict:
+    async def score(self, frame: Path, job: ShotJob) -> dict:
         if not self._model:
             return {}
         if self._model.startswith("gemini"):
-            return await self._score_google(frame, scene)
-        return await self._score_anthropic(frame, scene)
+            return await self._score_google(frame, job)
+        return await self._score_anthropic(frame, job)
 
-    async def _score_anthropic(self, frame: Path, scene: Scene) -> dict:
+    async def _score_anthropic(self, frame: Path, job: ShotJob) -> dict:
         key = get_settings().anthropic_api_key
         if not key:
             return {}
@@ -120,22 +128,25 @@ class VLMSignal:
         except ImportError:  # pragma: no cover
             return {}
 
+        import asyncio
+
         client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(
+        msg = await asyncio.to_thread(  # D-076: nunca bloquear el loop
+            client.messages.create,
             model=self._model,
             max_tokens=300,
             messages=[{
                 "role": "user",
                 "content": [
                     _image_block(frame),
-                    {"type": "text", "text": _JUDGE_PROMPT.format(prompt=scene.prompt)},
+                    {"type": "text", "text": _JUDGE_PROMPT.format(prompt=job.prompt)},
                 ],
             }],
         )
         metrics, _reason = parse_judge_metrics(msg.content[0].text)
         return metrics
 
-    async def _score_google(self, frame: Path, scene: Scene) -> dict:
+    async def _score_google(self, frame: Path, job: ShotJob) -> dict:
         """VLM-judge via Gemini. Requiere GOOGLE_API_KEY."""
         key = get_settings().google_api_key
         if not key:
@@ -153,7 +164,7 @@ class VLMSignal:
         ext = frame.suffix.lower()
         mime = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
 
-        prompt_text = _JUDGE_PROMPT.format(prompt=scene.prompt)
+        prompt_text = _JUDGE_PROMPT.format(prompt=job.prompt)
         contents = [
             types.Part.from_bytes(data=image_bytes, mime_type=mime),
             prompt_text,

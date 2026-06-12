@@ -13,12 +13,12 @@ Lógica pura (sin red ni ffmpeg real) -> core (CLAUDE.md).
 from pathlib import Path
 
 from pipeline.assemble import tail_start
-from pipeline.contracts import Scene, Shot
+from pipeline.contracts import Scene, Shot, ShotJob
 from pipeline.project import ProjectSpec
 from pipeline.prompt_compile import compose_start_pose_prompt
 from pipeline.providers.fal_kling import video_arguments
 from pipeline.runner import _video_inputs, plan_ribbon
-from pipeline.strategies.common import scene_to_request
+from pipeline.strategies.common import job_to_request
 
 
 # --- plan_ribbon: aplanado (escena, plano) en orden --------------------------
@@ -69,19 +69,19 @@ def test_start_pose_prompt_reframes_freely_on_hard_cuts():
     assert hard != soft  # la transición de entrada cambia la instrucción de reencuadre
 
 
-# --- scene_to_request: start->destino (contrato D-059, intacto en D-060) -----
+# --- job_to_request: start->destino (contrato D-059/D-075) -------------------
 
 def test_request_interpolates_start_to_destino():
-    scene = Scene(id="s1", prompt="p", duration_s=2,
+    job = ShotJob(id="s1", prompt="p", duration_s=2,
                   keyframe=Path("destino.png"), start_frame=Path("start_pose.png"))
-    req = scene_to_request(scene)
+    req = job_to_request(job)
     assert req.init_image == Path("start_pose.png")
     assert req.end_image == Path("destino.png")
 
 
 def test_request_falls_back_to_destino_as_init_without_start():
-    scene = Scene(id="s1", prompt="p", duration_s=2, keyframe=Path("destino.png"))
-    req = scene_to_request(scene)
+    job = ShotJob(id="s1", prompt="p", duration_s=2, keyframe=Path("destino.png"))
+    req = job_to_request(job)
     assert req.init_image == Path("destino.png")
     assert req.end_image is None
 

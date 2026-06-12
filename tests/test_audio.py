@@ -32,21 +32,22 @@ def _spec(voice_id=None, scenes=None):
 
 
 def test_resolve_voice_scene_override_wins():
+    # D-075: resolve_voice recibe el voice_id efectivo, no un objeto-escena.
     scene = Scene(id="s", prompt="p", duration_s=4, voice_id="scene-voice")
     spec = _spec(voice_id="proj-voice")
-    assert resolve_voice(scene, spec) == "scene-voice"
+    assert resolve_voice(scene.voice_id, spec) == "scene-voice"
 
 
 def test_resolve_voice_falls_back_to_project_default():
     scene = Scene(id="s", prompt="p", duration_s=4)
     spec = _spec(voice_id="proj-voice")
-    assert resolve_voice(scene, spec) == "proj-voice"
+    assert resolve_voice(scene.voice_id, spec) == "proj-voice"
 
 
 def test_resolve_voice_falls_back_to_system_default():
     scene = Scene(id="s", prompt="p", duration_s=4)
     spec = _spec(voice_id=None)
-    assert resolve_voice(scene, spec) == DEFAULT_VOICE_ID
+    assert resolve_voice(scene.voice_id, spec) == DEFAULT_VOICE_ID
 
 
 # --- effective_caption (autocompletado desde la VO) -------------------------

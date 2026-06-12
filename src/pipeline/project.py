@@ -124,6 +124,17 @@ def spec_from_dict(data: dict, slug: str) -> ProjectSpec:
     )
 
 
+def read_yaml(path: Path) -> dict:
+    """Lee un YAML OPCIONAL de estado del proyecto -> dict ({} si falta o vacío).
+
+    D-077: una sola copia del patrón "safe_load o {}" que estaba repetido ~15
+    veces (selections/casting/pose_picks/take_picks/candidates/manifest...)."""
+    p = Path(path)
+    if not p.exists():
+        return {}
+    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+
 def load_project_spec(path: Path) -> ProjectSpec:
     """Lee y valida un project.yaml -> ProjectSpec (escenas + banco de personajes)."""
     path = Path(path)
@@ -321,7 +332,7 @@ def effective_shots(scene: Scene) -> list[Shot]:
                  voiceover=scene.voiceover, caption=scene.caption, keyframe=scene.keyframe)]
 
 
-def _resolve_under(base: Path, p: Path) -> Path:
+def resolve_under(base: Path, p: Path) -> Path:
     """Resuelve una ruta contra `base` si es relativa; absoluta se queda igual.
 
     Los proyectos declaran refs en `project.yaml` y el humano pasa `--face
@@ -335,11 +346,11 @@ def _resolve_under(base: Path, p: Path) -> Path:
 
 def resolve_refs(base: Path, refs: list[Path]) -> list[Path]:
     """Resuelve una lista de refs contra `base`. Lógica pura (testeable)."""
-    return [_resolve_under(base, Path(r)) for r in refs]
+    return [resolve_under(base, Path(r)) for r in refs]
 
 
 def relativize(base: Path, p: Path) -> str:
-    """Inversa de `_resolve_under`: ruta **portable para PERSISTIR** (D-044).
+    """Inversa de `resolve_under`: ruta **portable para PERSISTIR** (D-044).
 
     Si `p` cae bajo `base` devuelve la ruta **relativa** (forward-slash, estable
     entre Windows/WSL y entre máquinas); si no, la absoluta. Lo usan

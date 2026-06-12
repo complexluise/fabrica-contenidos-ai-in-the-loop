@@ -15,7 +15,28 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from .finish import FinishConfig
+# D-076: LA fuente del perfil por defecto. CLI y server la importan — gastar
+# mas que ultra-cheap es siempre una decision explicita del humano.
+DEFAULT_PROFILE = "fal-ultra-cheap"
+
+
+class FinishConfig(BaseModel):
+    """El "film stock" del estilo: ~8 escalares tuneables en el YAML (D-073)."""
+
+    enabled: bool = True
+    saturation: float = 0.9      # los colores de cine: saturados O luminosos, no ambos
+    contrast: float = 1.02
+    # Curva S con hombro fílmico: sombras levemente comprimidas, highlights con roll-off.
+    curve: str = "0/0 0.25/0.22 0.5/0.5 0.75/0.78 1/0.97"
+    vignette: bool = True
+    halation_alpha: float = 0.12  # casi invisible: los coloristas avisan que se nota = mal
+    halation_sigma: float = 30.0
+    halation_threshold: int = 200  # solo highlights altos (Y > umbral)
+    sharpen: float = 0.4
+    grain: int = 7                # noise alls= (5-10 ~ 10-15% de opacidad 35mm)
+    fps: int = 24                 # conformar TODO a una sola cadencia (mezclas = tell)
+    lufs: float = -14.0           # Instagram/TikTok
+    true_peak: float = -1.0
 
 
 class ProviderConfig(BaseModel):
@@ -152,28 +173,38 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def providers_from(raw: dict) -> dict[str, ProviderConfig]:
+    """Bloque `providers:` ya parseado -> configs tipadas. Pura (D-077)."""
+    return {name: ProviderConfig(name=name, **spec)
+            for name, spec in (raw.get("providers") or {}).items()}
+
+
+def audio_from(raw: dict) -> dict[str, ProviderConfig]:
+    """Bloque `audio:` ya parseado (post de audio, D-034). Pura (D-077)."""
+    return {name: ProviderConfig(name=name, **spec)
+            for name, spec in (raw.get("audio") or {}).items()}
+
+
 def load_providers(path: Path) -> dict[str, ProviderConfig]:
-    raw = _load_yaml(path).get("providers", {})
-    return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
+    return providers_from(_load_yaml(path))
 
 
 def load_audio(path: Path) -> dict[str, ProviderConfig]:
     """Modelos de post de audio (bloque `audio:` de providers.yaml). D-034."""
-    raw = _load_yaml(path).get("audio", {})
-    return {name: ProviderConfig(name=name, **spec) for name, spec in raw.items()}
+    return audio_from(_load_yaml(path))
 
 
 # Claves de perfil de render que NO son reglas de routing (D-052/D-053).
 _PROFILE_ROLE_KEYS = {"gate", "est_cost_per_scene_usd"}
 
 
-def load_routing(path: Path, profile: str = "fal-ultra-cheap") -> RoutingConfig:
-    """Carga el routing resolviendo el perfil de render solicitado (D-038/D-052).
+def routing_from(raw: dict, profile: str = DEFAULT_PROFILE) -> RoutingConfig:
+    """Routing del perfil solicitado desde el YAML ya parseado (D-038/D-052).
 
     Formato nuevo: `profiles.<profile>` en el YAML.
     Compat: si no hay `profiles:`, se asume bloque `hybrid:` como perfil prod.
     """
-    raw = _load_yaml(path)
+    raw = dict(raw)  # no mutar el dict compartido (se parsea UNA vez, D-077)
     if "profiles" in raw:
         profiles = raw.pop("profiles")
         raw.pop("storyboard_backends", None)  # no forma parte del routing
@@ -182,15 +213,19 @@ def load_routing(path: Path, profile: str = "fal-ultra-cheap") -> RoutingConfig:
     else:
         rules = raw.pop("hybrid", {})
     raw["rules"] = rules
+    raw.pop("voice_backends", None)  # no forma parte del routing
     return RoutingConfig(**raw)
 
 
-def load_profile_config(path: Path, profile: str = "fal-ultra-cheap") -> ProfileConfig:
-    """Extrae la configuracion de la fase de render del perfil activo (D-052).
+def load_routing(path: Path, profile: str = DEFAULT_PROFILE) -> RoutingConfig:
+    return routing_from(_load_yaml(path), profile=profile)
+
+
+def profile_from(raw: dict, profile: str = DEFAULT_PROFILE) -> ProfileConfig:
+    """Configuracion de la fase de render del perfil activo (D-052). Pura.
 
     Perfiles sin secciones 'gate' usan los defaults de ProfileConfig (backward-compat).
     """
-    raw = _load_yaml(path)
     profiles = raw.get("profiles", {})
     entry = profiles.get(profile) or profiles.get("fal-ultra-cheap") or {}
 
@@ -203,12 +238,15 @@ def load_profile_config(path: Path, profile: str = "fal-ultra-cheap") -> Profile
     )
 
 
-def load_storyboard_config(path: Path, backend: str = "fal") -> StoryboardConfig:
-    """Extrae la configuracion del storyboard backend activo (D-053).
+def load_profile_config(path: Path, profile: str = DEFAULT_PROFILE) -> ProfileConfig:
+    return profile_from(_load_yaml(path), profile=profile)
+
+
+def storyboard_from(raw: dict, backend: str = "fal") -> StoryboardConfig:
+    """Configuracion del storyboard backend activo (D-053). Pura.
 
     Backends no encontrados caen a 'fal' (mas compatible).
     """
-    raw = _load_yaml(path)
     backends = raw.get("storyboard_backends", {})
     entry = backends.get(backend) or backends.get("fal") or {}
 
@@ -226,11 +264,14 @@ def load_storyboard_config(path: Path, backend: str = "fal") -> StoryboardConfig
     )
 
 
-def load_voice_config(path: Path, backend: str = "kokoro") -> VoiceConfig:
-    """Extrae el backend de voz activo de `voice_backends` (D-058).
+def load_storyboard_config(path: Path, backend: str = "fal") -> StoryboardConfig:
+    return storyboard_from(_load_yaml(path), backend=backend)
+
+
+def voice_from(raw: dict, backend: str = "kokoro") -> VoiceConfig:
+    """Backend de voz activo desde `voice_backends` (D-058). Pura.
 
     Backends no encontrados caen a 'kokoro' (el más barato; D-052)."""
-    raw = _load_yaml(path)
     backends = raw.get("voice_backends", {})
     entry = backends.get(backend) or backends.get("kokoro") or {}
     name = backend if backend in backends else "kokoro"
@@ -238,21 +279,28 @@ def load_voice_config(path: Path, backend: str = "kokoro") -> VoiceConfig:
     return VoiceConfig(name=name, **fields)
 
 
+def load_voice_config(path: Path, backend: str = "kokoro") -> VoiceConfig:
+    return voice_from(_load_yaml(path), backend=backend)
+
+
 def load_style(path: Path) -> StyleConfig:
     return StyleConfig(**_load_yaml(path))
 
 
-def load_config(config_dir: Path, style: str, profile: str = "fal-ultra-cheap",
+def load_config(config_dir: Path, style: str, profile: str = DEFAULT_PROFILE,
                 backend: str = "fal", voice_backend: str = "kokoro") -> Config:
     """Carga la config completa para un estilo, perfil de render, storyboard backend
     y backend de voz (D-052/D-053/D-058)."""
-    providers = load_providers(config_dir / "providers.yaml")
-    audio = load_audio(config_dir / "providers.yaml")
-    routing = load_routing(config_dir / "routing.yaml", profile=profile)
+    # D-077: cada YAML se parsea UNA vez (antes routing.yaml se leia 4 veces).
+    providers_raw = _load_yaml(config_dir / "providers.yaml")
+    routing_raw = _load_yaml(config_dir / "routing.yaml")
+    providers = providers_from(providers_raw)
+    audio = audio_from(providers_raw)
+    routing = routing_from(routing_raw, profile=profile)
     style_cfg = load_style(config_dir / "styles" / f"{style}.yaml")
-    profile_cfg = load_profile_config(config_dir / "routing.yaml", profile=profile)
-    storyboard_cfg = load_storyboard_config(config_dir / "routing.yaml", backend=backend)
-    voice_cfg = load_voice_config(config_dir / "routing.yaml", backend=voice_backend)
+    profile_cfg = profile_from(routing_raw, profile=profile)
+    storyboard_cfg = storyboard_from(routing_raw, backend=backend)
+    voice_cfg = voice_from(routing_raw, backend=voice_backend)
     # D-063: el preset de storyboard PISA los modelos de imagen del estilo (la
     # palanca de calidad). Sin preset explícito, el estilo manda (como siempre).
     if storyboard_cfg.keyframe.model:

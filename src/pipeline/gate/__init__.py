@@ -1,7 +1,7 @@
 """L6 - Quality Gate. Fusión de señales (VLM + CLIP + aesthetic) con umbral por clase."""
 
 from .frames import extract_frame
-from .fused import FusedGate, VLMGate
+from .fused import FusedGate, build_default_signals
 from .fusion import (
     build_report,
     enforce_verdict,
@@ -16,7 +16,7 @@ from .vlm import VLMSignal
 
 __all__ = [
     "FusedGate",
-    "VLMGate",
+    "build_default_signals",
     "VLMSignal",
     "extract_frame",
     "build_report",

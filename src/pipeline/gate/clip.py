@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..contracts import Scene
+from ..contracts import ShotJob
 
 
 class ClipSignal:
@@ -27,11 +27,11 @@ class ClipSignal:
         self.model.eval()
         self.tokenizer = open_clip.get_tokenizer(model_name)
 
-    async def score(self, frame: Path, scene: Scene) -> dict:
+    async def score(self, frame: Path, job: ShotJob) -> dict:
         from PIL import Image
 
         image = self.preprocess(Image.open(frame)).unsqueeze(0)
-        text = self.tokenizer([scene.prompt])
+        text = self.tokenizer([job.prompt])
         with self.torch.no_grad():
             img_emb = self.model.encode_image(image)
             txt_emb = self.model.encode_text(text)

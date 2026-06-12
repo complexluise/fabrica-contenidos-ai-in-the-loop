@@ -5,13 +5,13 @@ Regla: el provider mas BARATO que cumple las capabilities exigidas.
 
 import pytest
 
-from pipeline.contracts import Scene, SceneRequirements
+from pipeline.contracts import SceneRequirements, ShotJob
 from pipeline.strategies.router import pick_provider
 from conftest import make_provider
 
 
-def _scene(req: SceneRequirements | None = None) -> Scene:
-    return Scene(id="s", prompt="p", duration_s=4, requirements=req or SceneRequirements())
+def _job(req: SceneRequirements | None = None) -> ShotJob:
+    return ShotJob(id="s", prompt="p", duration_s=4, requirements=req or SceneRequirements())
 
 
 def test_picks_cheapest_when_all_eligible():
@@ -19,7 +19,7 @@ def test_picks_cheapest_when_all_eligible():
         make_provider("kling", 0.03, {"i2v"}),
         make_provider("seedance", 0.06, {"i2v", "multishot"}),
     ]
-    assert pick_provider(_scene(), providers).name == "kling"
+    assert pick_provider(_job(), providers).name == "kling"
 
 
 def test_skips_provider_missing_capability():
@@ -28,12 +28,12 @@ def test_skips_provider_missing_capability():
         make_provider("kling", 0.03, {"i2v", "lipsync"}),
         make_provider("veo", 0.50, {"i2v", "audio", "lipsync"}),
     ]
-    scene = _scene(SceneRequirements(needs_audio=True))
-    assert pick_provider(scene, providers).name == "veo"
+    job = _job(SceneRequirements(needs_audio=True))
+    assert pick_provider(job, providers).name == "veo"
 
 
 def test_raises_when_no_provider_qualifies():
     providers = [make_provider("kling", 0.03, {"i2v"})]
-    scene = _scene(SceneRequirements(needs_hdr=True))
+    job = _job(SceneRequirements(needs_hdr=True))
     with pytest.raises(ValueError):
-        pick_provider(scene, providers)
+        pick_provider(job, providers)

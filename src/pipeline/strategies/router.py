@@ -1,28 +1,28 @@
 """L5 - Smart Cost Router.
 
-En un solo paso, despacha la escena al provider MAS BARATO que cumple sus
+En un solo paso, despacha el plano al provider MAS BARATO que cumple sus
 requisitos. La logica de seleccion (`pick_provider`) es pura -> es core testeable
 porque decide el costo de toda la produccion.
 """
 
 from __future__ import annotations
 
-from ..contracts import GenResult, QualityGate, Scene
+from ..contracts import GenResult, QualityGate, ShotJob
 from ..gate import report_scores
 from ..providers.base import BaseProvider
-from .common import eligible_providers, scene_to_request
+from .common import eligible_providers, job_to_request
 
 
-def pick_provider(scene: Scene, providers: list[BaseProvider]) -> BaseProvider:
-    """El mas barato que cumple las capabilities exigidas por la escena.
+def pick_provider(job: ShotJob, providers: list[BaseProvider]) -> BaseProvider:
+    """El mas barato que cumple las capabilities exigidas por el plano.
 
     Lanza si ningun provider cumple (mejor fallar fuerte que mandar a uno incapaz).
     """
-    eligible = eligible_providers(scene, providers)
+    eligible = eligible_providers(job, providers)
     if not eligible:
-        required = scene.requirements.required_capabilities()
+        required = job.requirements.required_capabilities()
         raise ValueError(
-            f"Ningun provider cumple {required or '{}'} para la escena {scene.id}. "
+            f"Ningun provider cumple {required or '{}'} para el plano {job.id}. "
             f"Disponibles: {[(p.name, p.capabilities) for p in providers]}"
         )
     return min(eligible, key=lambda p: p.cost_per_second)
@@ -37,18 +37,26 @@ class SmartRouter:
         self.max_retries = max_retries
 
     async def run(
-        self, scene: Scene, providers: list[BaseProvider], gate: QualityGate
+        self, job: ShotJob, providers: list[BaseProvider], gate: QualityGate
     ) -> GenResult:
-        provider = pick_provider(scene, providers)
-        req = scene_to_request(scene)
+        provider = pick_provider(job, providers)
+        req = job_to_request(job)
         result = await provider.generate(req)
-        report = await gate.evaluate(scene, result)
+        report = await gate.evaluate(job, result)
         attempts = 1
+        # D-076: el costo/latencia del plano = TODOS los intentos (el reintento
+        # fallido también se pagó; Cascade y Ensemble ya acumulaban — el router no).
+        total_cost = result.cost_usd
+        total_latency = result.latency_s
         while not report.passed and attempts <= self.max_retries:
             req.seed = (req.seed or 0) + 1  # variar para que el reintento difiera
             result = await provider.generate(req)
-            report = await gate.evaluate(scene, result)
+            total_cost += result.cost_usd
+            total_latency += result.latency_s
+            report = await gate.evaluate(job, result)
             attempts += 1
+        result.cost_usd = round(total_cost, 4)
+        result.latency_s = round(total_latency, 3)
         result.raw_meta["gate_passed"] = report.passed
         result.raw_meta["gate_reason"] = report.reason
         result.raw_meta["attempts"] = attempts

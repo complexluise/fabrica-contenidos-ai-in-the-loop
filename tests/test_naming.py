@@ -1,26 +1,26 @@
 """Core Sprint 6.5: nombres semánticos legibles (D-026).
 
-Test-first. Solo la lógica pura (_slugify, readable_name, fallback de
+Test-first. Solo la lógica pura (slugify, readable_name, fallback de
 semantic_slug); la derivación con Claude Haiku es I/O y se valida con smoke.
 """
 
-from pipeline.naming import _slugify, readable_name, semantic_slug
+from pipeline.naming import readable_name, semantic_slug, slugify
 
 
 def test_slugify_basic():
-    assert _slugify("Plano general de una ciudad LEGO al amanecer") == "plano_general_de_una"
+    assert slugify("Plano general de una ciudad LEGO al amanecer") == "plano_general_de_una"
 
 
 def test_slugify_strips_accents_and_symbols():
-    assert _slugify("Acción épica: ¡el héroe!") == "accion_epica_el_heroe"
+    assert slugify("Acción épica: ¡el héroe!") == "accion_epica_el_heroe"
 
 
 def test_slugify_empty_falls_back():
-    assert _slugify("...!!!") == "scene"
+    assert slugify("...!!!") == "scene"
 
 
 def test_slugify_respects_max_words():
-    assert _slugify("uno dos tres cuatro cinco seis", max_words=2) == "uno_dos"
+    assert slugify("uno dos tres cuatro cinco seis", max_words=2) == "uno_dos"
 
 
 def test_readable_name_format():
@@ -29,7 +29,7 @@ def test_readable_name_format():
 
 
 def test_semantic_slug_falls_back_without_llm(monkeypatch):
-    # Sin LLM (no key / falla) -> usa _slugify del texto.
+    # Sin LLM (no key / falla) -> usa slugify del texto.
     monkeypatch.setattr("pipeline.naming._slug_via_llm", lambda text: None)
     assert semantic_slug("Una ciudad LEGO al amanecer") == "una_ciudad_lego_al"
 

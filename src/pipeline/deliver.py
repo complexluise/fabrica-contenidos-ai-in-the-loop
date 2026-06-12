@@ -9,10 +9,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from .assemble import _ffmpeg
+from .assemble import ffmpeg_exe
 
 # Resoluciones objetivo por formato.
-_FORMATS = {
+FORMATS = {
     "9:16": (1080, 1920),
     "1:1": (1080, 1080),
     "16:9": (1920, 1080),
@@ -21,16 +21,16 @@ _FORMATS = {
 
 def reframe(src: Path, out_path: Path, fmt: str = "9:16") -> Path:
     """Recorta/escala el video al formato objetivo (crop centrado + scale)."""
-    if fmt not in _FORMATS:
-        raise ValueError(f"Formato no soportado: {fmt}. Usa {list(_FORMATS)}.")
-    w, h = _FORMATS[fmt]
+    if fmt not in FORMATS:
+        raise ValueError(f"Formato no soportado: {fmt}. Usa {list(FORMATS)}.")
+    w, h = FORMATS[fmt]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     vf = (
         f"scale={w}:{h}:force_original_aspect_ratio=increase,"
         f"crop={w}:{h}"
     )
     cmd = [
-        _ffmpeg(), "-y", "-i", str(src), "-vf", vf,
+        ffmpeg_exe(), "-y", "-i", str(src), "-vf", vf,
         "-c:a", "copy", str(out_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
