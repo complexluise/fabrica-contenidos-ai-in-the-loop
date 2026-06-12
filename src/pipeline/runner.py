@@ -621,7 +621,9 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     keyframer = KeyframeGenerator(cfg.style, out_dir=run.dir / "_scratch",
                                    backend=cfg.storyboard.keyframe.backend,
                                    fmt=spec.format)
-    telemetry = Telemetry(run.run_id, db_path=run.dir / "telemetry.sqlite")
+    # D-079: el libro mayor es GLOBAL (out/telemetry.sqlite) — un solo lugar
+    # donde mirar la plata; el run_report.json del run sigue siendo el manifiesto.
+    telemetry = Telemetry(run.run_id, project=spec.slug)
 
     # Voz en off (Sprint 6): chequea scene.voiceover Y shot.voiceover (ambos válidos).
     any_vo = any(

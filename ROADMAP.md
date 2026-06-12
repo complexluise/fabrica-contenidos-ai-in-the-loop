@@ -1198,6 +1198,29 @@ muerta, el estado que mentía tras un run fallido y la disciplina restante. Ver 
 > mide 4.02s. Cache keys de candidatos/previews/variantes cambian SOLO en proyectos con `world:`.
 > Smoke real con APIs sigue pendiente de autorizacion (presupuesto).
 
+---
+
+## Sprint 6.35 — El libro mayor de costos (D-079)
+
+**Objetivo:** responder "¿cuánto llevo gastado, en qué proveedor, en qué proyecto?" con un
+comando. Telemetría consolidada en UN SQLite global (la única pieza fragmentada sin razón);
+la decisión de NO agregar una base de datos general queda documentada. Ver [D-079].
+
+### Acceptance Criteria
+- [x] AC1 — Libro mayor único `out/telemetry.sqlite` con columna `project`; migración automática
+  de esquemas viejos; `run_report.json` por run intacto. 🔬
+- [x] AC2 — `costs_summary(days, project)`: total, desglose video/sfx/keyframe/tts, por proyecto
+  y por proveedor. 🔬
+- [x] AC3 — CLI `pipeline costs [--days N] [--project slug]` + `GET /api/costs`.
+
+### Tasks
+- [x] T1 — Ledger + migración + project en SceneRecord. 🔬
+- [x] T2 — costs_summary + CLI + endpoint. 🔬
+
+> **Estado:** core en verde (**398 tests**). `pipeline costs` responde en seco; el libro se
+> llena con el proximo run pagado. Runs pre-D-079 quedan en sus run_report.json (backfill:
+> diferido).
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

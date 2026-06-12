@@ -223,3 +223,12 @@ def test_merge_env_lines_preserves_comments_and_foreign_keys():
     assert "OTRA_VAR=x" in out                     # las claves ajenas sobreviven
     assert "GOOGLE_API_KEY=g" in out               # la nueva se agrega al final
     assert "FAL_KEY=vieja" not in out
+
+
+# --- D-079: el libro mayor visible desde la UI ---------------------------------
+
+def test_costs_endpoint_returns_summary(tmp_path):
+    r = _client(tmp_path).get("/api/costs")
+    assert r.status_code == 200
+    body = r.json()
+    assert "total_usd" in body and "by_project" in body and "by_provider" in body
