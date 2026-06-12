@@ -43,6 +43,35 @@ export const GLOSARIO = {
 
 export const hasProject = () => !!studio.slug && studio.projects.length > 0;
 
+// --- routing por hash (D-081): #/<slug>/<tab>. F5 y el boton atras conservan
+// donde estabas; una pestaña se puede compartir. Sin router externo (~25 lineas).
+const TABS = new Set([...STAGES.map((s) => s.id), CONFIG.id]);
+
+export function parseHash() {
+  if (typeof window === "undefined") return null;
+  const m = window.location.hash.match(/^#\/([^/]*)\/([\w-]+)$/);
+  if (!m) return null;
+  return { slug: decodeURIComponent(m[1]), tab: TABS.has(m[2]) ? m[2] : "inicio" };
+}
+
+export function writeHash() {
+  if (typeof window === "undefined") return;
+  const h = `#/${encodeURIComponent(studio.slug || "")}/${studio.tab}`;
+  if (window.location.hash !== h) window.location.hash = h;
+}
+
+export function initRouting() {
+  if (typeof window === "undefined") return;
+  window.addEventListener("hashchange", async () => {
+    const w = parseHash();
+    if (!w) return;
+    if (w.slug && w.slug !== studio.slug && studio.projects.some((p) => p.slug === w.slug)) {
+      await setSlug(w.slug);
+    }
+    if (w.tab !== studio.tab) studio.tab = w.tab;
+  });
+}
+
 export async function loadProjects() {
   try {
     studio.projects = await get("/api/projects");
@@ -64,6 +93,7 @@ export async function loadProjects() {
 export async function setSlug(slug) {
   studio.slug = slug;
   studio.status = null;
+  writeHash();
   await refreshStatus();
 }
 
@@ -93,6 +123,7 @@ export async function refreshStatus() {
 
 export function goTo(tab) {
   studio.tab = tab;
+  writeHash();     // D-081: la URL refleja donde estas (F5/atras funcionan)
   refreshStatus(); // D-080: navegar re-lee el estado (la espina nunca miente)
   if (typeof window !== "undefined") window.scrollTo({ top: 0 });
 }

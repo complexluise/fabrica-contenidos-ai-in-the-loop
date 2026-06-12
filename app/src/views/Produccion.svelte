@@ -1,14 +1,16 @@
 <script>
   import { onMount } from "svelte";
-  import { runJob, humanError } from "../lib/api.js";
-  import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
   import { get } from "../lib/api.js";
+  import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
+  import { jobState } from "../lib/jobs.svelte.js";
 
   let { slug } = $props();
-  let running = $state(""); // "render" | "export" | ""
-  let log = $state([]);
-  let kindStatus = $state({ render: "", export: "" });
-  let err = $state("");
+  // D-081: un jobState por trabajo — el ciclo busy/log/err vive UNA vez en lib.
+  const jobs = { render: jobState(), export: jobState() };
+  let active = $state("render");  // de cual job se muestra el registro
+  let cur = $derived(jobs[active]);
+  let running = $derived(jobs.render.busy ? "render" : jobs.export.busy ? "export" : "");
+  let err = $derived(jobs.render.err || jobs.export.err);
   let showLog = $state(true);
   let profile = $state("fal-ultra-cheap");  // D-076: el mismo default que el motor
   let concurrency = $state(3);
@@ -70,18 +72,14 @@
   });
 
   function run(kind) {
-    log = []; err = ""; running = kind; kindStatus = { ...kindStatus, [kind]: "running" };
+    active = kind;
     const body = kind === "render" ? { profile, concurrency } : undefined;
-    runJob(`/api/projects/${slug}/${kind}`, {
+    jobs[kind].run(`/api/projects/${slug}/${kind}`, {
       body,
-      onLine: (l) => (log = [...log, l]),
-      onDone: async (s) => {
-        running = ""; kindStatus = { ...kindStatus, [kind]: s };
-        if (s !== "done") err = `Termino como: ${s}. Revisa el registro.`;
+      onDone: async () => {
         await refreshStatus();
         loadCosts();  // D-079: lo que acaba de costar, al instante
       },
-      onError: (e) => { running = ""; kindStatus = { ...kindStatus, [kind]: "error" }; err = humanError(e); },
     });
   }
 </script>
@@ -127,8 +125,8 @@
         <p class="muted">Genera cada plano y los une en un corte de referencia.</p>
       </div>
       <div class="step-act">
-        {#if kindStatus.render && kindStatus.render !== "done"}
-          <span class="badge {kindStatus.render === 'running' ? 'warn' : 'red'}">{kindStatus.render}</span>
+        {#if jobs.render.status && jobs.render.status !== "done"}
+          <span class="badge {jobs.render.busy ? 'warn' : 'red'}">{jobs.render.status}</span>
         {/if}
         <button class="machine" onclick={() => run("render")} disabled={!!running || !hasFal}>
           {running === "render" ? "Renderizando…" : renderDone ? "Re-renderizar" : "Armar el video"}
@@ -205,8 +203,8 @@
         <p class="muted">Videos, voces, subtitulos y guion en <code>projects/{slug}/export/</code>.</p>
       </div>
       <div class="step-act">
-        {#if kindStatus.export && kindStatus.export !== "done"}
-          <span class="badge {kindStatus.export === 'running' ? 'warn' : 'red'}">{kindStatus.export}</span>
+        {#if jobs.export.status && jobs.export.status !== "done"}
+          <span class="badge {jobs.export.busy ? 'warn' : 'red'}">{jobs.export.status}</span>
         {/if}
         <button onclick={() => run("export")} disabled={!!running || !renderDone}>
           {running === "export" ? "Empaquetando…" : exportDone ? "Re-armar paquete" : "Armar paquete"}
@@ -228,10 +226,10 @@
   </button>
   {#if showLog}
     <div class="log mono">
-      {#if log.length === 0}
+      {#if cur.log.length === 0}
         <span class="muted">El progreso aparece aca mientras la maquina trabaja…</span>
       {:else}
-        {#each log as l}<div>{l}</div>{/each}
+        {#each cur.log as l}<div>{l}</div>{/each}
       {/if}
     </div>
   {/if}

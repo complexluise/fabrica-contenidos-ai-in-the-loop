@@ -3,16 +3,19 @@
   // de pagar video. Cada plano = apertura → destino; el render interpola entre
   // ellas (en paralelo). Curación por excepción: todo viene propuesto; regenerás
   // solo la pose que no convence.
-  import { get, post, del, runJob, humanError } from "../lib/api.js";
+  import { onMount } from "svelte";
+  import { get, post, del, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
+  import { jobState } from "../lib/jobs.svelte.js";
+  import Progress from "../components/Progress.svelte";
 
   let { slug } = $props();
   let data = $state(null);      // { strip, total, ready, missing_poses, est_missing_cost_usd }
   let profiles = $state([]);    // para el estimado del render (costo visible, D-061)
-  let busy = $state(false);
-  let progress = $state("");
   let err = $state("");
   let dropping = $state("");    // "shot_id/which" en proceso de descarte
+  const gen = jobState();       // completar poses (D-081: ciclo de job compartido)
+  const variants = jobState();  // variantes por pose (key = "shot/which")
 
   let hasFal = $derived(!!studio.status?.keys?.fal_key);
   let strip = $derived(data?.strip ?? []);
@@ -45,19 +48,12 @@
       data = a; profiles = p || [];
     } catch (e) { err = humanError(e); }
   }
-  $effect(() => { if (slug) { data = null; err = ""; load(); } });
+  onMount(load);  // D-081: App remonta con {#key slug} — sin vigilar el slug
 
   function generate() {
-    busy = true; err = "";
-    progress = "Generando las poses que faltan…";
-    runJob(`/api/projects/${slug}/animatic`, {
-      onLine: (l) => (progress = l),
-      onDone: async (status) => {
-        busy = false; progress = "";
-        if (status !== "done") err = `Terminó como: ${status}.`;
-        await load(); await refreshStatus();
-      },
-      onError: (e) => { busy = false; progress = ""; err = humanError(e); },
+    err = "";
+    gen.run(`/api/projects/${slug}/animatic`, {
+      onDone: async () => { await load(); await refreshStatus(); },
     });
   }
 
@@ -72,16 +68,11 @@
   }
 
   // D-063: best-of-N por pose — generar variantes y ELEGIR (no solo regenerar).
-  let variantsBusy = $state("");  // "shot/which" generando variantes
   function genVariants(shotId, which) {
-    variantsBusy = `${shotId}/${which}`; err = "";
-    runJob(`/api/projects/${slug}/animatic/${shotId}/${which}/variants?n=3`, {
-      onDone: async (status) => {
-        variantsBusy = "";
-        if (status !== "done") err = `Variantes: terminó como ${status}.`;
-        await load();
-      },
-      onError: (e) => { variantsBusy = ""; err = humanError(e); },
+    err = "";
+    variants.run(`/api/projects/${slug}/animatic/${shotId}/${which}/variants?n=3`, {
+      key: `${shotId}/${which}`,
+      onDone: load,
     });
   }
   async function pickVariant(shotId, which, url) {
@@ -166,8 +157,8 @@
               title="Las poses en secuencia con sus duraciones: el ritmo de la película, gratis">
         ▶ Reproducir
       </button>
-      <button class="machine cta" onclick={generate} disabled={busy || !hasFal || data.missing_poses === 0}>
-        {busy ? "Generando…" : data.missing_poses > 0 ? `Completar animatic (${data.missing_poses})` : "✓ Animatic completo"}
+      <button class="machine cta" onclick={generate} disabled={gen.busy || !hasFal || data.missing_poses === 0}>
+        {gen.busy ? "Generando…" : data.missing_poses > 0 ? `Completar animatic (${data.missing_poses})` : "✓ Animatic completo"}
       </button>
     </div>
   </div>
@@ -186,8 +177,8 @@
     </div>
   {/if}
 
-  {#if busy}<div class="progress mono"><span class="spin"></span>{progress}</div>{/if}
-  {#if err}<p class="error">{err}</p>{/if}
+  {#if gen.busy}<Progress text={gen.progress || "Generando las poses que faltan…"} />{/if}
+  {#if err || gen.err || variants.err}<p class="error">{err || gen.err || variants.err}</p>{/if}
 
   {#each scenes as sceneId}
     {@const shots = strip.filter((e) => e.scene === sceneId)}
@@ -214,16 +205,16 @@
                 {#if e.lands && wi === 1}<span class="arrow">→</span>{/if}
                 {@const img = which === "start" ? e.start : e.destino}
                 {@const variants = e[`${which}_variants`] || []}
-                {@const vBusy = variantsBusy === `${e.shot_id}/${which}`}
+                {@const vBusy = variants.busy && variants.key === `${e.shot_id}/${which}`}
                 <div class="pose">
                   {#if img}
                     <img src={img} alt="{which} {e.shot_id}" loading="lazy" />
                     {#if e[`${which}_picked`]}<span class="pick-badge" title="Variante elegida por vos">★</span>{/if}
                     <button class="regen" title="No convence: descartar y regenerar esta pose"
-                            disabled={busy || dropping === `${e.shot_id}/${which}`}
+                            disabled={gen.busy || dropping === `${e.shot_id}/${which}`}
                             onclick={() => regenPose(e.shot_id, which)}>↻</button>
                     <button class="vary" title="Generar 3 variantes y ELEGIR (D-063)"
-                            disabled={busy || vBusy || !hasFal}
+                            disabled={gen.busy || vBusy || !hasFal}
                             onclick={() => genVariants(e.shot_id, which)}>{vBusy ? "…" : "⊞"}</button>
                   {:else}
                     <div class="hole">{which === "start" ? "apertura" : "destino"}</div>
@@ -276,9 +267,6 @@
   .gen-controls { display: flex; align-items: center; gap: 9px; }
   .est-line { font-size: 12.5px; margin: 6px 0 0; }
   .est-line b { color: var(--ink); font-family: var(--font-mono); }
-  .progress { display: flex; align-items: center; gap: 10px; background: var(--blue-wash); border: 1px solid #b9c2ee; color: var(--blue-deep); border-radius: var(--r); padding: 10px 14px; font-size: 13px; }
-  .spin { width: 13px; height: 13px; border: 2px solid var(--blue-deep); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .scene-block { margin: 18px 0 10px; }
   .scene-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }

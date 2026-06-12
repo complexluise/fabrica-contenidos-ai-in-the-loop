@@ -1,6 +1,8 @@
 <script>
-  import { get, put, post, runJob, humanError, bufToBase64 } from "../lib/api.js";
+  import { onMount } from "svelte";
+  import { get, post, put, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus } from "../lib/studio.svelte.js";
+  import { jobState } from "../lib/jobs.svelte.js";
 
   let { slug } = $props();
   let doc   = $state(null);
@@ -14,8 +16,10 @@
   let saving = $state(false);
   let music = $state(null);       // URL del archivo de música cargado
   let musicPrompt = $state("");
-  let musicBusy = $state(false);
+  let musicBusy = $derived(musicJob.busy || musicUploading);
+  const musicJob = jobState();  // D-081: el ciclo de job, una sola implementacion
   let musicErr = $state("");
+  let musicUploading = $state(false);
   let showMusicGen = $state(false);
   let backends = $state([]);         // D-053: backends disponibles
   let activeBackend = $state("fal"); // D-053: backend activo del proyecto
@@ -53,12 +57,8 @@
   const shotDesc = (sh) => (sh.action || sh.framing || "").trim();
   const setPalette = (sh, str) => { sh.visual.palette = str.split(",").map(x => x.trim()).filter(Boolean); touch(); };
 
-  $effect(() => {
-    if (!slug) return;
-    doc = null; error = ""; msg = ""; dirty = false;
-    cand = { keyframes: {}, cast: {}, selections: {} };
-    editing = {}; expanded = {};
-
+  onMount(() => {
+    // D-081: App remonta esta vista con {#key studio.slug} — sin resets manuales.
     // D-053: cargar backends disponibles
     get("/api/storyboard-backends")
       .then((b) => { backends = b; })
@@ -107,20 +107,20 @@
     const k = `${sceneId}_${j}`;
     // Calcula el estado VISIBLE actual (igual que la expresion en el template)
     const currentOpen = expandedAudio[k] !== false && (!!expandedAudio[k] || hasAudio(sh));
-    expandedAudio = { ...expandedAudio, [k]: !currentOpen };
+    expandedAudio[k] = !currentOpen;
   }
 
   function toggleExpand(id) {
-    expanded = { ...expanded, [id]: !expanded[id] };
+    expanded[id] = !expanded[id];
   }
 
   function toggleEdit(id) {
     if (editing[id]) {
       // Colapsando: si hay cambios sin guardar, guardar ahora (fire-and-forget)
       if (dirty) save(false);
-      else editing = { ...editing, [id]: false };
+      else editing[id] = false;
     } else {
-      editing = { ...editing, [id]: true };
+      editing[id] = true;
     }
   }
 
@@ -133,39 +133,38 @@
 
   function addScene() {
     const id = uniqueId();
-    doc.scenes = [...doc.scenes, {
+    doc.scenes.push({
       id, beat: "", prompt: "", dialogue: "", ambience: "", visual_intensity: null,
       characters: [], shots: [loadShot({})],
-    }];
-    editing = { ...editing, [id]: true }; // nueva escena abre en modo edicion
+    });
+    editing[id] = true; // nueva escena abre en modo edicion
     touch();
   }
   function deleteScene(i) {
     if (!confirm(`¿Eliminar la escena "${doc.scenes[i].id}"?`)) return;
-    doc.scenes = doc.scenes.filter((_, k) => k !== i);
+    doc.scenes.splice(i, 1);
     touch();
   }
   function move(i, d) {
     const j = i + d;
     if (j < 0 || j >= doc.scenes.length) return;
-    const a = [...doc.scenes];
-    [a[i], a[j]] = [a[j], a[i]];
-    doc.scenes = a; touch();
+    [doc.scenes[i], doc.scenes[j]] = [doc.scenes[j], doc.scenes[i]];
+    touch();
   }
   function addShot(s) {
-    s.shots = [...s.shots, loadShot({})];
+    s.shots.push(loadShot({}));
     touch();
   }
   function deleteShot(s, j) {
     if (s.shots.length === 1) return;
-    s.shots = s.shots.filter((_, k) => k !== j);
+    s.shots.splice(j, 1);
     touch();
   }
 
   async function uploadMusic(fileInput) {
     const file = fileInput.files[0];
     if (!file) return;
-    musicErr = ""; musicBusy = true;
+    musicErr = ""; musicUploading = true;
     try {
       const buf = await file.arrayBuffer();
       const r = await post(`/api/projects/${slug}/music/upload`,
@@ -174,26 +173,21 @@
     } catch (e) {
       musicErr = humanError(e);
     } finally {
-      musicBusy = false;
+      musicUploading = false;
       fileInput.value = "";
     }
   }
 
   function generateMusic() {
     if (!musicPrompt.trim()) return;
-    musicErr = ""; musicBusy = true;
-    // D-080: por runJob (SSE), como todo lo demás. El poll a mano usaba
-    // `job.job_id` (el server devuelve `id`) y esperaba "error" (es "failed"):
-    // la música fallaba SIEMPRE en la UI aunque el job saliera bien.
-    runJob(`/api/projects/${slug}/music/generate`, {
+    musicErr = "";
+    musicJob.run(`/api/projects/${slug}/music/generate`, {
       body: { prompt: musicPrompt, duration_s: total || 30 },
       onDone: async (status, jobId) => {
-        musicBusy = false;
-        if (status !== "done") { musicErr = `Terminó como: ${status}.`; return; }
+        if (status !== "done") { musicErr = musicJob.err; return; }
         const j = await get(`/api/jobs/${jobId}`).catch(() => null);
         music = j?.result?.url || null;
       },
-      onError: (e) => { musicBusy = false; musicErr = humanError(e); },
     });
   }
 
