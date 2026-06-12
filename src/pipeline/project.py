@@ -325,9 +325,21 @@ def write_spec(spec: ProjectSpec, path: Path) -> Path:
 
 def effective_shots(scene: Scene) -> list[Shot]:
     """Planos de la escena (D-028). Si no hay `shots:`, sintetiza **1 plano implícito**
-    con los campos de la escena → el runner/studio iteran planos siempre (compat)."""
+    con los campos de la escena → el runner/studio iteran planos siempre (compat).
+
+    D-078: `voiceover`/`caption` de ESCENA caen al PRIMER plano cuando ningún
+    plano los declara — antes morían en silencio con `shots:` explícitos (video
+    pagado, voz que nunca sonaba). Devuelve copias: no muta el spec."""
     if scene.shots:
-        return scene.shots
+        shots = list(scene.shots)
+        update: dict = {}
+        if scene.voiceover and not any(sh.voiceover for sh in shots):
+            update["voiceover"] = scene.voiceover
+        if scene.caption and not any(sh.caption for sh in shots):
+            update["caption"] = scene.caption
+        if update:
+            shots[0] = shots[0].model_copy(update=update)
+        return shots
     return [Shot(framing="", duration_s=scene.duration_s, seed=scene.seed,
                  voiceover=scene.voiceover, caption=scene.caption, keyframe=scene.keyframe)]
 
@@ -391,6 +403,16 @@ class Run:
     @property
     def manifest_path(self) -> Path:
         return self.dir / "manifest.yaml"
+
+    def final_render(self) -> Path | None:
+        """El video final del run si existe: master (con film stock, D-073) sobre
+        final (sin). None si el run no llegó a producir video — un run FALLIDO
+        no cuenta como render hecho (D-078; antes el estado mentía, D-032)."""
+        for pattern in ("master_*.mp4", "final_*.mp4"):
+            hit = next(iter(sorted(self.dir.glob(pattern))), None)
+            if hit is not None:
+                return hit
+        return None
 
 
 class Project:

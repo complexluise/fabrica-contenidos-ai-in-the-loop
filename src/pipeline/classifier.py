@@ -10,6 +10,10 @@ from __future__ import annotations
 from .contracts import Scene, SceneClass
 from .settings import get_settings
 
+# D-078: una palabra no merece Opus (~30x el precio de Haiku); el perfil
+# narrativo puede subirlo via `model=` (narrative_model, D-053/D-078).
+_CLASSIFY_MODEL = "claude-haiku-4-5-20251001"
+
 # Palabras que sugieren relleno/B-roll (volumen).
 _VOLUME_HINTS = ("b-roll", "establishing", "transicion", "paisaje", "ambiente", "relleno")
 
@@ -29,7 +33,7 @@ def classify_by_rules(scene: Scene) -> SceneClass | None:
     return None
 
 
-def classify_by_llm(scene: Scene) -> SceneClass:  # pragma: no cover - I/O externo
+def classify_by_llm(scene: Scene, model: str | None = None) -> SceneClass:  # pragma: no cover - I/O externo
     """Arbitra escenas ambiguas con Claude. Fallback determinista: standard."""
     key = get_settings().anthropic_api_key
     if not key:
@@ -41,7 +45,7 @@ def classify_by_llm(scene: Scene) -> SceneClass:  # pragma: no cover - I/O exter
 
     client = anthropic.Anthropic(api_key=key)
     msg = client.messages.create(
-        model="claude-opus-4-8",
+        model=model or _CLASSIFY_MODEL,
         max_tokens=10,
         messages=[
             {
@@ -58,9 +62,9 @@ def classify_by_llm(scene: Scene) -> SceneClass:  # pragma: no cover - I/O exter
     return answer if answer in ("hero", "standard", "volume") else "standard"
 
 
-def classify(scene: Scene) -> SceneClass:
+def classify(scene: Scene, model: str | None = None) -> SceneClass:
     """Pipeline de clasificacion: reglas primero, LLM para lo gris."""
     by_rules = classify_by_rules(scene)
     if by_rules is not None:
         return by_rules
-    return classify_by_llm(scene)
+    return classify_by_llm(scene, model)

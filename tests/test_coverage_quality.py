@@ -393,3 +393,25 @@ def test_gate_frame_times_sample_motion():
     assert len(ts) == 3 and ts[0] < ts[1] < ts[2]
     assert ts[0] >= 0.3 and ts[2] <= 4.7  # evita frames negros de borde
     assert frame_times(0.8) == [0.4]      # clip cortísimo: una sola muestra
+
+
+# --- D-078: dialogue_no_voice mira la cobertura EFECTIVA ----------------------
+
+def test_dialogue_advisory_satisfied_by_inherited_scene_voice():
+    """Escena con dialogue + voiceover de ESCENA y planos sin voz: la herencia
+    (effective_shots, D-078) la hace sonar -> NO debe avisar."""
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="p", duration_s=4, dialogue="hola", voiceover="hola",
+              shots=[Shot(action="a", duration_s=2), Shot(action="b", duration_s=2)]),
+    ])
+    kinds = {a["kind"] for a in signing_advisories(spec, _routing(), _providers())}
+    assert "dialogue_no_voice" not in kinds
+
+
+def test_dialogue_advisory_fires_without_any_voice():
+    spec = ProjectSpec(slug="t", style="lego", format="9:16", scenes=[
+        Scene(id="s1", prompt="p", duration_s=4, dialogue="hola",
+              shots=[Shot(action="a", duration_s=4)]),
+    ])
+    kinds = {a["kind"] for a in signing_advisories(spec, _routing(), _providers())}
+    assert "dialogue_no_voice" in kinds

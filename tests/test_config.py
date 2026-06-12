@@ -148,3 +148,14 @@ def test_fal_standard_gate_con_haiku():
     assert cfg.profile.gate.enabled is True
     assert cfg.profile.gate.vlm_model == "claude-haiku-4-5-20251001"
     assert cfg.profile.est_cost_per_scene_usd == 0.05
+
+
+# --- D-078: el LLM narrativo del perfil se cablea de verdad --------------------
+
+def test_narrative_model_only_for_anthropic_backend():
+    from pipeline.config import StoryboardConfig, StoryboardLLMConfig, narrative_model
+
+    sb = StoryboardConfig(llm=StoryboardLLMConfig(backend="anthropic", model="claude-x"))
+    assert narrative_model(sb) == "claude-x"
+    sb_g = StoryboardConfig(llm=StoryboardLLMConfig(backend="google", model="gemini-2.0-flash"))
+    assert narrative_model(sb_g) is None  # narrativa via Gemini: diferida (D-078)

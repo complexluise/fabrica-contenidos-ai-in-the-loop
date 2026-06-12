@@ -74,3 +74,30 @@ def test_load_project_spec_parses_shots(tmp_path):
     )
     sc = load_project_spec(f).scenes[0]
     assert len(sc.shots) == 2 and sc.shots[1].voiceover == "hola"
+
+
+# --- D-078: voiceover/caption de ESCENA caen al primer plano ------------------
+
+def test_effective_shots_inherits_scene_voice_to_first_shot():
+    """Antes morian en silencio con `shots:` declarados: video pagado, voz que
+    nunca sonaba (y el advisory daba falso negativo)."""
+    from pipeline.contracts import Shot
+
+    s = _scene(voiceover="hola mundo", caption="EL CAPTION",
+               shots=[Shot(action="a", duration_s=2), Shot(action="b", duration_s=3)])
+    shots = effective_shots(s)
+    assert shots[0].voiceover == "hola mundo"
+    assert shots[0].caption == "EL CAPTION"
+    assert shots[1].voiceover is None
+    assert s.shots[0].voiceover is None  # NO muta el spec en disco
+
+
+def test_effective_shots_respects_shot_level_voice():
+    from pipeline.contracts import Shot
+
+    s = _scene(voiceover="voz de escena",
+               shots=[Shot(action="a", duration_s=2),
+                      Shot(action="b", duration_s=2, voiceover="voz de plano")])
+    shots = effective_shots(s)
+    assert shots[0].voiceover is None       # un plano YA declara voz: la escena no pisa
+    assert shots[1].voiceover == "voz de plano"

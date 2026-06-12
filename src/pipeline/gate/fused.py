@@ -51,6 +51,8 @@ class FusedGate:
         return self.thresholds_by_class.get(job.class_ or "standard", {})
 
     async def evaluate(self, job: ShotJob, result: GenResult) -> GateReport:
+        if not self.signals:  # D-078: sin señales no se decodifica ni un frame
+            return GateReport(passed=True, reason="gate permisivo (sin señales configuradas)")
         thresholds = self._thresholds_for(job)
         try:
             # D-069: el gate deja de ser ciego al movimiento — 3 muestras

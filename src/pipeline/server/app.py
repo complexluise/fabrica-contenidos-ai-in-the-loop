@@ -69,6 +69,27 @@ class RenderBody(BaseModel):
 class PosePickBody(BaseModel):
     path: str = ""
 
+
+def merge_env_lines(lines: list[str], updates: dict[str, str]) -> list[str]:
+    """Mezcla claves en un .env PRESERVANDO comentarios y claves ajenas (D-078).
+
+    Antes el guardado desde la UI reescribía el archivo solo con las líneas
+    `k=v` — los comentarios del humano se perdían en cada guardado. Pura."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for ln in lines:
+        stripped = ln.strip()
+        key = None
+        if "=" in ln and not stripped.startswith("#"):
+            key = ln.split("=", 1)[0].strip()
+        if key is not None and key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            out.append(ln)
+    out.extend(f"{k}={v}" for k, v in updates.items() if k not in seen)
+    return out
+
 _KEYS = {"fal_key": "FAL_KEY", "anthropic_api_key": "ANTHROPIC_API_KEY",
          "elevenlabs_api_key": "ELEVENLABS_API_KEY", "google_api_key": "GOOGLE_API_KEY"}
 
@@ -425,8 +446,9 @@ def create_app(projects_dir: Path = Path("projects"),
         todo = [s for s in targets if (scene_id is not None or force or s.prompt_stale)]
 
         def work():
+            from ..config import narrative_model
             for s in todo:
-                sync_scene_prompt(s, spec.characters)
+                sync_scene_prompt(s, spec.characters, model=narrative_model(_cfg.storyboard))
             if todo:
                 write_spec(spec, project.spec_path)
 
@@ -506,12 +528,10 @@ def create_app(projects_dir: Path = Path("projects"),
         except Exception:
             out["animatic"] = None
 
-        final_url = None
+        # D-078: master (film stock) > final; un run fallido no tiene URL.
         run = project.latest_run()
-        if run is not None:
-            final = next(iter(run.dir.glob("final_*.mp4")), None)
-            final_url = file_url(final) if final else None
-        out["render"]["final_url"] = final_url
+        final = run.final_render() if run is not None else None
+        out["render"]["final_url"] = file_url(final) if final else None
         return out
 
     # --- jobs de generación ----------------------------------------------
@@ -844,11 +864,9 @@ def create_app(projects_dir: Path = Path("projects"),
     def put_settings(body: dict):
         env = Path(".env")
         lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
-        current = {ln.split("=", 1)[0]: ln for ln in lines if "=" in ln and not ln.startswith("#")}
-        for attr, env_name in _KEYS.items():
-            if attr in body and body[attr] is not None:
-                current[env_name] = f"{env_name}={body[attr]}"
-        env.write_text("\n".join(current.values()) + "\n", encoding="utf-8")
+        updates = {env_name: body[attr] for attr, env_name in _KEYS.items()
+                   if attr in body and body[attr] is not None}
+        env.write_text("\n".join(merge_env_lines(lines, updates)) + "\n", encoding="utf-8")
         get_settings.cache_clear()  # que el próximo get_settings lea las nuevas keys
         return get_settings_status()
 

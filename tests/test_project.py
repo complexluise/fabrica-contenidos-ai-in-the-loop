@@ -215,3 +215,16 @@ def test_cache_shared_across_runs(tmp_path):
 
     p2 = Project(slug="lego_demo", root=tmp_path)
     assert p2.cache_lookup("clips", key, ".mp4") is not None
+
+
+# --- D-078: el render final del run (master > final > None) -------------------
+
+def test_run_final_render_prefers_master(tmp_path):
+    from pipeline.project import Run
+
+    run = Run(run_id="r", dir=tmp_path)
+    assert run.final_render() is None              # run fallido: sin video
+    (tmp_path / "final_9x16.mp4").write_bytes(b"f")
+    assert run.final_render().name == "final_9x16.mp4"
+    (tmp_path / "master_9x16.mp4").write_bytes(b"m")
+    assert run.final_render().name == "master_9x16.mp4"  # el film stock manda

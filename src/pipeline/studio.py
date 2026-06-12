@@ -19,7 +19,7 @@ import yaml
 from .config import Config
 from .contact_sheet import build_contact_sheet, write_and_open
 from .keyframe import KeyframeGenerator, build_styled_prompt
-from .prompt_compile import compose_character_prompt, compose_keyframe_prompt
+from .prompt_compile import compose_character_prompt, compose_keyframe_prompt, compose_ref_map
 from .naming import readable_name, semantic_slug
 from .project import (
     Character,
@@ -49,6 +49,15 @@ def _alias(project: Project, subdir: str, prefix: str, slug: str, idx: int, src:
     dest = dest_dir / readable_name(prefix, slug, idx, src.suffix or ".png")
     dest.write_bytes(Path(src).read_bytes())
     return dest
+
+
+def candidate_seed_offset(recorded, existing: int) -> int:
+    """Seed inicial para "mas candidatos" (D-078). Pura.
+
+    `len(existing)` retrocede cuando el humano BORRA candidatos -> reusar ese
+    seed devolvia (cache hit) la misma imagen recien descartada. El contador
+    persistido nunca retrocede; `max()` da compat con proyectos sin contador."""
+    return max(int(recorded or 0), int(existing))
 
 
 def parse_picks(items: list[str]) -> dict[str, int]:
@@ -120,6 +129,7 @@ async def cast(project: Project, spec: ProjectSpec, cfg: Config, n: int,
                 key = cache_key("cast", {
                     "character": name, "prompt": cast_prompt,
                     "refs": ref_sig, "ref_model": cfg.style.keyframe.ref_model, "seed": i,
+                    "aspect": spec.format,  # D-078: cambiar el formato regenera caras
                 })
                 hit = project.cache_lookup("cast", key, ".png")
                 if hit is not None:
@@ -210,7 +220,9 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
         ref_sig = sorted(str(r) for r in refs)
         anchor = effective_shots(scene)[0]
         anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
-        styled = build_styled_prompt(scene, cfg.style, anchor_ext)
+        # D-078: el MISMO contexto que usa el render (D-067) — antes el humano
+        # curaba anclas generadas SIN la biblia del mundo que el render SI usa.
+        styled = build_styled_prompt(scene, cfg.style, anchor_ext, world=spec.world)
         slug = semantic_slug(f"{scene.prompt} {anchor_ext}".strip())
         scene_meta.append((scene, refs_resolved, ref_sig, anchor, styled, slug))
 
@@ -229,8 +241,11 @@ async def gen_keyframes(project: Project, spec: ProjectSpec, cfg: Config, n: int
                 stored = hit
             else:
                 logger.info("[%s] keyframe %d/%d | generando...", scene.id, i + 1, n)
+                ref_map = (compose_ref_map(characters=list(scene.characters))
+                           if refs_resolved else None)  # D-067: refs CON NOMBRE
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=i, framing=compose_keyframe_prompt(anchor))
+                                               seed=i, framing=compose_keyframe_prompt(anchor),
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene.id, slug, i, stored)
             logger.info("[%s] keyframe %d/%d listo: %s", scene.id, i + 1, n, alias.name)
@@ -296,12 +311,16 @@ async def gen_keyframes_scene(
 
     anchor_ext = compose_keyframe_prompt(anchor)  # D-047: artefacto del plano 1
     framing = f"{anchor_ext}, {prompt_tweak}".strip(", ") if prompt_tweak else anchor_ext
-    styled = build_styled_prompt(scene, cfg.style, framing)
+    styled = build_styled_prompt(scene, cfg.style, framing, world=spec.world)  # D-078
     slug = semantic_slug(f"{scene.prompt} {framing}".strip())
 
     manifest = read_yaml(project.candidates_path)
     existing = manifest.get(scene_id, [])
-    seed_offset = len(existing)  # seeds distintos = cache keys distintos
+    # D-078: contador monotono — "mas candidatos" jamas reusa un seed emitido
+    # (len(existing) retrocede al borrar candidatos; el contador no).
+    seeds_path = project.dir / "candidate_seeds.yaml"
+    seeds = read_yaml(seeds_path)
+    seed_offset = candidate_seed_offset(seeds.get(scene_id), len(existing))
 
     new_paths: list[str] = []
     for i in range(n):
@@ -316,8 +335,11 @@ async def gen_keyframes_scene(
                 logger.info("[%s] keyframe seed=%d (cache hit)", scene_id, seed)
             else:
                 logger.info("[%s] keyframe seed=%d | generando...", scene_id, seed)
+                ref_map = (compose_ref_map(characters=list(scene.characters))
+                           if refs_resolved else None)  # D-067: refs CON NOMBRE
                 tmp = await keyframer.generate(scene, ref_images=refs_resolved,
-                                               seed=seed, framing=framing)
+                                               seed=seed, framing=framing,
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             _alias(project, "keyframes", scene_id, slug, seed, stored)
             new_paths.append(str(stored))
@@ -330,6 +352,8 @@ async def gen_keyframes_scene(
     project.candidates_path.write_text(
         yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+    seeds[scene_id] = seed_offset + n  # D-078: el contador avanza siempre
+    seeds_path.write_text(yaml.safe_dump(seeds, sort_keys=False), encoding="utf-8")
 
 
 async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Config,
@@ -369,6 +393,7 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
                 "scene": scene_id, "idx": idx, "prompt": kf_ext,
                 "anchor": relativize(project.dir, anchor), "seed": shot.seed,
                 "ref_model": cfg.style.keyframe.ref_model,
+                "world": spec.world,  # D-078: el mundo es identidad del still
             })
             hit = project.cache_lookup("keyframes", key, ".png")
             if hit is not None and not force:
@@ -376,8 +401,12 @@ async def preview_shot_keyframes(project: Project, spec: ProjectSpec, cfg: Confi
                 logger.info("[%s] plano %d (cache hit)", scene_id, idx + 1)
             else:
                 logger.info("[%s] plano %d | encadenando keyframe...", scene_id, idx + 1)
+                ref_map = compose_ref_map(
+                    source_label="this scene of the film" if chain_refs else None,
+                    characters=list(scene.characters)) if chain_refs else None
                 tmp = await keyframer.generate(scene, ref_images=chain_refs,
-                                               seed=shot.seed, framing=kf_ext)
+                                               seed=shot.seed, framing=kf_ext,
+                                               world=spec.world, ref_map=ref_map)
                 stored = project.cache_store("keyframes", key, tmp, ".png")
             alias = _alias(project, "keyframes", scene_id, f"plano{idx + 1}", idx, stored)
             out_paths.append(str(alias))
@@ -788,13 +817,20 @@ async def pose_variants(project: Project, spec: ProjectSpec, cfg: Config,
         vkey = cache_key("keyframe", {
             "variant_of": f"{shot_id}/{which}", "seed": seed, "prompt": ext,
             "ref_model": cfg.style.keyframe.ref_model, "refs": ref_sig,
+            "world": spec.world,  # D-078: el mundo es identidad del still
         })
         hit = project.cache_lookup("keyframes", vkey, ".png")
         if hit is not None:
             out.append(hit)
             continue
+        # D-078: misma derivacion que la pose real (_shot_boundaries): mundo +
+        # refs con nombre — las variantes deben PARECERSE a la tira que curas.
+        src_label = ("the previous moment of this film" if which == "start"
+                     else ("this scene of the film" if source else None))
+        ref_map = compose_ref_map(source_label=src_label,
+                                  characters=list(scene.characters)) if ref_images else None
         tmp = await keyframer.generate(scene, ref_images=ref_images, seed=seed,
-                                       framing=ext)
+                                       framing=ext, world=spec.world, ref_map=ref_map)
         out.append(project.cache_store("keyframes", vkey, tmp, ".png"))
 
     pool_path = project.dir / "pose_candidates.yaml"

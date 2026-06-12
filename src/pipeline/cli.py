@@ -421,9 +421,10 @@ def describe(
     """[L10] Ojos: Haiku describe/evalua cada plano del bundle -> descriptions.yaml (D-041)."""
     from .describe import describe_bundle
 
-    proj, _spec, _cfg = _load_project(project, projects_dir, config_dir)
+    proj, _spec, cfg = _load_project(project, projects_dir, config_dir)
+    from .config import narrative_model
     console.print(f"[bold]{project}[/] - describiendo planos con Haiku...")
-    path = describe_bundle(proj)
+    path = describe_bundle(proj, model=narrative_model(cfg.storyboard))
     console.print(
         f"\n[bold green]Listo[/] {path}\n"
         f"  por plano: description - on_message - usable - issues"
@@ -465,7 +466,7 @@ def prompts(
     from .project import write_spec
     from .prompt_compile import sync_scene_prompt
 
-    proj, spec, _cfg = _load_project(project, projects_dir, config_dir)
+    proj, spec, cfg = _load_project(project, projects_dir, config_dir)
     targets = [s for s in spec.scenes if (scene is None or s.id == scene)]
     if scene and not targets:
         console.print(f"[red]Escena '{scene}' no encontrada.[/]")
@@ -477,8 +478,9 @@ def prompts(
         return
 
     console.print(f"[bold]{project}[/] - compilando {len(todo)} prompt(s) desde la narrativa...")
+    from .config import narrative_model
     for s in todo:
-        sync_scene_prompt(s, spec.characters)
+        sync_scene_prompt(s, spec.characters, model=narrative_model(cfg.storyboard))
         console.print(f"  - {s.id}: {s.prompt[:72]}...")
     write_spec(spec, proj.spec_path)
     console.print(f"\n[bold green]Listo[/] {proj.spec_path} - {len(todo)} prompt(s) en sintonia.")

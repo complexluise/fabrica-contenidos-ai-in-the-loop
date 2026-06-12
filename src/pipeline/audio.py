@@ -92,27 +92,38 @@ def vo_mix_filter(diegetic_volume: float = DIEGETIC_DUCK) -> str:
 # --- mezcla con ffmpeg (I/O) ------------------------------------------------
 
 
-def mux_voiceover(clip: Path, voice: Path, out: Path,
-                  diegetic_volume: float = DIEGETIC_DUCK) -> Path:
-    """Pone la VO en el clip (el video manda la duración). No usa `-shortest`.
-
-    - Clip **con** audio diegético (sfx/ambiente de MMAudio o nativo, D-034):
-      **mezcla** la VO encima, bajando el diegético (`amix`), no lo reemplaza.
-    - Clip **mudo** (sin audio): la VO se vuelve su pista de audio (como antes).
-    """
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if has_audio(clip):
-        cmd = [
-            ffmpeg_exe(), "-y", "-i", str(clip), "-i", str(voice),
+def mux_cmds(clip, voice, out, clip_has_audio: bool,
+             diegetic_volume: float = DIEGETIC_DUCK, exe: str = "ffmpeg") -> list[str]:
+    """Comando ffmpeg del mux de VO (pura, testeable). EL VIDEO MANDA LA DURACIÓN
+    en AMBAS ramas (D-078): `duration=first` en el amix (rama diegética) y
+    `-shortest` en la rama muda. Sin `-shortest`, una VO más larga que el plano
+    estiraba el clip y DESINCRONIZABA todo el film aguas abajo del concat
+    (verificado con ffmpeg: un film de 4s salía de 6s). La VO que no cabe se
+    corta — exactamente lo que el advisory `vo_too_long` promete al firmar."""
+    if clip_has_audio:
+        return [
+            exe, "-y", "-i", str(clip), "-i", str(voice),
             "-filter_complex", vo_mix_filter(diegetic_volume),
             "-map", "0:v:0", "-map", "[a]",
             "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
         ]
-    else:
-        cmd = [
-            ffmpeg_exe(), "-y", "-i", str(clip), "-i", str(voice),
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
-        ]
+    return [
+        exe, "-y", "-i", str(clip), "-i", str(voice),
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+        "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", str(out),
+    ]
+
+
+def mux_voiceover(clip: Path, voice: Path, out: Path,
+                  diegetic_volume: float = DIEGETIC_DUCK) -> Path:
+    """Pone la VO en el clip. El video manda la duración (D-078; ver `mux_cmds`).
+
+    - Clip **con** audio diegético (sfx/ambiente de MMAudio o nativo, D-034):
+      **mezcla** la VO encima, bajando el diegético (`amix`), no lo reemplaza.
+    - Clip **mudo** (sin audio): la VO se vuelve su pista de audio, recortada
+      al final del video (`-shortest`).
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = mux_cmds(clip, voice, out, has_audio(clip), diegetic_volume, exe=ffmpeg_exe())
     subprocess.run(cmd, check=True, capture_output=True)
     return out

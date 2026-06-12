@@ -35,7 +35,9 @@ async def generate_music_fal(
             FAL_MUSIC_MODEL,
             arguments={
                 "prompt": prompt,
-                "seconds_total": min(float(duration_s), 190.0),  # limite del modelo
+                # Schema real de fal-ai/stable-audio (verificado 2026-06-12):
+                # seconds_total es INTEGER. Mandar float es apostar a la coercion.
+                "seconds_total": int(round(min(float(duration_s), 190.0))),
                 "steps": steps,
             },
         ),

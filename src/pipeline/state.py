@@ -137,7 +137,9 @@ def signing_advisories(spec: ProjectSpec, routing, providers: dict) -> list[dict
         if s.class_ and s.class_ not in routing_classes:
             out.append({"scene": s.id, "kind": "unknown_class",
                         "msg": f"la clase '{s.class_}' no existe en el perfil; se enruta como 'standard'."})
-        if s.dialogue and not (s.voiceover or any(sh.voiceover for sh in s.shots)):
+        # D-078: cobertura EFECTIVA (incluye la herencia escena->primer plano);
+        # antes `s.voiceover` contaba como cubierto aunque jamás llegara al audio.
+        if s.dialogue and not any(sh.voiceover for sh in effective_shots(s)):
             out.append({"scene": s.id, "kind": "dialogue_no_voice",
                         "msg": "tiene diálogo pero ningún 'voiceover'; se verá como texto pero no se "
                                "escuchará (el TTS solo dobla 'voiceover')."})
@@ -246,7 +248,10 @@ def derive_state(project: Project, spec: ProjectSpec, *, has_fal_key: bool) -> P
     storyboard_signed = (project.dir / "storyboard.signed").exists()
 
     run = project.latest_run()
-    render = RenderState(done=run is not None, run_id=run.run_id if run is not None else None)
+    # D-078: render hecho = hay VIDEO FINAL (master o final). new_run() crea la
+    # carpeta al inicio, así que "existe un run" incluía runs que reventaron a mitad.
+    final = run.final_render() if run is not None else None
+    render = RenderState(done=final is not None, run_id=run.run_id if run is not None else None)
     export_done = (project.dir / "export").exists()
 
     stage = compute_stage(

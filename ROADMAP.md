@@ -1161,6 +1161,43 @@ de cache sin excepciones, guard de slug). Ver [D-075], [D-076], [D-077].
 > corrida es el que el humano firmo en CUALQUIER superficie (CLI y server comparten default).
 > Pendiente de smoke real (autorizacion de presupuesto del usuario).
 
+---
+
+## Sprint 6.34 — El recorrido de ejecución: voz que no estira el film + checkpoints honestos (D-078)
+
+**Objetivo:** ejecutar los hallazgos del trace de ejecución (2026-06-12, verificación empírica
+en ffmpeg local, $0 de API): el desync por VO larga, la voz de escena que moría en silencio,
+el contexto D-067 ausente en los checkpoints, Opus/bloqueo en el clasificador, la config LLM
+muerta, el estado que mentía tras un run fallido y la disciplina restante. Ver [D-078].
+
+### Acceptance Criteria
+- [x] AC1 — El video manda la duración en AMBAS ramas del mux de VO (`-shortest` en la rama
+  muda); `mux_cmds` puro y testeado. Verificado de punta a punta con ffmpeg local. 🔬
+- [x] AC2 — `effective_shots` hereda `voiceover`/`caption` de escena al primer plano si ningún
+  plano los declara; `dialogue_no_voice` usa cobertura efectiva (sin falso negativo). 🔬
+- [x] AC3 — `world` + `ref_map` en TODA generación de stills del studio (keyframes por escena,
+  previews, variantes de pose); keys incorporan el mundo. 🔬
+- [x] AC4 — Clasificador a Haiku + `to_thread`; `cfg.storyboard.llm.model` cableado vía
+  `narrative_model()` (compile/describe/classify); preset google honesto. 🔬
+- [x] AC5 — `Run.final_render()` (master > final > None): el estado marca render hecho solo con
+  video final; server y export sirven el master. 🔬
+- [x] AC6 — Disciplina restante: contador monótono de seeds de candidatos; gate early-return
+  sin señales; `.env` preserva comentarios; export recorta por cola los `lands`; aspect en la
+  key del casting; `seconds_total` int (schema fal verificado). 🔬
+
+### Tasks
+- [x] T1 — Mux de VO + verificación empírica ffmpeg. 🔬
+- [x] T2 — Herencia escena→plano + advisory. 🔬
+- [x] T3 — Contexto D-067 en el studio. 🔬
+- [x] T4 — Clasificador + narrative_model + preset honesto. 🔬
+- [x] T5 — final_render + estado/server/export. 🔬
+- [x] T6 — Seeds, gate, .env, export lands, cast aspect, música int. 🔬
+
+> **Estado:** core en verde (**391 tests**). El desync por VO larga quedo verificado y
+> RE-verificado con ffmpeg local: clip 2s+VO 4s pasaba el film de 4s a 6.04s; post-fix el film
+> mide 4.02s. Cache keys de candidatos/previews/variantes cambian SOLO en proyectos con `world:`.
+> Smoke real con APIs sigue pendiente de autorizacion (presupuesto).
+
 ## Sprint 9 — Biblioteca global de assets reusables (D-036)
 
 **Objetivo:** crear personajes/símbolos/lugares **una vez** y reusarlos **entre proyectos**,

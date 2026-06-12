@@ -27,7 +27,7 @@ from .audio import (
     vo_inputs,
 )
 from .classifier import classify
-from .config import Config
+from .config import Config, narrative_model
 from .contracts import GenResult, ShotJob
 from .deliver import reframe
 from .gate import FusedGate, build_default_signals
@@ -670,7 +670,11 @@ async def run_project(project: Project, spec: ProjectSpec, cfg: Config,
     # Contexto por escena (clasificación, refs, regla), calculado una sola vez.
     scene_ctx: dict[str, tuple] = {}
     for scene in spec.scenes:
-        scene.class_ = scene.class_ or classify(scene)
+        if scene.class_ is None:
+            # D-078: el clasificador puede llamar a Claude (sync) — to_thread para
+            # no bloquear el loop (misma regla que el gate, D-076).
+            scene.class_ = await asyncio.to_thread(
+                classify, scene, narrative_model(cfg.storyboard))
         refs = character_refs(scene, spec.characters)
         rule = select_rule(scene.class_, cfg.routing)
         subset = [providers_by_name[n] for n in rule.providers if n in providers_by_name]

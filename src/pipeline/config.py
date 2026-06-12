@@ -164,6 +164,16 @@ class Config(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
 
 
+def narrative_model(storyboard: StoryboardConfig) -> str | None:
+    """Modelo del LLM narrativo (compile/describe/classify) SI el backend es
+    anthropic — el único implementado. Otro backend -> None y cada módulo usa su
+    default Claude (la vía Gemini narrativa queda DIFERIDA, D-078). Antes
+    `StoryboardLLMConfig` era config muerta: nadie la leía."""
+    if storyboard.llm.backend == "anthropic":
+        return storyboard.llm.model
+    return None
+
+
 # --- Loaders -----------------------------------------------------------------
 
 def _load_yaml(path: Path) -> dict:
