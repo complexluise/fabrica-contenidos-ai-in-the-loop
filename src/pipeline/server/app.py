@@ -831,6 +831,14 @@ def create_app(projects_dir: Path = Path("projects"),
         path = record_cast_picks(project, dict(body.picks))
         return {"saved": str(path)}
 
+    # --- costos (D-079): el libro mayor, visible desde la UI ---------------
+    @app.get("/api/costs")
+    def costs(days: int | None = None, project: str | None = None):
+        """Cuanto se ha gastado (total/por proyecto/por proveedor) del libro mayor."""
+        from ..telemetry import costs_summary
+
+        return costs_summary(days=days, project=project)
+
     # --- jobs: estado + stream -------------------------------------------
     @app.get("/api/jobs")
     def list_jobs():

@@ -3,6 +3,11 @@
 No es opcional ni diferible: es lo que valida el ahorro 60-70% que justifica
 todo el diseno y lo que permite recalibrar el router. Persiste a SQLite y emite
 un run_report.json por corrida.
+
+D-079: la base SQLite es UN LIBRO MAYOR GLOBAL (`out/telemetry.sqlite`), no un
+archivo por run — "cuanto llevo gastado, en que proveedor, en que proyecto" se
+responde con `costs_summary` / `pipeline costs`. El run_report.json por corrida
+sigue siendo el manifiesto inmutable del run.
 """
 
 from __future__ import annotations
@@ -10,8 +15,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+
+# D-079: el libro mayor de costos — global, gitignoreado, compartido por TODOS
+# los proyectos y runs. Un solo lugar donde mirar la plata.
+LEDGER_PATH = Path("out/telemetry.sqlite")
 
 
 @dataclass
@@ -25,6 +34,7 @@ class SceneRecord:
     scene_class: str
     cost_usd: float
     latency_s: float
+    project: str = ""  # D-079: el slug del proyecto (lo sella Telemetry)
     attempt: int = 1
     passed: bool = True
     cached: bool = False  # True si salio del cache (costo 0)
@@ -41,6 +51,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scene_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
+    project TEXT NOT NULL DEFAULT '',
     scene_id TEXT NOT NULL,
     provider TEXT NOT NULL,
     strategy TEXT NOT NULL,
@@ -61,14 +72,27 @@ CREATE TABLE IF NOT EXISTS scene_runs (
 """
 
 
-class Telemetry:
-    """Registro de costo/latencia. Una instancia por corrida (run)."""
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Migracion minima del libro mayor (D-079): agrega `project` si falta.
 
-    def __init__(self, run_id: str, db_path: Path = Path("out/telemetry.sqlite")):
+    Los sqlite pre-D-079 (uno por run) siguen siendo legibles si se consultan;
+    sus filas viejas quedan con project='' (sin proyecto)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(scene_runs)")}
+    if cols and "project" not in cols:
+        conn.execute("ALTER TABLE scene_runs ADD COLUMN project TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+
+class Telemetry:
+    """Registro de costo/latencia de UN run, contra el libro mayor global (D-079)."""
+
+    def __init__(self, run_id: str, db_path: Path = LEDGER_PATH, project: str = ""):
         self.run_id = run_id
         self.db_path = db_path
+        self.project = project  # D-079: se sella en cada record
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
+        _migrate(self._conn)
         self._conn.execute(_SCHEMA)
         self._conn.commit()
         self._records: list[SceneRecord] = []
@@ -79,16 +103,19 @@ class Telemetry:
         self._failures.append({"scene_id": scene_id, "error": error})
 
     def record(self, rec: SceneRecord) -> None:
+        if not rec.project and self.project:  # D-079: el run sella su proyecto
+            rec.project = self.project
         self._records.append(rec)
         self._conn.execute(
             """INSERT INTO scene_runs
-               (run_id, scene_id, provider, strategy, scene_class,
+               (run_id, project, scene_id, provider, strategy, scene_class,
                 cost_usd, latency_s, attempt, passed, cached,
                 keyframe_key, video_key, audio_provider, audio_cost_usd,
                 keyframe_cost_usd, tts_cost_usd, ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                rec.run_id, rec.scene_id, rec.provider, rec.strategy, rec.scene_class,
+                rec.run_id, rec.project, rec.scene_id, rec.provider, rec.strategy,
+                rec.scene_class,
                 rec.cost_usd, rec.latency_s, rec.attempt, int(rec.passed), int(rec.cached),
                 rec.keyframe_key, rec.video_key, rec.audio_provider, rec.audio_cost_usd,
                 rec.keyframe_cost_usd, rec.tts_cost_usd, rec.ts,
@@ -142,3 +169,72 @@ class Telemetry:
 
     def close(self) -> None:
         self._conn.close()
+
+
+# --- D-079: consultas del libro mayor ----------------------------------------
+
+def _record_total(rec: SceneRecord) -> float:
+    """Costo TOTAL de una fila: video + sfx + keyframe + tts. Pura."""
+    return rec.cost_usd + rec.audio_cost_usd + rec.keyframe_cost_usd + rec.tts_cost_usd
+
+
+def costs_summary(db_path: Path = LEDGER_PATH, days: int | None = None,
+                  project: str | None = None) -> dict:
+    """Cuanto se ha gastado: total, desglose, por proyecto y por proveedor.
+
+    Lee el libro mayor (D-079). `days` limita a los ultimos N dias; `project`
+    filtra a un slug. Sin ledger -> resumen en ceros (nunca lanza)."""
+    empty = {"total_usd": 0.0, "runs": 0, "scenes": 0,
+             "breakdown": {"video_usd": 0.0, "sfx_usd": 0.0, "keyframe_usd": 0.0,
+                            "tts_usd": 0.0},
+             "by_project": {}, "by_provider": {},
+             "days": days, "project": project}
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return empty
+
+    field_names = [f.name for f in fields(SceneRecord)]
+    query = f"SELECT {', '.join(field_names)} FROM scene_runs WHERE 1=1"
+    params: list = []
+    if days is not None:
+        query += " AND ts >= ?"
+        params.append(time.time() - days * 86400)
+    if project is not None:
+        query += " AND project = ?"
+        params.append(project)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        _migrate(conn)  # ledgers pre-D-079: las filas viejas cuentan (project='')
+        rows = conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return empty
+
+    records = [SceneRecord(**dict(zip(field_names, row))) for row in rows]
+    by_project: dict[str, float] = {}
+    by_provider: dict[str, float] = {}
+    video = sfx = kf = tts = 0.0
+    for r in records:
+        by_project[r.project] = by_project.get(r.project, 0.0) + _record_total(r)
+        by_provider[r.provider] = by_provider.get(r.provider, 0.0) + r.cost_usd
+        if r.audio_provider and r.audio_cost_usd:
+            by_provider[r.audio_provider] = (by_provider.get(r.audio_provider, 0.0)
+                                             + r.audio_cost_usd)
+        video += r.cost_usd
+        sfx += r.audio_cost_usd
+        kf += r.keyframe_cost_usd
+        tts += r.tts_cost_usd
+    return {
+        "total_usd": round(video + sfx + kf + tts, 4),
+        "runs": len({r.run_id for r in records}),
+        "scenes": len(records),
+        "breakdown": {"video_usd": round(video, 4), "sfx_usd": round(sfx, 4),
+                       "keyframe_usd": round(kf, 4), "tts_usd": round(tts, 4)},
+        "by_project": {k: round(v, 4) for k, v in sorted(by_project.items(),
+                                                          key=lambda kv: -kv[1])},
+        "by_provider": {k: round(v, 4) for k, v in sorted(by_provider.items(),
+                                                           key=lambda kv: -kv[1])},
+        "days": days, "project": project,
+    }

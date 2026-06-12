@@ -40,6 +40,8 @@ uv run pipeline animatic <slug>                                     # the film a
 uv run pipeline render <slug>                                       # video from chosen keyframes
 uv run pipeline takes <slug>  →  pick-take <slug> s2=<path>         # curate among N takes (D-074)
 ```
+
+`uv run pipeline costs [--days N] [--project slug]` answers "how much have I spent" from the global ledger `out/telemetry.sqlite` (D-079; per-run `run_report.json` stays as the immutable manifest).
 `cast`/`keyframes` generate N candidates and auto-open an **HTML contact sheet**; the human selects by index. Selections persist in the project (`selections.yaml` / `casting.yaml` / `pose_picks.yaml` / `take_picks.yaml`), so the flow is non-blocking and resumable — this matters because generation is slow (keyframe ~30-60s, video 1-3 min). Re-running already-generated work is **free** (cache).
 
 ## Architecture (the parts that span files)

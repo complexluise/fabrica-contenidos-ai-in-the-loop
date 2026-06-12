@@ -396,6 +396,40 @@ def studio(
 
 
 @app.command()
+def costs(
+    days: int = typer.Option(None, "--days", help="Solo los ultimos N dias."),
+    project: str = typer.Option(None, "--project", help="Filtrar a un proyecto (slug)."),
+    db: Path = typer.Option(None, "--db", help="Ruta del libro mayor (default: out/telemetry.sqlite)."),
+):
+    """[L9 - D-079] Cuanto se ha gastado: total, por proyecto y por proveedor."""
+    from .telemetry import LEDGER_PATH, costs_summary
+
+    s = costs_summary(db or LEDGER_PATH, days=days, project=project)
+    scope = []
+    if days:
+        scope.append(f"ultimos {days} dias")
+    if project:
+        scope.append(f"proyecto {project}")
+    title = " - ".join(scope) if scope else "historico completo"
+    if not s["scenes"]:
+        console.print(f"[yellow]Sin registros[/] ({title}). El libro mayor arranca con el proximo run (D-079).")
+        return
+    console.print(f"[bold]Costos[/] ({title})  -  {s['runs']} runs, {s['scenes']} registros")
+    console.print(f"  [bold green]total: ${s['total_usd']:.3f}[/]")
+    b = s["breakdown"]
+    console.print(f"  video ${b['video_usd']:.3f} | keyframes ${b['keyframe_usd']:.3f}"
+                  f" | sfx ${b['sfx_usd']:.3f} | voz ${b['tts_usd']:.3f}")
+    if not project and s["by_project"]:
+        console.print("  por proyecto:")
+        for slug, usd in s["by_project"].items():
+            console.print(f"    {slug or '(sin proyecto)':<24} ${usd:.3f}")
+    if s["by_provider"]:
+        console.print("  por proveedor:")
+        for prov, usd in s["by_provider"].items():
+            console.print(f"    {prov:<24} ${usd:.3f}")
+
+
+@app.command()
 def export(
     project: str = typer.Argument(..., help="Slug del proyecto."),
     config_dir: Path = typer.Option(Path("config")),
