@@ -315,6 +315,8 @@ def render(
     ),
     profile: str = typer.Option(_DEFAULT_PROFILE, "--profile", help="Perfil de IA (D-052)."),
     voice: str = typer.Option(None, "--voice", help="Backend de voz: kokoro (default) o elevenlabs (D-058)."),
+    concurrency: int = typer.Option(1, "--concurrency", "-c",
+                                    help="Planos de video en paralelo (D-039/D-060). Default 1 = serial."),
     config_dir: Path = typer.Option(Path("config")),
     projects_dir: Path = typer.Option(Path("projects")),
 ):
@@ -329,7 +331,8 @@ def render(
         else:
             console.print(f"[bold]{project}[/] - render con keyframes elegidos - perfil {profile}...")
         _print_advisories(spec, cfg)  # D-057: visibilidad antes de gastar
-        run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides))
+        run, final, totals = asyncio.run(render_project(proj, spec, cfg, keyframe_overrides=overrides,
+                                                        concurrency=concurrency))
         actual = totals["total_cost_usd"]
         console.print(
             f"\n[bold green]Listo[/] {final}\n"

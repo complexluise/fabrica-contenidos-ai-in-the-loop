@@ -934,7 +934,9 @@ checkpoint **Animatic**: la película en stills antes de pagar video. Ver [D-060
   aterrizaje) — cierra el hallazgo del A/B. 🔬
 - [x] AC5 — Checkpoint `pipeline animatic <slug>`: hoja de contactos apertura→destino por plano,
   con las mismas cache keys del render.
-- [ ] AC6 — Smoke real (**pendiente por decisión del usuario**: no correr smoke en esta iteración).
+- [x] AC6 — Smoke real (run 20260611-191726): `animatic` generó 22 poses ($0.066) y el render las
+  reusó (cache hit total en Fase A); **11/11 clips, 0 fallos, $0.93, ~7 min con `--concurrency 4`**
+  (vs ~25 min secuencial en D-059). La bala DESTRIPARLOS persiste s1→s2 vía la cadena de stills. ✅
 
 ### Tasks (orden test-first)
 - [x] T6.26.1 — `tests/test_film_ribbon.py` reescrito (red): transition_in, start-pose prompt,
