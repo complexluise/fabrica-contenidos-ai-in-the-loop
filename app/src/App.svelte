@@ -6,7 +6,9 @@
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
-  import Picker from "./views/Picker.svelte";
+  import Casting from "./views/Casting.svelte";
+  import Encuadres from "./views/Encuadres.svelte";
+  import Animatic from "./views/Animatic.svelte";
   import Produccion from "./views/Produccion.svelte";
   import Ajustes from "./views/Ajustes.svelte";
 
@@ -179,8 +181,12 @@
       <Inicio />
     {:else if studio.tab === "storyboard"}
       <Storyboard slug={studio.slug} />
-    {:else if studio.tab === "elegir"}
-      <Picker slug={studio.slug} />
+    {:else if studio.tab === "casting"}
+      <Casting slug={studio.slug} />
+    {:else if studio.tab === "encuadres"}
+      <Encuadres slug={studio.slug} />
+    {:else if studio.tab === "animatic"}
+      <Animatic slug={studio.slug} />
     {:else if studio.tab === "producir"}
       <Produccion slug={studio.slug} />
     {/if}
