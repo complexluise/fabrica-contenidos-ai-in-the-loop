@@ -63,3 +63,5 @@ Thumbs.db
 # Bundle distribuible (scripts/build.py): dist/ y build/ son artefactos
 dist/
 build/
+# Espacio de trabajo de recortes (material generado, D-079 fix)
+_recut/
