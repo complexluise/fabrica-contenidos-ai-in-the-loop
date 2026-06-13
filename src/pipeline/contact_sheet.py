@@ -30,8 +30,14 @@ def build_contact_sheet(title: str, groups: dict[str, list[Path]]) -> str:
         + " ".join(f"{s}=N" for s in groups) + "</code></p>",
     ]
     for scene_id, candidates in groups.items():
+        # D-070: los planos cámara-actúa no tienen apertura (start=None) y un
+        # destino que falló también es None — no son rutas, se omiten (antes
+        # `Path(None)` tumbaba el job de animatic ENTERO por un still cosmético).
+        real = [p for p in candidates if p is not None]
+        if not real:
+            continue
         parts.append(f"<h2>{scene_id}</h2><div class='grid'>")
-        for idx, path in enumerate(candidates):
+        for idx, path in enumerate(real):
             p = Path(path)
             src = p.resolve().as_uri()
             parts.append(

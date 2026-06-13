@@ -772,8 +772,16 @@ async def animatic(project: Project, spec: ProjectSpec, cfg: Config,
 
     groups: dict[str, list[Path]] = {}
     for entry, b in zip(plan_ribbon(spec), boundaries):
-        if b is not None:
-            groups[f"{entry['shot_id']}  (apertura → destino)"] = [b["start"], b["destino"]]
+        if b is None:
+            continue
+        # D-070: cámara-actúa no tiene apertura (start=None); un destino que falló
+        # tambien es None. Solo van las poses REALES, con etiqueta honesta.
+        poses = [p for p in (b.get("start"), b.get("destino")) if p is not None]
+        if not poses:
+            continue
+        label = (f"{entry['shot_id']}  (apertura → destino)" if b.get("start")
+                 else f"{entry['shot_id']}  (destino)")
+        groups[label] = poses
     html = build_contact_sheet(
         f"Animatic · {spec.slug} — la película en poses, antes de pagar el video", groups)
     return write_and_open(html, project.dir / "animatic_review.html", open_browser=open_sheet)

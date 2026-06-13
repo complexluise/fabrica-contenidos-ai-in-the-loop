@@ -34,6 +34,19 @@ def test_contact_sheet_labels_indices():
     assert "s1=0" in html and "s1=1" in html
 
 
+def test_contact_sheet_skips_none_paths():
+    # D-070: cámara-actúa pasa start=None; antes Path(None) tumbaba el job entero.
+    html = build_contact_sheet("t", {"s1  (destino)": [None, Path("dest.png")]})
+    assert html.count("<img") == 1          # solo la pose real
+    assert "s1  (destino)=0" in html         # el índice cuenta solo las reales
+
+
+def test_contact_sheet_drops_group_with_only_none():
+    html = build_contact_sheet("t", {"s1": [None], "s2": [Path("ok.png")]})
+    assert "<h2>s1</h2>" not in html         # grupo sin poses reales: no se muestra
+    assert "<h2>s2</h2>" in html
+
+
 # --- parse de selecciones ---------------------------------------------------
 
 def test_parse_picks_single():
