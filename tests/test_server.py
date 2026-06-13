@@ -400,3 +400,63 @@ def test_discard_cast_candidate_422_when_no_candidates(tmp_path):
     _make_project(tmp_path)
     r = _client(tmp_path).delete("/api/projects/demo/cast-candidates/juan/0")
     assert r.status_code == 422
+
+
+# --- D-085: el prompt del personaje, visible y editable (patrón completo) --------
+
+def _make_cast_project(tmp_path, slug="cast"):
+    d = tmp_path / slug
+    d.mkdir()
+    (d / "project.yaml").write_text(
+        "project: " + slug + "\nstyle: lego\ntitle: Cast\n"
+        "characters:\n"
+        "  juan:\n"
+        "    design:\n"
+        "      prompt: hombre mayor\n"
+        "      physical: barba canosa\n"
+        "      palette: [azul, ocre]\n"
+        "scenes:\n"
+        "  - id: s1\n    prompt: x\n    duration_s: 4\n    characters: [juan]\n",
+        encoding="utf-8",
+    )
+    return d
+
+
+def test_project_detail_exposes_design_fields(tmp_path):
+    _make_cast_project(tmp_path)
+    chars = _client(tmp_path).get("/api/projects/cast").json()["characters"]
+    juan = next(c for c in chars if c["name"] == "juan")
+    assert juan["design_fields"]["prompt"] == "hombre mayor"
+    assert juan["design_fields"]["physical"] == "barba canosa"
+    assert juan["design_fields"]["palette"] == ["azul", "ocre"]
+    # `design` es el compuesto (preview de lo que se envía a la IA)
+    assert "hombre mayor" in juan["design"] and "barba canosa" in juan["design"]
+
+
+def test_update_character_persists_design(tmp_path):
+    _make_cast_project(tmp_path)
+    c = _client(tmp_path)
+    r = c.put("/api/projects/cast/characters/juan", json={
+        "prompt": "hombre joven", "physical": "pelo corto",
+        "wardrobe": "saco azul", "palette": ["rojo"], "expression": "serio"})
+    assert r.status_code == 200
+    assert "hombre joven" in r.json()["design"]
+    # persistió: el siguiente GET lo refleja
+    juan = next(ch for ch in c.get("/api/projects/cast").json()["characters"]
+                if ch["name"] == "juan")
+    assert juan["design_fields"]["prompt"] == "hombre joven"
+    assert juan["design_fields"]["wardrobe"] == "saco azul"
+    assert juan["design_fields"]["expression"] == "serio"
+
+
+def test_update_character_404_for_unknown(tmp_path):
+    _make_cast_project(tmp_path)
+    r = _client(tmp_path).put("/api/projects/cast/characters/fantasma",
+                              json={"prompt": "x"})
+    assert r.status_code == 404
+
+
+def test_update_character_422_without_prompt(tmp_path):
+    _make_cast_project(tmp_path)
+    r = _client(tmp_path).put("/api/projects/cast/characters/juan", json={"prompt": "  "})
+    assert r.status_code == 422

@@ -437,6 +437,16 @@ def create_app(projects_dir: Path = Path("projects"),
         characters = [{
             "name": name,
             "design": compose_character_prompt(ch.design) if ch.design else None,  # D-049/B2
+            # D-085: los campos del design viajan EDITABLES (el patrón completo del
+            # casting: ver y tocar el prompt, como Encuadres). `design` es el
+            # compuesto (preview de lo que se envía); `design_fields` son las palancas.
+            "design_fields": ({
+                "prompt": ch.design.prompt,
+                "physical": ch.design.physical,
+                "wardrobe": ch.design.wardrobe,
+                "palette": list(ch.design.palette),
+                "expression": ch.design.expression,
+            } if ch.design else None),
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
         music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
@@ -445,6 +455,46 @@ def create_app(projects_dir: Path = Path("projects"),
                 "storyboard_backend": spec.storyboard_backend,  # D-053
                 "voice_backend": spec.voice_backend,            # D-058
                 "characters": characters, "scenes": scenes}
+
+    @app.put("/api/projects/{slug}/characters/{name}")
+    def update_character(slug: str, name: str, body: dict):
+        """[D-085] Guarda el design EDITADO de un personaje (el patrón completo del
+        casting). Campos: prompt (base), physical, wardrobe, palette (lista),
+        expression. La cara se regenera al pedir variantes (el compuesto entra al
+        cache key). No toca casting.yaml: la elección vigente sigue hasta regenerar."""
+        from ..prompt_compile import compose_character_prompt
+        from ..project import CharacterDesign, load_project_spec, write_spec
+
+        project = safe_project(slug)
+        if not project.spec_path.exists():
+            raise HTTPException(404, f"Proyecto '{slug}' no existe.")
+        spec = load_project_spec(project.spec_path)
+        ch = spec.characters.get(name)
+        if ch is None:
+            raise HTTPException(404, f"Personaje '{name}' no encontrado.")
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(422, "El personaje necesita un prompt base.")
+        palette = body.get("palette") or []
+        if isinstance(palette, str):  # tolerar "cyan, ámbar" además de lista
+            palette = [p.strip() for p in palette.split(",") if p.strip()]
+        try:
+            ch.design = CharacterDesign(
+                prompt=prompt,
+                refs=(ch.design.refs if ch.design else []),  # las refs no se editan acá
+                physical=(body.get("physical") or "").strip() or None,
+                wardrobe=(body.get("wardrobe") or "").strip() or None,
+                palette=list(palette),
+                expression=(body.get("expression") or "").strip() or None,
+            )
+        except Exception as exc:  # noqa: BLE001 — validación -> 422 legible
+            raise HTTPException(422, f"Design inválido: {exc}")
+        write_spec(spec, project.spec_path)
+        return {"name": name, "design": compose_character_prompt(ch.design),
+                "design_fields": {
+                    "prompt": ch.design.prompt, "physical": ch.design.physical,
+                    "wardrobe": ch.design.wardrobe, "palette": list(ch.design.palette),
+                    "expression": ch.design.expression}}
 
     @app.post("/api/projects/{slug}/prompts/compile")
     async def compile_prompts(slug: str, body: CompileBody | None = None):
