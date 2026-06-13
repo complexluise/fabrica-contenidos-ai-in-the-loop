@@ -14,7 +14,10 @@ from pipeline.server.app import create_app  # noqa: E402
 
 
 def _client(tmp_path) -> TestClient:
-    return TestClient(create_app(projects_dir=tmp_path, config_dir=Path("config")))
+    # db_path apunta a un SQLite temporal para que los tests no toquen
+    # out/telemetry.sqlite (el libro mayor global de produccion).
+    return TestClient(create_app(projects_dir=tmp_path, config_dir=Path("config"),
+                                 db_path=tmp_path / "test_jobs.sqlite"))
 
 
 def test_health(tmp_path):
@@ -460,3 +463,99 @@ def test_update_character_422_without_prompt(tmp_path):
     _make_cast_project(tmp_path)
     r = _client(tmp_path).put("/api/projects/cast/characters/juan", json={"prompt": "  "})
     assert r.status_code == 422
+
+
+# --- Ciclo 1: persistencia de jobs — endpoints (GET /api/jobs, /history, /{id}) ---
+
+def test_list_jobs_returns_only_active(tmp_path, monkeypatch):
+    """GET /api/jobs devuelve SOLO los jobs activos (no los terminados).
+
+    El dock del sidebar pollea cada 3s; devolver el historico lo arruinaria.
+    """
+    import threading
+
+    from pipeline import author
+
+    gate = threading.Event()
+    draft = author.ProjectDraft(
+        title="X", scenes=[author.Scene(id="s1", prompt="a", duration_s=4)])
+
+    def slow_draft(text):
+        gate.wait(timeout=5)
+        return draft
+
+    monkeypatch.setattr(author, "draft_project", slow_draft)
+    c = _client(tmp_path)
+    try:
+        job = c.post("/api/projects/import", json={"text": "hola"}).json()
+        # Job activo: debe aparecer en /api/jobs
+        active = c.get("/api/jobs").json()
+        assert any(j["id"] == job["id"] for j in active)
+        # Solo activos: ninguno de los que estan en lista esta done/failed
+        assert all(j["status"] in ("queued", "running") for j in active)
+    finally:
+        gate.set()
+
+
+def test_jobs_history_endpoint(tmp_path, monkeypatch):
+    """GET /api/jobs/history devuelve jobs terminados del SQLite."""
+    from pipeline import author
+
+    draft = author.ProjectDraft(
+        title="X", scenes=[author.Scene(id="s1", prompt="a", duration_s=4)])
+    monkeypatch.setattr(author, "draft_project", lambda text: draft)
+    c = _client(tmp_path)
+
+    # Crear y completar un job via el endpoint de import
+    job = c.post("/api/projects/import", json={"text": "hola"}).json()
+    # Consumir el stream para que el job termine
+    c.get(f"/api/jobs/{job['id']}/stream").text
+
+    # Debe aparecer en history
+    history = c.get("/api/jobs/history").json()
+    assert isinstance(history, list)
+    ids = [h["id"] for h in history]
+    assert job["id"] in ids
+    # El job terminado tiene status done o failed
+    entry = next(h for h in history if h["id"] == job["id"])
+    assert entry["status"] in ("done", "failed")
+
+
+def test_jobs_history_pagination(tmp_path):
+    """GET /api/jobs/history?limit=&offset= pagina correctamente."""
+    c = _client(tmp_path)
+    r = c.get("/api/jobs/history?limit=10&offset=0")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_job_detail_fallback_to_sqlite(tmp_path, monkeypatch):
+    """GET /api/jobs/{id} cae a SQLite para jobs terminados que ya no estan en memoria.
+
+    Simula el caso post-reinicio: el job esta en SQLite (done) pero no en memoria.
+    """
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "test_jobs.sqlite"
+    # Pre-insertar un job terminado directamente en el store (simula proceso anterior)
+    store = JobStore(db)
+    store.insert_job("histjob1", "render", "demo")
+    store.set_running("histjob1")
+    store.set_done("histjob1", {"run_id": "r99"}, log_tail=["ultima linea"])
+    store.close()
+
+    # El JobManager hace el barrido al boot pero ese job ya era done -> intacto
+    c = _client(tmp_path)
+    r = c.get("/api/jobs/histjob1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "histjob1"
+    assert body["status"] == "done"
+    assert body["result"]["run_id"] == "r99"
+    assert "ultima linea" in body["logs"]
+
+
+def test_job_detail_unknown_returns_404(tmp_path):
+    """GET /api/jobs/{id} devuelve 404 si el job no existe ni en memoria ni en SQLite."""
+    r = _client(tmp_path).get("/api/jobs/nonexistent123")
+    assert r.status_code == 404

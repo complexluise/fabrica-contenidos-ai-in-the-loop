@@ -6,6 +6,18 @@ se transmite en vivo por SSE. Sin broker: single-user local.
 
 `Job` y las transiciones de estado son lógica pura (core testeable); el `run`/
 `stream` async se valida con smoke.
+
+Persistencia (Ciclo 1 — historia en SQLite):
+  - `JobManager` acepta un `db_path` opcional (por defecto LEDGER_PATH de
+    telemetry.py). En __init__ crea el `JobStore` y barre los jobs
+    queued/running de procesos anteriores (barrido al boot, critico: sin esto
+    el guard 409 / `find_active` bloquearia para siempre re-disparar ese
+    kind+proyecto).
+  - El dict `_jobs` EN MEMORIA sigue siendo la verdad de lo VIVO (el SSE y
+    los watchers dependen de el). SQLite es la verdad durable del historial.
+  - Transiciones que persisten: create (queued), set_status (running/done/failed).
+  - El log completo NO va en SQLite (puede ser MB). Se guarda el tail al
+    terminar via `job_store.set_done` / `set_failed`.
 """
 
 from __future__ import annotations
@@ -15,7 +27,11 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Awaitable
+
+from ..telemetry import LEDGER_PATH
+from .job_store import JobStore
 
 _PKG_LOGGER = "pipeline"
 
@@ -72,18 +88,34 @@ class _JobLogHandler(logging.Handler):
 
 
 class JobManager:
-    """Registro de jobs en memoria + ejecución async con captura de logs."""
+    """Registro de jobs en memoria + ejecución async con captura de logs.
 
-    def __init__(self):
+    La memoria es la verdad de lo VIVO (SSE/watchers). SQLite (JobStore)
+    es la verdad durable del historial.
+    """
+
+    def __init__(self, db_path: Path = LEDGER_PATH):
         self._jobs: dict[str, Job] = {}
         # T2.6.23: un Event POR CONSUMIDOR del stream. Con uno compartido, dos
         # SSE del mismo job se robaban el despertar (clear ajeno -> cuelgue).
         self._watchers: dict[str, list[asyncio.Event]] = {}
 
+        # Persistencia: abre el store y barre los jobs huerfanos del proceso
+        # anterior ANTES de que lleguen requests (barrido al boot critico).
+        self._store = JobStore(db_path)
+        swept = self._store.sweep_interrupted()
+        if swept:
+            logging.getLogger(_PKG_LOGGER).info(
+                "JobManager boot: %d job(s) interrumpidos marcados como failed: %s",
+                len(swept), swept,
+            )
+
     # --- registro (lógica pura) -------------------------------------------
     def create(self, kind: str, project: str) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project)
         self._jobs[job.id] = job
+        # Persistir transicion "queued"
+        self._store.insert_job(job.id, kind, project)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -116,10 +148,33 @@ class JobManager:
         if error is not None:
             job.error = error
         self._wake(job_id)
+        # Persistir la transicion en SQLite
+        self._persist_transition(job)
+
+    def _persist_transition(self, job: Job) -> None:
+        """Escribe la transicion de estado en el JobStore."""
+        if job.status == JobStatus.RUNNING:
+            self._store.set_running(job.id)
+        elif job.status == JobStatus.DONE:
+            self._store.set_done(job.id, job.result, log_tail=job.logs)
+        elif job.status == JobStatus.FAILED:
+            self._store.set_failed(job.id, job.error or "", log_tail=job.logs)
+        # QUEUED ya se persiste en create(); los demas no necesitan re-persistir
 
     def _wake(self, job_id: str) -> None:
         for ev in self._watchers.get(job_id, []):
             ev.set()
+
+    # --- consulta historica (SQLite) --------------------------------------
+
+    def get_from_store(self, job_id: str) -> dict | None:
+        """Busca un job en SQLite (para jobs terminados que ya no estan en memoria)."""
+        return self._store.get_job(job_id)
+
+    def list_history(self, limit: int = 50, offset: int = 0,
+                     since: float | None = None) -> list[dict]:
+        """Jobs terminados del historial SQLite, mas nuevos primero."""
+        return self._store.list_history(limit=limit, offset=offset, since=since)
 
     # --- ejecución (async, smoke) -----------------------------------------
     async def run(self, job: Job, coro: Awaitable) -> None:

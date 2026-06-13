@@ -119,11 +119,21 @@ def _unique_slug(base: str, projects_dir: Path) -> str:
 
 
 def create_app(projects_dir: Path = Path("projects"),
-               config_dir: Path = Path("config")) -> FastAPI:
+               config_dir: Path = Path("config"),
+               db_path: Path | None = None) -> FastAPI:
+    """Crea la aplicacion FastAPI del Studio.
+
+    `db_path` permite inyectar una base SQLite alternativa (para tests) en
+    vez de la base global `out/telemetry.sqlite`. Si es None usa el default
+    de telemetry (LEDGER_PATH).
+    """
+    from ..telemetry import LEDGER_PATH
+
     projects_dir = Path(projects_dir)
     config_dir = Path(config_dir)
     app = FastAPI(title="Video Studio (local)")
-    jobs = JobManager()
+    _db = Path(db_path) if db_path is not None else LEDGER_PATH
+    jobs = JobManager(db_path=_db)
 
     @app.exception_handler(JobConflictError)
     async def _job_conflict(_request, exc: JobConflictError):
@@ -965,19 +975,54 @@ def create_app(projects_dir: Path = Path("projects"),
     # --- jobs: estado + stream -------------------------------------------
     @app.get("/api/jobs")
     def list_jobs():
-        return [j.to_dict() for j in jobs.list()]
+        """Devuelve SOLO los jobs activos (queued/running) en memoria.
+
+        El dock del sidebar (D-083) pollea cada 3s y mostrar cientos de
+        filas historicas lo arruinaria. El historial paginado esta en
+        GET /api/jobs/history.
+        """
+        return [j.to_dict() for j in jobs.list() if not j.done]
+
+    @app.get("/api/jobs/history")
+    def list_jobs_history(limit: int = 50, offset: int = 0,
+                          since: float | None = None):
+        """Jobs terminados (done/failed) del historial SQLite, mas nuevos primero.
+
+        Paginado con `limit`/`offset`. `since` (Unix timestamp) filtra solo
+        los terminados despues de ese momento — util para actualizaciones
+        incrementales desde la UI. Lee de SQLite, no de memoria.
+        """
+        return jobs.list_history(limit=limit, offset=offset, since=since)
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str):
+        """Detalle de un job. Si ya no esta en memoria (termino, el server
+        reinicio), cae a SQLite para que el historial sea navegable."""
         job = jobs.get(job_id)
-        if job is None:
+        if job is not None:
+            # Job vivo o reciente en memoria: devuelve log completo
+            return {**job.to_dict(), "logs": job.logs}
+        # Job terminado: buscar en SQLite (historial)
+        row = jobs.get_from_store(job_id)
+        if row is None:
             raise HTTPException(404, "Job desconocido.")
-        return {**job.to_dict(), "logs": job.logs}
+        # log_tail son las ultimas LOG_TAIL_LINES lineas persistidas al terminar
+        return {
+            "id": row["id"], "kind": row["kind"], "project": row["project"],
+            "status": row["status"], "result": row.get("result"),
+            "error": row.get("error"),
+            "log_lines": len(row.get("log_tail") or []),
+            "logs": row.get("log_tail") or [],
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "ended_at": row.get("ended_at"),
+        }
 
     @app.get("/api/jobs/{job_id}/stream")
     async def job_stream(job_id: str):
+        # Solo streamea jobs vivos en memoria; los terminados no tienen SSE abierto.
         if jobs.get(job_id) is None:
-            raise HTTPException(404, "Job desconocido.")
+            raise HTTPException(404, "Job desconocido o ya terminado.")
 
         async def gen():
             async for line in jobs.stream(job_id):

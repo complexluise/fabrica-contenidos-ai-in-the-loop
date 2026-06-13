@@ -206,6 +206,10 @@ def costs_summary(db_path: Path = LEDGER_PATH, days: int | None = None,
     conn = sqlite3.connect(db_path)
     try:
         _migrate(conn)  # ledgers pre-D-079: las filas viejas cuentan (project='')
+        # Defensivo: la base puede existir (creada por JobStore) sin scene_runs todavia.
+        tables = {row[1] for row in conn.execute("PRAGMA table_info(scene_runs)")}
+        if not tables:
+            return empty
         rows = conn.execute(query, params).fetchall()
     finally:
         conn.close()

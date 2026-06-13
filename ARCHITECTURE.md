@@ -264,7 +264,7 @@ trade-offs):
 | L5 Estrategias | Router / Cascade / Ensemble (híbrido por YAML) | [D-006](docs/decisiones/0001-0010.md) |
 | L6 Quality Gate | VLM-judge → señales enchufables + fusión | [D-007](docs/decisiones/0001-0010.md), [D-016](docs/decisiones/0011-0020.md) |
 | L7/L8 Post | ffmpeg | [D-008](docs/decisiones/0001-0010.md) |
-| L9 Estado/cola | SQLite+asyncio → Temporal+Postgres | [D-009](docs/decisiones/0001-0010.md) |
+| L9 Estado/cola | SQLite+asyncio (jobs ya persisten, D-090) → Temporal+Postgres | [D-009](docs/decisiones/0001-0010.md), [D-090](docs/decisiones/0081-0090.md) |
 | Modelo de proyecto | Spec + caché content-addressed + runs | [D-013](docs/decisiones/0011-0020.md)…[D-015](docs/decisiones/0011-0020.md) |
 | Filosofía de deps | APIs antes que libs pesadas | [D-017](docs/decisiones/0011-0020.md) |
 | Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](docs/decisiones/0011-0020.md) |
@@ -478,6 +478,18 @@ projects/<slug>/
     final_9x16.mp4
 ```
 
+> **Historia de jobs durable (server, [D-090]).** El run_report por corrida sigue siendo el
+> manifiesto inmutable; aparte, el Studio guarda la **historia de JOBS** (los procesos de
+> generación que dispara la UI) en la **misma** base global `out/telemetry.sqlite` que el libro
+> de costos ([D-079]), en tablas propias `jobs` + `job_events` (event-source liviano). Esto NO
+> contradice [D-032] (el ESTADO del proyecto sigue derivado del disco): los jobs ganan una
+> dimensión que el disco de proyecto nunca capturó — cuándo corriste qué, cuánto tardó, por qué
+> falló. Contrato del server: `GET /api/jobs` = solo **activos** (queued+running, desde memoria;
+> el dock de [D-083] lo pollea); `GET /api/jobs/history` = **historial** paginado (SQLite);
+> `GET /api/jobs/{id}` cae a SQLite para jobs terminados. El `JobManager` (dict en memoria) es la
+> verdad de lo VIVO; SQLite, la verdad durable. Al boot, los jobs huérfanos queued/running de un
+> proceso anterior se marcan `failed` (evita el deadlock del guard 409, [D-082]).
+
 ### 7.4 Modelo de datos (`project.py`)
 
 - `Project` — resuelve `project.yaml`, conoce sus paths de `cache/` y `runs/`, su estilo único.
@@ -543,6 +555,9 @@ video_gen_pipeline/
 │  ├─ runner.py             # orquesta una corrida (keyframe→video→gate→ensamblaje)
 │  ├─ studio.py             # modo interactivo: cast / pick-cast / keyframes / pick / render
 │  ├─ contact_sheet.py      # hoja de contactos HTML (elegir candidatos)
+│  ├─ server/               # Studio local (FastAPI, [D-031]): app.py (endpoints), jobs.py
+│  │                        #   (JobManager: dict en memoria = verdad de lo VIVO),
+│  │                        #   job_store.py (SQLite: historia durable de jobs, [D-090])
 │  └─ cli.py
 ├─ skills/<nombre>/SKILL.md # capa de discoverability para agentes ([D-023]); apunta al CLI
 ├─ briefs/example.yaml      # modo --brief (smoke suelto)

@@ -115,3 +115,23 @@ es continua entre archivos.
 | D-072 | El dialecto de movimiento: `shot.motion`, prompt de video motion-only, negative de tiempo, cfg | Vigente |
 | D-073 | La capa de finishing: el "film stock" en ffmpeg (grade+grano+loudnorm), $0/corrida | Vigente |
 | D-074 | La economía de tomas: N takes + ranking del gate + pick humano + stills Ken Burns | Vigente |
+| D-075 | ShotJob: el contrato del plano + un solo pipeline | Vigente |
+| D-076 | Disciplina de costo: un default, gate async, modelo por perfil, contabilidad honesta | Vigente |
+| D-077 | Fronteras honestas: nombres públicos, disciplina de cache y guard de slug | Vigente |
+| D-078 | El recorrido de ejecución: la voz no estira el film y los checkpoints ven lo que compra el render | Vigente |
+| D-079 | El libro mayor de costos: telemetría global, no por run | Vigente |
+| D-080 | La superficie se sincroniza con el motor: muere "elegir", mueren las poses fantasma | Vigente |
+
+### [0081-0090.md](0081-0090.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-081 | El frontend se vuelve Svelte de verdad: mutación directa, remount por key, verdad compartida | Vigente |
+| D-082 | Hardening post-auditoría: contrato UI↔server honesto, sin doble gasto, firma no se borra en silencio | Vigente |
+| D-083 | El dashboard de jobs: un dock siempre visible, no una pantalla aparte | Vigente |
+| D-084 | El casting hereda el patrón fluido de los encuadres (variantes, ajuste, subir, descartar) | Vigente |
+| D-085 | El casting completa el patrón: el prompt del personaje, visible y editable | Vigente |
+| D-086 | El Storyboard es el centro: las mesas lo nutren, todo se valida ahí | Vigente |
+| D-087 | El player como proyección del guion (en el Storyboard) + el sidebar como árbol | Vigente |
+| D-088 | Arquitectura de documentos: una pregunta por archivo, índice que no miente | Vigente |
+| D-089 | Orquestación multi-agente: PO humano + architect / coder / verifier | Vigente |
+| D-090 | Los jobs ganan historia: persistencia en SQLite (event-source liviano), barrido al boot | Vigente |

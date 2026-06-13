@@ -60,7 +60,12 @@ hardening post-auditoría. Detalle completo en
 
 - [ ] Planos **concurrentes dentro de un render** (toca `run_project`: `gather` con cap).
 - [ ] Envoltorio **desktop** (Tauri) para un ícono clickeable, si se quiere.
-- [ ] Reanudar jobs tras reinicio (persistir estado; hoy en memoria, el caché hace barato re-disparar).
+- [~] Reanudar jobs tras reinicio. **Parcial** ([D-090], 2026-06-13): los jobs ya **persisten** en
+  SQLite (`out/telemetry.sqlite`, tablas `jobs`/`job_events`) y el historial sobrevive al reinicio;
+  al boot, los huérfanos queued/running se marcan `failed` (rompe el deadlock del guard 409). Falta lo
+  de **reanudar** el trabajo interrumpido en sí (hoy se marca failed, no se retoma; el caché hace
+  barato re-disparar). Es el **Ciclo 1 de 3** (persistencia); faltan el semáforo (Ciclo 2, Fase 3
+  AC1/T3.1) y la pantalla+sidebar de historial (Ciclo 3).
 
 ---
 
