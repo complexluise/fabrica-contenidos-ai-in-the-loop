@@ -3,10 +3,11 @@
   // de pagar video. Cada plano = apertura → destino; el render interpola entre
   // ellas (en paralelo). Curación por excepción: todo viene propuesto; regenerás
   // solo la pose que no convence.
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { get, post, del, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
   import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
+  import FilmPlayer from "../components/FilmPlayer.svelte";
   import Progress from "../components/Progress.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
 
@@ -94,38 +95,17 @@
     } catch (e) { err = humanError(e); }
   }
 
-  // D-062: ▶ reproducir el animatic — las poses en secuencia con sus duraciones.
+  // [D-087] ▶ reproducir las poses — ahora vía el FilmPlayer compartido (mismo
+  // player que el Storyboard, con el fix de "falta pose"). Acá sin diálogo: es
+  // revisión de poses, no proyección del guion.
   let playing = $state(false);
-  let playIdx = $state(0);
-  let playPose = $state("start"); // "start" | "destino" dentro del plano
-  let playTimer = null;
-  function stopPlay() { playing = false; if (playTimer) clearTimeout(playTimer); playTimer = null; }
-  onDestroy(stopPlay);  // T2.6.17: navegar con el player abierto no deja timers vivos
-  function play() {
-    if (!strip.length) return;
-    playing = true; playIdx = 0; playPose = "start";
-    stepPlay();
-  }
-  function stepPlay() {
-    const e = strip[playIdx];
-    if (!e) { stopPlay(); return; }
-    const dur = Math.max(1, e.duration_s || 2) * 1000;
-    if (playPose === "start") {
-      // apertura ~40% del plano, destino el resto (el clip ATERRIZA en el destino)
-      playTimer = setTimeout(() => { playPose = "destino"; stepPlay(); }, dur * 0.4);
-    } else {
-      playTimer = setTimeout(() => {
-        if (playIdx + 1 < strip.length) { playIdx += 1; playPose = "start"; stepPlay(); }
-        else stopPlay();
-      }, dur * 0.6);
-    }
-  }
-  let playerShot = $derived(strip[playIdx] ?? null);
-  let playerImg = $derived(playerShot ? (playPose === "start" ? playerShot.start : playerShot.destino) : null);
+  let playerFrames = $derived((strip || []).map((e) => ({
+    shot_id: e.shot_id,
+    sceneLabel: e.scene + (e.beat ? ` · ${e.beat}` : ""),
+    start: e.start, destino: e.destino, lands: e.lands,
+    duration_s: e.duration_s, intention: e.intention || "", action: "", line: "", caption: "",
+  })));
 </script>
-
-<!-- T2.6.18: Escape cierra el player desde cualquier foco -->
-<svelte:window onkeydown={(e) => { if (e.key === "Escape" && playing) stopPlay(); }} />
 
 <ViewHeader eyebrow="Paso 5 · vos decidís" title="Animatic">
   <span title={GLOSARIO.animatic}>La película completa en poses</span>, <b class="r">antes</b> de pagar
@@ -164,7 +144,7 @@
       {/if}
     </div>
     <div class="gen-controls">
-      <button class="ghost" onclick={play} disabled={playing || !strip.length}
+      <button class="ghost" onclick={() => (playing = true)} disabled={playing || !strip.length}
               title="Las poses en secuencia con sus duraciones: el ritmo de la película, gratis">
         ▶ Reproducir
       </button>
@@ -174,20 +154,7 @@
     </div>
   </div>
 
-  {#if playing && playerShot}
-    <div class="player" onclick={stopPlay} role="button" tabindex="0"
-         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stopPlay(); } }}>
-      {#if playerImg}
-        <img src={playerImg} alt={playerShot.shot_id} />
-      {:else}
-        <div class="player-hole">pose faltante</div>
-      {/if}
-      <div class="player-bar">
-        <span class="mono">{playerShot.shot_id} · {playPose} · {playerShot.duration_s}s</span>
-        <span class="muted">plano {playIdx + 1}/{strip.length} — clic para parar</span>
-      </div>
-    </div>
-  {/if}
+  {#if playing}<FilmPlayer frames={playerFrames} onclose={() => (playing = false)} />{/if}
 
   {#if gen.busy}<Progress text={gen.progress || "Generando las poses que faltan…"} />{/if}
   {#if err || gen.err || variants.err}<p class="error">{err || gen.err || variants.err}</p>{/if}
@@ -332,16 +299,7 @@
   .billing { color: var(--ink-2); }
   .billing .waste { color: var(--warn-deep, #9a6b00); font-size: 11.5px; }
 
-  /* D-062: ▶ reproductor del animatic (poses en secuencia) */
-  .player {
-    position: fixed; inset: 0; z-index: 50; background: rgba(15, 12, 9, 0.92);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 14px; cursor: pointer;
-  }
-  .player img { max-height: 78vh; max-width: 92vw; border-radius: var(--r); box-shadow: 0 12px 60px rgba(0,0,0,0.6); }
-  .player-hole { color: #999; font-size: 14px; }
-  .player-bar { display: flex; gap: 16px; color: #ddd; font-size: 13px; }
-  .player-bar .mono { font-family: var(--font-mono); }
+  /* D-087: el ▶ reproductor vive ahora en components/FilmPlayer.svelte */
 
   /* D-063: variantes por pose (best-of-N) */
   .vary {

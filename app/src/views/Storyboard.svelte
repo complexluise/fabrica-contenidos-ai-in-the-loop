@@ -3,6 +3,7 @@
   import { get, post, put, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus, nextStep } from "../lib/studio.svelte.js";
   import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
+  import FilmPlayer from "../components/FilmPlayer.svelte";
 
   let { slug } = $props();
   let doc   = $state(null);
@@ -126,6 +127,29 @@
     const ps = scenePoses(sceneId);
     return { ready: ps.filter((p) => p.url).length, total: ps.length };
   }
+
+  // [D-087] ▶ Reproducir el plan: la película en stills CON su narrativa. Cruza
+  // el strip del animatic (poses, en orden de cinta) con doc (diálogo/vo/caption).
+  let playing = $state(false);
+  function sceneOf(id) { return doc?.scenes.find((s) => s.id === id) || null; }
+  function shotIdxOf(shotId) {
+    const m = String(shotId).match(/\.(\d+)$/);
+    return m ? parseInt(m[1], 10) - 1 : 0;  // "s3"->0, "s3.2"->1, "s3.3"->2
+  }
+  let playerFrames = $derived((strip || []).map((e) => {
+    const sc = sceneOf(e.scene);
+    const sh = sc?.shots?.[shotIdxOf(e.shot_id)] || {};
+    return {
+      shot_id: e.shot_id,
+      sceneLabel: e.scene + (e.beat ? ` · ${e.beat}` : ""),
+      start: e.start, destino: e.destino, lands: e.lands,
+      duration_s: e.duration_s,
+      action: sh.action || "",
+      intention: e.intention || sh.intention || "",
+      line: sh.voiceover || sc?.dialogue || "",
+      caption: sh.caption || "",
+    };
+  }));
 
   const touch = () => { dirty = true; msg = ""; };
   const sceneDur = (s) => s.shots.reduce((a, sh) => a + (Number(sh.duration_s) || 0), 0);
@@ -309,6 +333,7 @@
 {#if error && !doc}
   <p class="error">{error}</p>
 {:else if doc}
+  {#if playing}<FilmPlayer frames={playerFrames} onclose={() => (playing = false)} />{/if}
   <header class="head">
     <div class="eyebrow">Paso 2 · vos decidís</div>
     <input class="title-in" bind:value={doc.title} oninput={touch} placeholder="Título del proyecto" />
@@ -318,6 +343,13 @@
       <span class="pill">{doc.scenes.length} escena{doc.scenes.length === 1 ? "" : "s"}</span>
       {#if signed && !dirty}<span class="pill ok">✓ firmado</span>
       {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
+      <!-- D-087: la película en stills CON su narrativa — la vista temporal del plan -->
+      {#if playerFrames.length}
+        <button class="play-plan" onclick={() => (playing = true)}
+                title="Ver la película en stills, plano por plano, con lo que pasa en cada uno">
+          ▶ Reproducir el plan
+        </button>
+      {/if}
     </div>
     {#if backends.length > 1}
       <div class="backend-row">
@@ -806,7 +838,14 @@
   .title-in:hover { border-bottom-color: var(--line); }
   .title-in:focus { border-bottom-color: var(--red); outline: none; box-shadow: none; }
   .lede { font-size: 15px; margin: 6px 0 10px; }
-  .meta { display: flex; gap: 7px; }
+  .meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  /* D-087: ▶ Reproducir el plan */
+  .play-plan {
+    margin-left: 4px; font-size: 12.5px; font-weight: 700; padding: 3px 12px;
+    border-radius: 999px; border: 1.5px solid var(--red); color: var(--red-deep);
+    background: var(--red-wash); box-shadow: none;
+  }
+  .play-plan:hover { background: var(--red); color: #fff; box-shadow: none; }
 
   /* D-053: selector de backend del storyboard */
   .backend-row {
