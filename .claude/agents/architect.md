@@ -1,5 +1,5 @@
 ---
-name: software-architect
+name: architect
 description: >-
   Guardián de la coherencia entre la documentación y el código. Úsalo para
   auditar que el código refleje PRD/ARCHITECTURE/ROADMAP/ADRs (y viceversa),

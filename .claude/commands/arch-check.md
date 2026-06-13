@@ -2,7 +2,7 @@
 description: El architect audita la coherencia docs<->código y propone fixes (solo docs + recomendaciones).
 ---
 
-Despachá al subagente `software-architect` para una auditoría de coherencia
+Despachá al subagente `architect` para una auditoría de coherencia
 **documentación ↔ código**.
 
 Alcance: $ARGUMENTS

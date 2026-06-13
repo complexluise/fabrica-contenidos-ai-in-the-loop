@@ -10,7 +10,7 @@ sus resultados y le reportás al PO. **No commitees** — el commit lo decide el
 Pasos:
 
 1. **Encuadre (architect, opcional pero recomendado si la tarea toca diseño/contratos):**
-   Usá el subagente `software-architect` para confirmar que la tarea encaja con
+   Usá el subagente `architect` para confirmar que la tarea encaja con
    PRD/ARCHITECTURE y para detectar si hace falta un ADR. Si es un cambio trivial,
    saltealo y decilo.
 
@@ -26,7 +26,7 @@ Pasos:
    los pendientes sean opcionales/bajos que el PO pueda aceptar).
 
 5. **Sincronía de docs (architect):** una vez que el código pasa, usá el
-   `software-architect` para que actualice ROADMAP (AC), proponga/escriba el ADR si
+   `architect` para que actualice ROADMAP (AC), proponga/escriba el ADR si
    corresponde, y confirme que los docs reflejan el cambio.
 
 6. **Reporte al PO:** resumí en tu mensaje final qué se hizo, el veredicto del verifier,
