@@ -140,7 +140,6 @@
         class:feeder={isFeeder}
         onclick={() => goTo(s.id)}
       >
-        {#if !isFeeder && s.id !== "inicio"}<span class="rail"></span>{/if}
         {#if isFeeder}
           <span class="feeder-mark" class:done={state === "done"}></span>
         {:else}
@@ -305,7 +304,24 @@
   .pm-err { font-size: 11.5px; color: var(--red-deep); }
 
   /* --- la espina del bucle --- */
-  .spine { display: flex; flex-direction: column; }
+  /* Una sola guia vertical continua a x=24px (centro exacto de StageNode).
+     Antes habia dos lineas: .rail (left:27px) y .feeders::before (left:23px)
+     que generaban una "barra doble". Ahora es un unico ::before en .spine. */
+  .spine {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .spine::before {
+    content: "";
+    position: absolute;
+    left: 24px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--line-2);
+    pointer-events: none;
+  }
   .step {
     position: relative;
     display: flex;
@@ -322,28 +338,12 @@
   .step:hover { background: rgba(33, 28, 22, 0.05); box-shadow: none; }
   .step.active { background: var(--card); box-shadow: var(--shadow); }
 
-  /* riel vertical que conecta los nodos (el "bucle") */
-  .rail {
-    position: absolute;
-    left: 27px;
-    top: -10px;
-    width: 2px;
-    height: 18px;
-    background: var(--line-2);
-  }
-
-  /* D-087: las mesas que nutren el Storyboard — ÁRBOL limpio: una línea guía
-     vertical (alineada con el centro de los nodos, ~24px) y los dots colgando
-     de ella. Reemplaza el bracket flotante de D-086. */
-  .feeders { position: relative; }
-  .feeders::before {
-    content: ""; position: absolute; left: 23px; top: -10px; bottom: -12px;
-    width: 2px; background: var(--line-2);
-  }
+  /* D-087: las mesas que nutren el Storyboard — cuelgan de la misma guia de .spine. */
   .feeders-cap {
     display: block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
     text-transform: uppercase; color: var(--ink-soft); padding: 6px 0 4px 44px;
   }
+  /* feeder: padding-left=18px + feeder-mark radio=5.5px => centro en 23.5px (~24px) */
   .step.feeder { padding-left: 18px; gap: 14px; }
   .step.feeder .lbl { font-size: 13px; font-weight: 600; }
   .step.feeder .sub { font-size: 10.5px; }
