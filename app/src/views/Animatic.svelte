@@ -139,7 +139,7 @@
     <div class="gen-l">
       <div class="eyebrow" style="color:var(--blue-deep)">La IA propone</div>
       <p class="muted gen-help">
-        {data.ready}/{data.total} planos con sus dos poses ·
+        {data.ready}/{data.total} planos con su pose lista{data.missing_poses > 0 ? ` · ${data.missing_poses} sin generar` : ""} ·
         {totalDur.toFixed(0)}s de película en {scenes.length} escena{scenes.length === 1 ? "" : "s"}.
       </p>
       <p class="est-line">
