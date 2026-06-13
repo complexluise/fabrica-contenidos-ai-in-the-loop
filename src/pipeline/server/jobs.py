@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Awaitable
 
 from ..telemetry import LEDGER_PATH
-from .job_store import JobStore
+from .job_store import JobStore, determine_scope
 
 _PKG_LOGGER = "pipeline"
 
@@ -69,6 +69,7 @@ class Job:
     logs: list[str] = field(default_factory=list)
     result: dict | None = None
     error: str | None = None
+    scope: str = "batch"  # 'batch' | 'item' (D-093)
 
     @property
     def done(self) -> bool:
@@ -78,7 +79,7 @@ class Job:
         return {
             "id": self.id, "kind": self.kind, "project": self.project,
             "status": self.status.value, "result": self.result, "error": self.error,
-            "log_lines": len(self.logs),
+            "log_lines": len(self.logs), "scope": self.scope,
         }
 
 
@@ -137,10 +138,11 @@ class JobManager:
 
     # --- registro (lógica pura) -------------------------------------------
     def create(self, kind: str, project: str) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project)
+        scope = determine_scope(kind, project)
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project, scope=scope)
         self._jobs[job.id] = job
-        # Persistir transicion "queued"
-        self._store.insert_job(job.id, kind, project)
+        # Persistir transicion "queued" con scope calculado
+        self._store.insert_job(job.id, kind, project, scope=scope)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -197,9 +199,19 @@ class JobManager:
         return self._store.get_job(job_id)
 
     def list_history(self, limit: int = 50, offset: int = 0,
-                     since: float | None = None) -> list[dict]:
-        """Jobs terminados del historial SQLite, mas nuevos primero."""
-        return self._store.list_history(limit=limit, offset=offset, since=since)
+                     since: float | None = None,
+                     kind: str | list[str] | None = None,
+                     scope: str | None = None,
+                     include_micro: bool = False) -> list[dict]:
+        """Jobs terminados del historial SQLite, mas nuevos primero.
+
+        Por defecto excluye micro-iteraciones (scope=item). Pasa include_micro=True
+        para incluirlas todas, o scope explicito para filtrar exactamente.
+        """
+        return self._store.list_history(
+            limit=limit, offset=offset, since=since,
+            kind=kind, scope=scope, include_micro=include_micro,
+        )
 
     # --- ejecución (async, smoke) -----------------------------------------
     async def run(self, job: Job, coro: Awaitable) -> None:

@@ -175,10 +175,14 @@
 
         <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
                 onclick={() => goTo(CONFIG.id)}>
+          <!-- ajustes tipo "sliders" — mas limpio que el engranaje -->
           <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
-            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.7 7.7 0 0 0-1.7-1l-.3-2.5H10.9l-.3 2.5a7.7 7.7 0 0 0-1.7 1l-2.3-1-2 3.4L4.6 11a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.7 7.7 0 0 0 1.7 1l.3 2.5h3.2l.3-2.5a7.7 7.7 0 0 0 1.7-1l2.3 1 2-3.4z"
-              fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <line x1="4" y1="7"  x2="20" y2="7"  stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="9"  cy="7"  r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="15" cy="12" r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="9"  cy="17" r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
           </svg>
           <span class="txt">
             <span class="lbl">{CONFIG.label}</span>
@@ -190,6 +194,21 @@
         {#each TOOLS as t}
           <button class="tool-btn" class:active={studio.tab === t.id}
                   onclick={() => goTo(t.id)}>
+            {#if t.id === "jobs"}
+              <!-- lista de tareas / stack -->
+              <svg viewBox="0 0 24 24" class="tool-icon" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <rect x="3" y="17" width="11" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            {:else if t.id === "costos"}
+              <!-- moneda / signo peso -->
+              <svg viewBox="0 0 24 24" class="tool-icon" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M12 7v10M9.5 9.5c0-1.4 1.1-2 2.5-2s2.5.9 2.5 2-1.1 1.8-2.5 2.2C10.5 12.1 9.5 13 9.5 14.5s1.1 2 2.5 2 2.5-.6 2.5-2"
+                      fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            {/if}
             <span class="txt">
               <span class="lbl">{t.label}</span>
               <span class="sub">{t.sub}</span>
@@ -258,6 +277,8 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .brand { display: flex; align-items: center; gap: 11px; }
@@ -402,6 +423,7 @@
   .tool-btn.active { background: var(--card); box-shadow: var(--shadow); }
   .tool-btn .lbl { font-weight: 700; font-size: 13.5px; }
   .tool-btn .sub { font-size: 11px; color: var(--ink-soft); }
+  .tool-icon { width: 22px; height: 22px; color: var(--ink-soft); flex-shrink: 0; }
 
   .legend { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--ink-soft); }
   .legend span { display: flex; align-items: center; gap: 7px; }

@@ -101,11 +101,6 @@
   </WarnStrip>
 {/if}
 
-<!-- D-088: panel de costos movido a la pagina Costos (una verdad, un lugar). -->
-<div class="costs-link">
-  <button class="ghost small" onclick={() => goTo("costos")}>Ver costos &rarr;</button>
-</div>
-
 <div class="steps">
   <!-- 1. Render -->
   <section class="step card" class:is-done={renderDone}>
@@ -275,6 +270,4 @@
   .ok-line { color: var(--ok); margin: 12px 0 0; font-weight: 600; }
 
 
-  /* D-088: link a la pagina de Costos */
-  .costs-link { margin-bottom: 14px; }
 </style>

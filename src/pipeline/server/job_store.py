@@ -42,9 +42,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     started_at REAL,
     ended_at REAL,
     result TEXT,
-    error TEXT
+    error TEXT,
+    scope TEXT NOT NULL DEFAULT 'batch'
 );
 """
+
+# Migracion defensiva: agrega la columna scope si la tabla ya existe sin ella
+# (bases SQLite de Ciclos 1-3 no la tienen). ALTER TABLE es idempotente aqui
+# porque se captura el error si la columna ya existe.
+_MIGRATE_SCOPE = "ALTER TABLE jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'batch'"
+
+# Kinds que son SIEMPRE micro-iteraciones por item (independientemente del project)
+_MICRO_KINDS = frozenset({"pose_variants", "shots"})
 
 _SCHEMA_JOB_EVENTS = """
 CREATE TABLE IF NOT EXISTS job_events (
@@ -55,6 +64,18 @@ CREATE TABLE IF NOT EXISTS job_events (
     payload TEXT NOT NULL DEFAULT ''
 );
 """
+
+
+def determine_scope(kind: str, project: str) -> str:
+    """Determina el scope de un job: 'batch' o 'item'.
+
+    Regla: es 'item' si el project contiene '/' (jobs por-escena/personaje/pose
+    usan project='slug/sub') O si el kind es un micro-kind (pose_variants, shots).
+    En cualquier otro caso es 'batch'.
+    """
+    if kind in _MICRO_KINDS or "/" in project:
+        return "item"
+    return "batch"
 
 
 def _open(db_path: Path) -> sqlite3.Connection:
@@ -70,6 +91,11 @@ def _open(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute(_SCHEMA_JOBS)
     conn.execute(_SCHEMA_JOB_EVENTS)
+    # Migracion defensiva: bases anteriores no tienen la columna scope.
+    try:
+        conn.execute(_MIGRATE_SCOPE)
+    except sqlite3.OperationalError:
+        pass  # la columna ya existe — idempotente
     conn.commit()
     return conn
 
@@ -87,14 +113,20 @@ class JobStore:
     # --- escritura -----------------------------------------------------------
 
     def insert_job(self, job_id: str, kind: str, project: str,
-                   created_at: float | None = None) -> None:
-        """Registra un nuevo job (estado queued) + su evento inicial."""
+                   created_at: float | None = None,
+                   scope: str | None = None) -> None:
+        """Registra un nuevo job (estado queued) + su evento inicial.
+
+        `scope` se puede pasar explicitamente; si es None se calcula con
+        `determine_scope(kind, project)`.
+        """
         now = created_at if created_at is not None else time.time()
+        job_scope = scope if scope is not None else determine_scope(kind, project)
         self._conn.execute(
             """INSERT OR IGNORE INTO jobs
-               (id, kind, project, status, created_at)
-               VALUES (?, ?, ?, 'queued', ?)""",
-            (job_id, kind, project, now),
+               (id, kind, project, status, created_at, scope)
+               VALUES (?, ?, ?, 'queued', ?, ?)""",
+            (job_id, kind, project, now, job_scope),
         )
         self._conn.execute(
             """INSERT INTO job_events (job_id, ts, type, payload)
@@ -227,20 +259,42 @@ class JobStore:
         return d
 
     def list_history(self, limit: int = 50, offset: int = 0,
-                     since: float | None = None) -> list[dict[str, Any]]:
+                     since: float | None = None,
+                     kind: str | list[str] | None = None,
+                     scope: str | None = None,
+                     include_micro: bool = False) -> list[dict[str, Any]]:
         """Jobs terminados (done/failed), mas nuevos primero, paginado.
 
-        `since` es un Unix timestamp: filtra solo jobs que terminaron
-        despues de ese momento (para el cliente que quiere "lo nuevo").
+        `since`        : Unix timestamp — solo jobs terminados despues de ese momento.
+        `kind`         : filtrar por kind (str o lista de strings).
+        `scope`        : filtrar por scope exacto ('batch' o 'item').
+        `include_micro`: si False (default) excluye los jobs scope='item'.
+                         Si True los incluye todos. `scope` explicito tiene prioridad.
         """
         params: list[Any] = []
         query = """SELECT id, kind, project, status,
-                          created_at, started_at, ended_at, result, error
+                          created_at, started_at, ended_at, result, error, scope
                    FROM jobs
                    WHERE status IN ('done', 'failed')"""
         if since is not None:
             query += " AND ended_at > ?"
             params.append(since)
+        # Filtro por scope: `scope` explicito tiene prioridad sobre include_micro
+        if scope is not None:
+            query += " AND scope = ?"
+            params.append(scope)
+        elif not include_micro:
+            query += " AND scope = 'batch'"
+        # Filtro por kind (uno o varios)
+        if kind is not None:
+            if isinstance(kind, str):
+                kinds = [k.strip() for k in kind.split(",") if k.strip()]
+            else:
+                kinds = list(kind)
+            if kinds:
+                placeholders = ",".join("?" * len(kinds))
+                query += f" AND kind IN ({placeholders})"
+                params.extend(kinds)
         query += " ORDER BY ended_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = self._conn.execute(query, params).fetchall()

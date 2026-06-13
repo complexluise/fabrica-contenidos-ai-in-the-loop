@@ -82,6 +82,13 @@ hardening post-auditoría. Detalle completo en
 > (abierto en [D-090]) queda **completo**: Ciclo 1 = persistencia ([D-090]), Ciclo 2 = semáforo
 > ([D-092]), Ciclo 3 = pantalla/sidebar/costos ([D-091]). Sin endpoints nuevos (todo el contrato
 > ya existía). Verifier: PASA CON RESERVAS (cosméticas, ya corregidas).
+>
+> **Refinación del smoke** (2026-06-13, [D-093]): el historial se ahogaba en micro-iteraciones.
+> Se agregó `scope` ('batch'|'item') a los jobs (persistir todo, ocultar las micro por defecto);
+> `GET /api/jobs/history` acepta `?kind=`/`?scope=`/`?include_micro=` y la pantalla de Jobs estrena
+> filtro por tipo + toggle "mostrar micro-iteraciones" (default OFF). Polish de UI sin arquitectura
+> (sidebar scrolleable, iconos de Herramientas consistentes, quitada la barra "Ver costos" de
+> Producción que duplicaba la página de Costos — [D-088]).
 
 ---
 

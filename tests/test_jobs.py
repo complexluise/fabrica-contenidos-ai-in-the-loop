@@ -472,3 +472,183 @@ async def test_semaphore_queued_job_visible_in_list(tmp_path):
 
     release.set()
     await _wait_all_done(m)
+
+
+# --- D-093: scope batch/item -----------------------------------------------
+
+
+def test_determine_scope_batch_for_top_level_kinds(tmp_path):
+    """Jobs de lote (render, keyframes, cast, animatic con project=slug) -> batch."""
+    from pipeline.server.job_store import determine_scope
+
+    assert determine_scope("render", "mi-proyecto") == "batch"
+    assert determine_scope("keyframes", "mi-proyecto") == "batch"
+    assert determine_scope("cast", "mi-proyecto") == "batch"
+    assert determine_scope("animatic", "mi-proyecto") == "batch"
+    assert determine_scope("export", "mi-proyecto") == "batch"
+    assert determine_scope("import", "mi-proyecto") == "batch"
+    assert determine_scope("music", "mi-proyecto") == "batch"
+
+
+def test_determine_scope_item_for_sub_project(tmp_path):
+    """Jobs con project='slug/sub' (per-escena, per-personaje) -> item."""
+    from pipeline.server.job_store import determine_scope
+
+    assert determine_scope("keyframes", "mi-proyecto/s1") == "item"
+    assert determine_scope("cast", "mi-proyecto/juan") == "item"
+    assert determine_scope("shots", "mi-proyecto/s1") == "item"
+
+
+def test_determine_scope_item_for_micro_kinds(tmp_path):
+    """Kinds micro (pose_variants, shots) siempre son item, aunque project sea top-level."""
+    from pipeline.server.job_store import determine_scope
+
+    assert determine_scope("pose_variants", "mi-proyecto") == "item"
+    assert determine_scope("shots", "mi-proyecto") == "item"
+    # Con sub-project tambien
+    assert determine_scope("pose_variants", "mi-proyecto/s1/destino") == "item"
+
+
+def test_scope_persisted_on_create(tmp_path):
+    """create() persiste el scope correcto en SQLite."""
+    from pipeline.server.job_store import JobStore
+
+    m = _mgr(tmp_path)
+    # batch
+    j_batch = m.create("render", "demo")
+    # item por project
+    j_item_proj = m.create("keyframes", "demo/s1")
+    # item por kind
+    j_item_kind = m.create("shots", "demo")
+
+    store = JobStore(tmp_path / "jobs_test.sqlite")
+    assert store.get_job(j_batch.id)["scope"] == "batch"
+    assert store.get_job(j_item_proj.id)["scope"] == "item"
+    assert store.get_job(j_item_kind.id)["scope"] == "item"
+
+
+def test_scope_in_job_to_dict(tmp_path):
+    """to_dict() incluye el campo scope."""
+    m = _mgr(tmp_path)
+    j_batch = m.create("render", "demo")
+    j_item = m.create("keyframes", "demo/s1")
+    assert j_batch.to_dict()["scope"] == "batch"
+    assert j_item.to_dict()["scope"] == "item"
+
+
+def test_history_default_excludes_micro(tmp_path):
+    """list_history() por defecto devuelve solo jobs batch (exclude micro scope=item)."""
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "scope_test.sqlite"
+    store = JobStore(db)
+    # batch
+    store.insert_job("b1", "render", "p", created_at=1000.0)
+    store.set_running("b1", started_at=1001.0)
+    store.set_done("b1", {"ok": 1}, ended_at=1010.0)
+    # item
+    store.insert_job("i1", "keyframes", "p/s1", created_at=2000.0)
+    store.set_running("i1", started_at=2001.0)
+    store.set_done("i1", {"ok": 1}, ended_at=2010.0)
+    store.close()
+
+    m = JobManager(db_path=db)
+    history = m.list_history()
+    ids = [h["id"] for h in history]
+    # i1 es item: NO debe aparecer por defecto
+    assert "b1" in ids
+    assert "i1" not in ids
+
+
+def test_history_include_micro_returns_all(tmp_path):
+    """list_history(include_micro=True) devuelve batch e item."""
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "scope_micro.sqlite"
+    store = JobStore(db)
+    store.insert_job("b1", "render", "p", created_at=1000.0)
+    store.set_running("b1", started_at=1001.0)
+    store.set_done("b1", {}, ended_at=1010.0)
+    store.insert_job("i1", "keyframes", "p/s1", created_at=2000.0)
+    store.set_running("i1", started_at=2001.0)
+    store.set_done("i1", {}, ended_at=2010.0)
+    store.close()
+
+    m = JobManager(db_path=db)
+    history = m.list_history(include_micro=True)
+    ids = [h["id"] for h in history]
+    assert "b1" in ids
+    assert "i1" in ids
+
+
+def test_history_filter_by_kind(tmp_path):
+    """list_history(kind='render') devuelve solo jobs de ese kind."""
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "kind_filter.sqlite"
+    store = JobStore(db)
+    for i, (kind, jid) in enumerate([("render", "r1"), ("export", "e1"), ("keyframes", "k1")]):
+        # timestamps deterministas (no hash(), que depende de PYTHONHASHSEED)
+        store.insert_job(jid, kind, "p", created_at=float(1000 + i))
+        store.set_running(jid)
+        store.set_done(jid, {}, ended_at=float(2000 + i))
+    store.close()
+
+    m = JobManager(db_path=db)
+    history = m.list_history(kind="render")
+    ids = [h["id"] for h in history]
+    assert "r1" in ids
+    assert "e1" not in ids
+    assert "k1" not in ids
+
+
+def test_history_scope_in_each_row(tmp_path):
+    """list_history devuelve el campo scope en cada fila."""
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "scope_row.sqlite"
+    store = JobStore(db)
+    store.insert_job("b1", "render", "p", created_at=1000.0)
+    store.set_running("b1")
+    store.set_done("b1", {}, ended_at=1010.0)
+    store.close()
+
+    m = JobManager(db_path=db)
+    history = m.list_history()
+    row = next(h for h in history if h["id"] == "b1")
+    assert "scope" in row
+    assert row["scope"] == "batch"
+
+
+def test_migration_adds_scope_to_existing_db(tmp_path):
+    """Bases SQLite previas (sin columna scope) se migran al abrir el JobStore."""
+    import sqlite3
+    from pipeline.server.job_store import JobStore
+
+    db = tmp_path / "old.sqlite"
+    # Crear la tabla sin la columna scope (simula base de Ciclo 1-3)
+    conn = sqlite3.connect(str(db))
+    conn.execute("""
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, project TEXT NOT NULL,
+            status TEXT NOT NULL, created_at REAL NOT NULL,
+            started_at REAL, ended_at REAL, result TEXT, error TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE job_events (
+            rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL, ts REAL NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute("INSERT INTO jobs VALUES ('old1', 'render', 'p', 'done', 100, 101, 110, NULL, NULL)")
+    conn.commit()
+    conn.close()
+
+    # Abrir el JobStore -> debe migrar sin error
+    store = JobStore(db)
+    row = store.get_job("old1")
+    # La columna scope existe y tiene el default 'batch'
+    assert row is not None
+    assert row.get("scope") == "batch"
+    store.close()

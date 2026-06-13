@@ -3,6 +3,10 @@
   // Los jobs activos se toman del store `jobsMonitor` (D-083, ya pollea vivo).
   // El historial usa GET /api/jobs/history (Ciclo 1, paginado limit/offset).
   // Click en un job terminado -> GET /api/jobs/{id} para ver log completo.
+  //
+  // Filtros (D-093):
+  //   - Chips de tipo (kind) con etiquetas humanas.
+  //   - Toggle "Mostrar micro-iteraciones" (apagado por defecto: solo lotes).
   import { onMount } from "svelte";
   import { jobsMonitor } from "../lib/jobs.svelte.js";
   import { studio, setSlug, goTo } from "../lib/studio.svelte.js";
@@ -18,6 +22,12 @@
   let offset = $state(0);
   let hasMore = $state(false);
 
+  // --- filtros (D-093) ---
+  // Chips de tipo: null = todos los kinds
+  let filterKind = $state(null);
+  // Toggle micro: false por defecto (solo lotes)
+  let includeMicro = $state(false);
+
   // --- detalle de un job terminado ---
   let selected = $state(null);   // { id, kind, project, status, logs, error, ... }
   let detailErr = $state("");
@@ -28,17 +38,31 @@
 
   // etiqueta humana por kind (mismo mapa que JobsDock)
   const KIND = {
-    import:        { label: "Importando",  tab: "importar" },
-    cast:          { label: "Casting",     tab: "casting" },
-    keyframes:     { label: "Encuadres",   tab: "encuadres" },
-    shots:         { label: "Planos",      tab: "encuadres" },
-    animatic:      { label: "Animatic",    tab: "animatic" },
-    pose_variants: { label: "Variantes",   tab: "animatic" },
-    render:        { label: "Render",      tab: "producir" },
-    export:        { label: "Paquete",     tab: "producir" },
-    music:         { label: "Musica",      tab: "storyboard" },
+    import:        { label: "Importar",   tab: "importar" },
+    cast:          { label: "Casting",    tab: "casting" },
+    keyframes:     { label: "Encuadres",  tab: "encuadres" },
+    shots:         { label: "Planos",     tab: "encuadres" },
+    animatic:      { label: "Animatic",   tab: "animatic" },
+    pose_variants: { label: "Variantes",  tab: "animatic" },
+    render:        { label: "Render",     tab: "producir" },
+    export:        { label: "Paquete",    tab: "producir" },
+    music:         { label: "Musica",     tab: "storyboard" },
   };
   const kindLabel = (k) => (KIND[k] || { label: k }).label;
+
+  // Chips de tipo disponibles para filtrar (batch y micro mezclados en las opciones)
+  const KIND_CHIPS = [
+    { id: null,           label: "Todos" },
+    { id: "render",       label: "Render" },
+    { id: "export",       label: "Paquete" },
+    { id: "keyframes",    label: "Encuadres" },
+    { id: "cast",         label: "Casting" },
+    { id: "animatic",     label: "Animatic" },
+    { id: "import",       label: "Importar" },
+    { id: "music",        label: "Musica" },
+    { id: "shots",        label: "Planos" },
+    { id: "pose_variants",label: "Variantes" },
+  ];
 
   function fmtTs(ts) {
     if (!ts) return "—";
@@ -55,12 +79,21 @@
     return `${Math.floor(s / 60)}m ${s % 60}s`;
   }
 
+  function buildHistoryUrl() {
+    const params = new URLSearchParams();
+    params.set("limit", String(PAGE));
+    params.set("offset", String(offset));
+    if (filterKind !== null) params.set("kind", filterKind);
+    if (includeMicro) params.set("include_micro", "true");
+    return `/api/jobs/history?${params.toString()}`;
+  }
+
   async function loadHistory(reset = false) {
     if (loading) return;
-    if (reset) { offset = 0; history = []; }
+    if (reset) { offset = 0; history = []; selected = null; }
     loading = true; historyErr = "";
     try {
-      const rows = await get(`/api/jobs/history?limit=${PAGE}&offset=${offset}`);
+      const rows = await get(buildHistoryUrl());
       history = reset ? rows : [...history, ...rows];
       hasMore = rows.length === PAGE;
       offset += rows.length;
@@ -69,6 +102,16 @@
     } finally {
       loading = false;
     }
+  }
+
+  function setKindFilter(kind) {
+    filterKind = kind;
+    loadHistory(true);
+  }
+
+  function toggleMicro() {
+    includeMicro = !includeMicro;
+    loadHistory(true);
   }
 
   async function showDetail(jobId) {
@@ -133,6 +176,24 @@
     <button class="mini" onclick={() => loadHistory(true)} disabled={loading}>
       {loading ? "Cargando..." : "Actualizar"}
     </button>
+  </div>
+
+  <!-- Filtros: chips de tipo + toggle micro -->
+  <div class="filters-row">
+    <div class="kind-chips" role="group" aria-label="Filtrar por tipo">
+      {#each KIND_CHIPS as chip}
+        <button
+          class="chip"
+          class:active={filterKind === chip.id}
+          onclick={() => setKindFilter(chip.id)}
+          aria-pressed={filterKind === chip.id}
+        >{chip.label}</button>
+      {/each}
+    </div>
+    <label class="micro-toggle">
+      <input type="checkbox" checked={includeMicro} onchange={toggleMicro} />
+      Mostrar micro-iteraciones
+    </label>
   </div>
 
   {#if historyErr}
@@ -274,4 +335,28 @@
   .empty-line { font-size: 14px; }
   .loading-line { margin-top: 10px; font-size: 13px; }
   .load-more { margin-top: 14px; }
+
+  /* --- filtros (D-093) --- */
+  .filters-row {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 10px 14px; margin-bottom: 14px;
+  }
+  .kind-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    padding: 4px 11px; border-radius: 999px;
+    border: 1.5px solid var(--line); background: var(--paper);
+    font-size: 12.5px; cursor: pointer; box-shadow: none;
+    transition: border-color .12s, background .12s;
+  }
+  .chip:hover { border-color: var(--blue); background: var(--blue-wash); box-shadow: none; }
+  .chip.active {
+    border-color: var(--blue); background: var(--blue-wash);
+    font-weight: 700; color: var(--blue-deep);
+  }
+  .micro-toggle {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--ink-soft); cursor: pointer;
+    white-space: nowrap;
+  }
+  .micro-toggle input { cursor: pointer; }
 </style>

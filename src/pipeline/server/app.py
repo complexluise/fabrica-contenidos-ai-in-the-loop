@@ -990,14 +990,24 @@ def create_app(projects_dir: Path = Path("projects"),
 
     @app.get("/api/jobs/history")
     def list_jobs_history(limit: int = 50, offset: int = 0,
-                          since: float | None = None):
+                          since: float | None = None,
+                          kind: str | None = None,
+                          scope: str | None = None,
+                          include_micro: bool = False):
         """Jobs terminados (done/failed) del historial SQLite, mas nuevos primero.
 
-        Paginado con `limit`/`offset`. `since` (Unix timestamp) filtra solo
-        los terminados despues de ese momento — util para actualizaciones
-        incrementales desde la UI. Lee de SQLite, no de memoria.
+        Paginado con `limit`/`offset`. Filtros opcionales:
+        - `since`         : Unix timestamp — solo jobs terminados despues de ese momento.
+        - `kind`          : filtrar por kind, comma-separated (ej: "render,export").
+        - `scope`         : 'batch' o 'item' (filtro exacto; prioridad sobre include_micro).
+        - `include_micro` : si True incluye micro-iteraciones (scope=item).
+                            Por defecto False: solo lotes (scope=batch).
+        Devuelve `scope` en cada fila.
         """
-        return jobs.list_history(limit=limit, offset=offset, since=since)
+        return jobs.list_history(
+            limit=limit, offset=offset, since=since,
+            kind=kind, scope=scope, include_micro=include_micro,
+        )
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str):

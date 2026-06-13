@@ -141,3 +141,4 @@ es continua entre archivos.
 |---|---|---|
 | D-091 | La pantalla de jobs + sección "Herramientas" del sidebar + Costos a página propia (Ciclo 3 de 3) | Vigente |
 | D-092 | Semáforo de concurrencia entre jobs: encolar, no rechazar (Ciclo 2 de 3) | Vigente |
+| D-093 | `scope` (batch/item) en los jobs: persistir todo, ocultar las micro por defecto | Vigente |

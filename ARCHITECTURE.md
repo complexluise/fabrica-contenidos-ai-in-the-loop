@@ -490,6 +490,16 @@ projects/<slug>/
 > verdad de lo VIVO; SQLite, la verdad durable. Al boot, los jobs huérfanos queued/running de un
 > proceso anterior se marcan `failed` (evita el deadlock del guard 409, [D-082]).
 >
+> **Scope de los jobs: lote vs. micro-iteración (server, [D-093]).** Cada job lleva un campo
+> **`scope` ('batch' | 'item')** calculado al crearlo (`job_store.determine_scope`): es `item` si
+> el `project` contiene `/` (jobs por-escena/personaje/pose, p. ej. `slug/s1`) **o** si el `kind`
+> es micro (`pose_variants`, `shots`); si no, `batch`. **Se persiste TODO** (incluidas las micro,
+> por trazabilidad), pero la **lectura filtra**: `GET /api/jobs/history` acepta `?kind=`, `?scope=`
+> (filtro exacto, prioritario) y `?include_micro=` (default **False** -> solo `batch`); cada fila
+> del history y cada job de `/api/jobs` (activos) reportan su `scope`. Migración defensiva: bases
+> previas ganan la columna con default `batch`. El job significativo es el lote; las micro son ruido
+> que se conserva pero se oculta por defecto.
+>
 > **Concurrencia entre jobs (server, [D-092]).** El `JobManager` lleva un
 > `asyncio.Semaphore(max_concurrency)` (default 2, rango 1–16) que limita cuántos jobs corren en
 > paralelo. El gate se adquiere en `run()` **antes** de pasar a RUNNING: un job en cola es QUEUED
