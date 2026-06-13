@@ -500,6 +500,17 @@ projects/<slug>/
 > Contrato: `GET/PUT /api/studio-settings` (separado de `/api/settings`, que gestiona las keys); el
 > PUT persiste y hace **hot-swap no estricto** del semáforo (aplica a los próximos jobs; los que ya
 > corren terminan con el límite viejo — trade-off consciente para local mono-usuario).
+>
+> **Superficie de UI de los jobs (Studio, [D-091]).** Dos planos, dos lugares: el **dock**
+> (`components/JobsDock.svelte`, [D-083]) es lo VIVO de un vistazo, omnipresente en el sidebar; la
+> **pantalla de Jobs** (`views/Jobs.svelte`) es el complemento — activos del monitor global +
+> **historial** paginado (`GET /api/jobs/history`) + detalle/log al click (`GET /api/jobs/{id}`).
+> Ambas viven en la nueva sección **"Herramientas"** del foot del sidebar (Configuración + Jobs +
+> Costos), **fuera** de la espina del bucle narrativo ([D-086]/[D-087]): es la lista `TOOLS` de
+> `studio.svelte.js`, separada de `STAGES`/`PIPELINE_ORDER`, con tabs globales (sin slug). El
+> **libro de costos** ([D-079]) es su propia página (`views/Costos.svelte`, `GET /api/costs`), ya
+> no un panel dentro de Producción (una verdad, un lugar — [D-088]). Sin endpoints nuevos: todo el
+> contrato (history, detalle, costs) ya existía.
 
 ### 7.4 Modelo de datos (`project.py`)
 

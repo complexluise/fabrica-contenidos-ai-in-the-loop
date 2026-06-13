@@ -38,6 +38,13 @@ export const TOPLEVEL = STAGES.filter((s) => !s.parent);
 // Configuración (claves de API): setup transversal, fuera del bucle numerado (#4).
 export const CONFIG = { id: "ajustes", label: "Configuración", sub: "Claves de API" };
 
+// Herramientas globales (D-088/D-091): utilitarias sin slug, fuera de la espina del bucle.
+// NO van en STAGES ni en PIPELINE_ORDER — no son pasos del flujo narrativo.
+export const TOOLS = [
+  { id: "jobs",   label: "Jobs",   sub: "Trabajos y historial" },
+  { id: "costos", label: "Costos", sub: "El libro mayor de gastos" },
+];
+
 // Glosario: traducir la jerga a lenguaje humano (se muestra inline).
 export const GLOSARIO = {
   keyframe: "la imagen clave de la escena: el momento donde el plano ATERRIZA (su destino)",
@@ -52,7 +59,7 @@ export const hasProject = () => !!studio.slug && studio.projects.length > 0;
 
 // --- routing por hash (D-081): #/<slug>/<tab>. F5 y el boton atras conservan
 // donde estabas; una pestaña se puede compartir. Sin router externo (~25 lineas).
-const TABS = new Set([...STAGES.map((s) => s.id), CONFIG.id]);
+const TABS = new Set([...STAGES.map((s) => s.id), CONFIG.id, ...TOOLS.map((t) => t.id)]);
 
 export function parseHash() {
   if (typeof window === "undefined") return null;

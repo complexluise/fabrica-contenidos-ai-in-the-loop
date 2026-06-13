@@ -61,16 +61,27 @@ hardening post-auditoría. Detalle completo en
 
 ---
 
-## Ciclo 3 — Pantalla de historial de jobs + sidebar (pendiente)
+## Ciclo 3 — Pantalla de jobs + sección "Herramientas" del sidebar + Costos a página propia  ✅ CERRADO
 
 > Trabajo NUEVO, no parte del AC original de Fase 3 (ese era el dock de activos + el semáforo, ya
 > cerrados). Es el **Ciclo 3 de 3** del plan abierto en [D-090] (Ciclo 1 = persistencia, hecho;
-> Ciclo 2 = semáforo, [D-092], hecho). ADR reservado: [D-091].
+> Ciclo 2 = semáforo, [D-092], hecho). ADR: [D-091].
 
-- [ ] Pantalla/sección de **historial** que lea `GET /api/jobs/history` (paginado, ya existe por
-  [D-090]): qué generé, cuándo, cuánto tardó, por qué falló.
-- [ ] Integrar el plano histórico al **dock/sidebar** de [D-083] (que hoy solo muestra activos);
-  **revisa D-083** al sumarle memoria.
+- [x] Pantalla de **Jobs** (`views/Jobs.svelte`) que lee `GET /api/jobs/history` (paginado, ya
+  existe por [D-090]) + activos del monitor global + detalle/log al click (`GET /api/jobs/{id}`,
+  cae a SQLite para terminados): qué generé, cuándo, cuánto tardó, por qué falló. ([D-091])
+- [x] El plano histórico vive en una pantalla dedicada; el **dock de [D-083] se mantiene** (lo
+  vivo de un vistazo). **Revisa D-083**, no lo reemplaza: dock = glance, pantalla = historial +
+  detalle + log. ([D-091])
+- [x] Sección **"Herramientas"** en el foot del sidebar (Configuración + Jobs + Costos), FUERA de
+  la espina del bucle (honra [D-086]/[D-087]); lista `TOOLS` separada de STAGES/PIPELINE_ORDER. ([D-091])
+- [x] **Costos a página propia** (`views/Costos.svelte`); se quita el panel de Producción, queda un
+  link "Ver costos ->" (una verdad, un lugar — [D-088]). ([D-091])
+
+> **Cerrado** (2026-06-13) con [D-091]. Con esto el plan entero de "los jobs ganan historia"
+> (abierto en [D-090]) queda **completo**: Ciclo 1 = persistencia ([D-090]), Ciclo 2 = semáforo
+> ([D-092]), Ciclo 3 = pantalla/sidebar/costos ([D-091]). Sin endpoints nuevos (todo el contrato
+> ya existía). Verifier: PASA CON RESERVAS (cosméticas, ya corregidas).
 
 ---
 
@@ -82,8 +93,9 @@ hardening post-auditoría. Detalle completo en
   SQLite (`out/telemetry.sqlite`, tablas `jobs`/`job_events`) y el historial sobrevive al reinicio;
   al boot, los huérfanos queued/running se marcan `failed` (rompe el deadlock del guard 409). Falta lo
   de **reanudar** el trabajo interrumpido en sí (hoy se marca failed, no se retoma; el caché hace
-  barato re-disparar). Es el **Ciclo 1 de 3** (persistencia); faltan el semáforo (Ciclo 2, Fase 3
-  AC1/T3.1) y la pantalla+sidebar de historial (Ciclo 3).
+  barato re-disparar). Era el **Ciclo 1 de 3** (persistencia); el semáforo (Ciclo 2, [D-092]) y la
+  pantalla/sidebar de historial (Ciclo 3, [D-091]) ya están cerrados — el plan de jobs está completo,
+  salvo este ítem de **reanudar** (que sigue diferido).
 
 ---
 

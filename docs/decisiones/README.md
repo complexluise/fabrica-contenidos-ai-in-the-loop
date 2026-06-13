@@ -127,7 +127,7 @@ es continua entre archivos.
 |---|---|---|
 | D-081 | El frontend se vuelve Svelte de verdad: mutación directa, remount por key, verdad compartida | Vigente |
 | D-082 | Hardening post-auditoría: contrato UI↔server honesto, sin doble gasto, firma no se borra en silencio | Vigente |
-| D-083 | El dashboard de jobs: un dock siempre visible, no una pantalla aparte | Vigente |
+| D-083 | El dashboard de jobs: un dock siempre visible, no una pantalla aparte | Revisada por D-091 |
 | D-084 | El casting hereda el patrón fluido de los encuadres (variantes, ajuste, subir, descartar) | Vigente |
 | D-085 | El casting completa el patrón: el prompt del personaje, visible y editable | Vigente |
 | D-086 | El Storyboard es el centro: las mesas lo nutren, todo se valida ahí | Vigente |
@@ -139,5 +139,5 @@ es continua entre archivos.
 ### [0091-0100.md](0091-0100.md)
 | # | Decisión | Estado |
 |---|---|---|
-| D-091 | Reservado: pantalla de historial de jobs + sidebar (Ciclo 3 de 3) | Diferida |
+| D-091 | La pantalla de jobs + sección "Herramientas" del sidebar + Costos a página propia (Ciclo 3 de 3) | Vigente |
 | D-092 | Semáforo de concurrencia entre jobs: encolar, no rechazar (Ciclo 2 de 3) | Vigente |

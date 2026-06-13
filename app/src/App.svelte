@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, TOPLEVEL, FEEDERS, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
+  import { studio, STAGES, TOPLEVEL, FEEDERS, CONFIG, TOOLS, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
            createProject, deleteProject, parseHash, initRouting, writeHash } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
   import { startJobsMonitor } from "./lib/jobs.svelte.js";
@@ -14,6 +14,8 @@
   import Animatic from "./views/Animatic.svelte";
   import Produccion from "./views/Produccion.svelte";
   import Ajustes from "./views/Ajustes.svelte";
+  import Jobs from "./views/Jobs.svelte";
+  import Costos from "./views/Costos.svelte";
 
   let current = $derived(studio.projects.find((p) => p.slug === studio.slug) || null);
   let next = $derived(nextStep(studio.status));
@@ -167,19 +169,34 @@
     <div class="foot">
       <JobsDock />
 
-      <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
-              onclick={() => goTo(CONFIG.id)}>
-        <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/>
-          <path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.7 7.7 0 0 0-1.7-1l-.3-2.5H10.9l-.3 2.5a7.7 7.7 0 0 0-1.7 1l-2.3-1-2 3.4L4.6 11a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.7 7.7 0 0 0 1.7 1l.3 2.5h3.2l.3-2.5a7.7 7.7 0 0 0 1.7-1l2.3 1 2-3.4z"
-            fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-        </svg>
-        <span class="txt">
-          <span class="lbl">{CONFIG.label}</span>
-          <span class="sub">{keysOk ? "claves listas" : "faltan claves"}</span>
-        </span>
-        {#if !keysOk}<span class="badge-warn">!</span>{/if}
-      </button>
+      <!-- D-088/D-091: seccion Herramientas — utilitarias globales, fuera de la espina -->
+      <div class="tools-group">
+        <span class="tools-eyebrow eyebrow">Herramientas</span>
+
+        <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
+                onclick={() => goTo(CONFIG.id)}>
+          <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.7 7.7 0 0 0-1.7-1l-.3-2.5H10.9l-.3 2.5a7.7 7.7 0 0 0-1.7 1l-2.3-1-2 3.4L4.6 11a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.7 7.7 0 0 0 1.7 1l.3 2.5h3.2l.3-2.5a7.7 7.7 0 0 0 1.7-1l2.3 1 2-3.4z"
+              fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          <span class="txt">
+            <span class="lbl">{CONFIG.label}</span>
+            <span class="sub">{keysOk ? "claves listas" : "faltan claves"}</span>
+          </span>
+          {#if !keysOk}<span class="badge-warn">!</span>{/if}
+        </button>
+
+        {#each TOOLS as t}
+          <button class="tool-btn" class:active={studio.tab === t.id}
+                  onclick={() => goTo(t.id)}>
+            <span class="txt">
+              <span class="lbl">{t.label}</span>
+              <span class="sub">{t.sub}</span>
+            </span>
+          </button>
+        {/each}
+      </div>
 
       <div class="legend">
         <span><i class="dot blue"></i> la IA propone</span>
@@ -197,6 +214,10 @@
       <Importar />
     {:else if studio.tab === "ajustes"}
       <Ajustes />
+    {:else if studio.tab === "jobs"}
+      <Jobs />
+    {:else if studio.tab === "costos"}
+      <Costos />
     {:else if !studio.slug}
       <div class="empty card">
         <h2>No hay proyectos todavía</h2>
@@ -346,6 +367,14 @@
 
   .foot { margin-top: auto; display: flex; flex-direction: column; gap: 14px; }
 
+  /* D-088/D-091: agrupador de herramientas en el pie del sidebar */
+  .tools-group { display: flex; flex-direction: column; gap: 4px; }
+  .tools-eyebrow {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-soft);
+    padding: 2px 0 4px 2px;
+  }
+
   .config {
     position: relative; display: flex; align-items: center; gap: 11px; width: 100%;
     text-align: left; background: transparent; border: 1px solid var(--line-2);
@@ -362,6 +391,17 @@
     margin-left: auto; width: 18px; height: 18px; border-radius: 50%; background: var(--red);
     color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center;
   }
+
+  /* botones de herramientas (Jobs / Costos) */
+  .tool-btn {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    text-align: left; background: transparent; border: 1px solid var(--line-2);
+    border-radius: var(--r); padding: 9px 11px; box-shadow: none;
+  }
+  .tool-btn:hover { background: rgba(33, 28, 22, 0.05); box-shadow: none; }
+  .tool-btn.active { background: var(--card); box-shadow: var(--shadow); }
+  .tool-btn .lbl { font-weight: 700; font-size: 13.5px; }
+  .tool-btn .sub { font-size: 11px; color: var(--ink-soft); }
 
   .legend { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--ink-soft); }
   .legend span { display: flex; align-items: center; gap: 7px; }

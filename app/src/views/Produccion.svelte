@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { get, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
+  // D-088: costos movidos a Costos.svelte (una verdad, un lugar).
+  // loadCosts ya no vive aca.
   import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import JobLog from "../components/JobLog.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
@@ -27,7 +29,6 @@
   let finalUrl = $derived(st?.render?.final_url || null);
   // D-080: "elegir" no existe mas — la verdad es el stage del motor.
   let ready = $derived(st ? PIPELINE_ORDER.indexOf(st.stage) > PIPELINE_ORDER.indexOf("encuadres") : false);
-  let costs = $state(null);  // D-079: el libro mayor, visible donde se gasta
   let selectedProfile = $derived(profiles.find(p => p.key === profile) ?? null);
 
   const SPEEDS = [
@@ -52,12 +53,7 @@
     return `background:${c.bg};color:${c.fg}`;
   }
 
-  async function loadCosts() {
-    try { costs = await get(`/api/costs`); } catch { costs = null; }
-  }
-
   onMount(async () => {
-    loadCosts();  // D-079: la plata visible
     try {
       profiles = await get("/api/profiles");
       // T2.6.16: SIN fallback hardcodeado — si no hay perfiles, no se renderiza
@@ -76,7 +72,7 @@
       const live = await findLiveJob([kind], slug);
       if (live) {
         active = kind;
-        jobs[kind].attach(live.id, { onDone: async () => { await refreshStatus(); loadCosts(); } });
+        jobs[kind].attach(live.id, { onDone: async () => { await refreshStatus(); } });
       }
     }
   });
@@ -88,7 +84,6 @@
       body,
       onDone: async () => {
         await refreshStatus();
-        loadCosts();  // D-079: lo que acaba de costar, al instante
       },
     });
   }
@@ -106,19 +101,10 @@
   </WarnStrip>
 {/if}
 
-{#if costs && costs.scenes > 0}
-  <div class="costs card" title="El libro mayor de costos (D-079): out/telemetry.sqlite">
-    <span class="eyebrow">La plata</span>
-    <span class="costs-total">gastado: <b>${costs.total_usd.toFixed(2)}</b></span>
-    {#if costs.by_project?.[slug] != null}
-      <span class="costs-proj">este proyecto: <b>${costs.by_project[slug].toFixed(2)}</b></span>
-    {/if}
-    <span class="costs-bd muted">
-      video ${costs.breakdown.video_usd.toFixed(2)} · imágenes ${costs.breakdown.keyframe_usd.toFixed(2)}
-      · sfx ${costs.breakdown.sfx_usd.toFixed(2)} · voz ${costs.breakdown.tts_usd.toFixed(2)}
-    </span>
-  </div>
-{/if}
+<!-- D-088: panel de costos movido a la pagina Costos (una verdad, un lugar). -->
+<div class="costs-link">
+  <button class="ghost small" onclick={() => goTo("costos")}>Ver costos &rarr;</button>
+</div>
 
 <div class="steps">
   <!-- 1. Render -->
@@ -289,9 +275,6 @@
   .ok-line { color: var(--ok); margin: 12px 0 0; font-weight: 600; }
 
 
-  /* D-079: la plata visible donde se gasta */
-  .costs { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 14px; }
-  .costs-total b, .costs-proj b { font-family: var(--font-mono); color: var(--ink); }
-  .costs-total, .costs-proj { font-size: 13px; }
-  .costs-bd { font-size: 11.5px; }
+  /* D-088: link a la pagina de Costos */
+  .costs-link { margin-bottom: 14px; }
 </style>
