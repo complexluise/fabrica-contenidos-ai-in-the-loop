@@ -108,6 +108,7 @@ class JobStore:
     """
 
     def __init__(self, db_path: Path = LEDGER_PATH):
+        self._db_path = db_path  # expuesto para tests de aislamiento
         self._conn = _open(db_path)
 
     # --- escritura -----------------------------------------------------------

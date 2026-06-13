@@ -113,7 +113,7 @@ class JobManager:
     del spawn, y arranca cuando hay cupo.
     """
 
-    def __init__(self, db_path: Path = LEDGER_PATH,
+    def __init__(self, db_path: Path | None = None,
                  max_concurrency: int = _DEFAULT_MAX_CONCURRENCY):
         self._jobs: dict[str, Job] = {}
         # T2.6.23: un Event POR CONSUMIDOR del stream. Con uno compartido, dos
@@ -128,7 +128,10 @@ class JobManager:
 
         # Persistencia: abre el store y barre los jobs huerfanos del proceso
         # anterior ANTES de que lleguen requests (barrido al boot critico).
-        self._store = JobStore(db_path)
+        # db_path se resuelve AQUI (no en la firma) para que monkeypatch de
+        # LEDGER_PATH en tests sea efectivo (default lazy, no early-bind).
+        resolved_path = db_path if db_path is not None else LEDGER_PATH
+        self._store = JobStore(resolved_path)
         swept = self._store.sweep_interrupted()
         if swept:
             logging.getLogger(_PKG_LOGGER).info(

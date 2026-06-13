@@ -164,3 +164,59 @@ def test_ledger_migrates_pre_d079_schema(tmp_path):
     assert s["total_usd"] == pytest.approx(0.15)
     assert s["runs"] == 2
     assert s["by_project"][""] == pytest.approx(0.05)  # lo viejo, sin proyecto
+
+
+# --- Aislamiento de la base real (fixture _isolate_ledger) --------------------
+
+import pipeline.telemetry as _tel_mod
+from pathlib import Path as _Path
+
+
+def test_telemetry_default_path_uses_monkeypatched_ledger(tmp_path, monkeypatch):
+    """Telemetry() sin db_path debe usar LEDGER_PATH parchado, no out/telemetry.sqlite.
+
+    La fixture _isolate_ledger ya corre (autouse), pero este test valida
+    EXPLICITAMENTE que el aislamiento funciona para Telemetry.__init__."""
+    real_ledger = _Path("out/telemetry.sqlite")
+    # Parchamos a una ruta distinta de la del autouse fixture para poder distinguir.
+    fake = tmp_path / "explicit_check.sqlite"
+    monkeypatch.setattr("pipeline.telemetry.LEDGER_PATH", fake)
+
+    t = Telemetry("r_iso", project="iso")  # SIN db_path
+    t.record(_rec("s1", "kling", 0.01, 1))
+    t.close()
+
+    # El archivo creado es el fake, NO la base real
+    assert fake.exists(), "Telemetry() debe escribir al LEDGER_PATH parchado"
+    assert not real_ledger.exists() or _tel_mod.LEDGER_PATH != real_ledger, (
+        "Telemetry() NO debe usar out/telemetry.sqlite bajo la fixture"
+    )
+    # Y la base real NO fue tocada (o no existe)
+    if real_ledger.exists():
+        import sqlite3 as _sq
+        conn = _sq.connect(real_ledger)
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        conn.close()
+        assert "scene_runs" not in tables or conn.execute(
+            "SELECT COUNT(*) FROM scene_runs WHERE run_id='r_iso'"
+        ).fetchone()[0] == 0
+
+
+def test_costs_summary_default_path_uses_monkeypatched_ledger(tmp_path, monkeypatch):
+    """costs_summary() sin db_path debe leer LEDGER_PATH parchado, no el real.
+
+    Espejo del test de JobManager: verifica que el default lazy funciona."""
+    fake = tmp_path / "costs_check.sqlite"
+    monkeypatch.setattr("pipeline.telemetry.LEDGER_PATH", fake)
+
+    # Escribimos un registro al fake via db_path explicito
+    t = Telemetry("r_costs", db_path=fake, project="check")
+    t.record(_rec("s1", "veo", 0.99, 5))
+    t.close()
+
+    # costs_summary() SIN db_path debe leer el fake (donde hay datos)
+    s = costs_summary()
+    assert s["total_usd"] == pytest.approx(0.99), (
+        "costs_summary() sin db_path debe resolver a LEDGER_PATH parchado"
+    )

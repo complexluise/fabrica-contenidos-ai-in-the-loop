@@ -86,12 +86,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
 class Telemetry:
     """Registro de costo/latencia de UN run, contra el libro mayor global (D-079)."""
 
-    def __init__(self, run_id: str, db_path: Path = LEDGER_PATH, project: str = ""):
+    def __init__(self, run_id: str, db_path: Path | None = None, project: str = ""):
+        # db_path se resuelve aqui (no en la firma) para que monkeypatch de
+        # LEDGER_PATH en tests sea efectivo (default lazy, no early-bind).
+        resolved = Path(db_path) if db_path is not None else LEDGER_PATH
         self.run_id = run_id
-        self.db_path = db_path
+        self.db_path = resolved
         self.project = project  # D-079: se sella en cada record
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(resolved)
         _migrate(self._conn)
         self._conn.execute(_SCHEMA)
         self._conn.commit()
@@ -178,18 +181,20 @@ def _record_total(rec: SceneRecord) -> float:
     return rec.cost_usd + rec.audio_cost_usd + rec.keyframe_cost_usd + rec.tts_cost_usd
 
 
-def costs_summary(db_path: Path = LEDGER_PATH, days: int | None = None,
+def costs_summary(db_path: Path | None = None, days: int | None = None,
                   project: str | None = None) -> dict:
     """Cuanto se ha gastado: total, desglose, por proyecto y por proveedor.
 
     Lee el libro mayor (D-079). `days` limita a los ultimos N dias; `project`
     filtra a un slug. Sin ledger -> resumen en ceros (nunca lanza)."""
+    # db_path se resuelve aqui (no en la firma) para que monkeypatch de
+    # LEDGER_PATH en tests sea efectivo (default lazy, no early-bind).
+    db_path = Path(db_path) if db_path is not None else LEDGER_PATH
     empty = {"total_usd": 0.0, "runs": 0, "scenes": 0,
              "breakdown": {"video_usd": 0.0, "sfx_usd": 0.0, "keyframe_usd": 0.0,
                             "tts_usd": 0.0},
              "by_project": {}, "by_provider": {},
              "days": days, "project": project}
-    db_path = Path(db_path)
     if not db_path.exists():
         return empty
 

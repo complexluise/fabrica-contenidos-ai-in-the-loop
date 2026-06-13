@@ -1,9 +1,9 @@
-"""Core Studio (D-031): job manager — estados y registro (lógica pura).
+"""Core Studio (D-031): job manager — estados y registro (logica pura).
 
 Ciclo 1 (persistencia SQLite): cubre transiciones persistidas, barrido al
-boot y el historial. Los tests existentes usan out/telemetry.sqlite (que se
-crea con IF NOT EXISTS y no interfiere con la suite); los nuevos de
-persistencia usan tmp_path para estar aislados.
+boot y el historial. Los tests de persistencia usan tmp_path para estar
+aislados; la fixture autouse en conftest.py garantiza que NINGUN test
+escriba en out/telemetry.sqlite (la base real del operador).
 """
 
 import asyncio
@@ -618,6 +618,36 @@ def test_history_scope_in_each_row(tmp_path):
     row = next(h for h in history if h["id"] == "b1")
     assert "scope" in row
     assert row["scope"] == "batch"
+
+
+# --- Aislamiento: JobManager() sin args NO debe tocar out/telemetry.sqlite ----
+
+
+def test_job_manager_default_does_not_write_real_ledger():
+    """JobManager() sin db_path usa el LEDGER_PATH redirigido por la fixture.
+
+    La fixture autouse _isolate_ledger monkeypatcha pipeline.server.jobs.LEDGER_PATH
+    a un SQLite temporal. Este test verifica que el default lazy (resuelto en
+    __init__, no en la firma) respeta el monkeypatch y por lo tanto nunca toca
+    out/telemetry.sqlite durante la suite.
+    """
+    import pipeline.server.jobs as jobs_mod
+
+    # La ruta real del operador (hardcodeada como referencia, nunca debe ser usada)
+    real_ledger = Path("out/telemetry.sqlite").resolve()
+
+    # La fixture ya redirige LEDGER_PATH del modulo a un tmp.
+    # Crear un JobManager sin argumentos debe usar ESE tmp, no la ruta real.
+    m = JobManager()
+    db_used = m._store._db_path  # JobStore expone _db_path
+    assert db_used.resolve() != real_ledger, (
+        f"JobManager() sin args escribio en la base real {real_ledger}. "
+        "El aislamiento fallo."
+    )
+    # Ademas, el path usado debe ser el que el modulo tiene ahora (el tmp de la fixture)
+    assert db_used == jobs_mod.LEDGER_PATH, (
+        f"JobManager usa {db_used} pero jobs_mod.LEDGER_PATH es {jobs_mod.LEDGER_PATH}"
+    )
 
 
 def test_migration_adds_scope_to_existing_db(tmp_path):
