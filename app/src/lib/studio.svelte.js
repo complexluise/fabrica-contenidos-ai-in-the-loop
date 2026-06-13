@@ -15,18 +15,25 @@ export const studio = $state({
 //   "ia"  -> la maquina propone/ejecuta  (azul)
 //   "lee" -> lectura/contexto            (neutro)
 // Ajustes (claves) NO es un paso del bucle: es setup. Vive aparte (CONFIG, #4).
-// D-061: "Elegir" se separa en tres etapas, de lo grueso a lo fino — una página,
-// una decisión: Casting (QUIENES) -> Encuadres (como se VE cada escena) ->
-// Animatic (como FLUYE la pelicula, en poses, antes de pagar video).
+// D-086: el Storyboard es EL CENTRO (D-061). Casting/Encuadres/Animatic ya no son
+// pasos hermanos: son MESAS DE TRABAJO que lo nutren (`parent: "storyboard"`) —
+// cada una produce imágenes que aparecen en el Storyboard, donde todo se valida.
+// El bucle numerado queda 1 Guion -> 2 Storyboard -> 3 Producir; las sub-etapas
+// cuelgan del Storyboard.
 export const STAGES = [
-  { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",            actor: "lee" },
-  { id: "importar",   n: 1, label: "Guion",      sub: "Texto -> borrador (la IA)",     actor: "ia"  },
-  { id: "storyboard", n: 2, label: "Storyboard", sub: "Edita y firma el plan",         actor: "tu"  },
-  { id: "casting",    n: 3, label: "Casting",    sub: "La cara de cada personaje",     actor: "tu"  },
-  { id: "encuadres",  n: 4, label: "Encuadres",  sub: "La imagen clave de cada escena", actor: "tu" },
-  { id: "animatic",   n: 5, label: "Animatic",   sub: "La pelicula en poses",          actor: "tu"  },
-  { id: "producir",   n: 6, label: "Producir",   sub: "Armar el video y el paquete",   actor: "ia"  },
+  { id: "inicio",     n: 0, label: "Inicio",     sub: "Donde estas parado",             actor: "lee" },
+  { id: "importar",   n: 1, label: "Guion",      sub: "Texto -> borrador (la IA)",      actor: "ia"  },
+  { id: "storyboard", n: 2, label: "Storyboard", sub: "El centro: edita, valida, firma", actor: "tu"  },
+  { id: "casting",    label: "Casting",    sub: "La cara de cada personaje",      actor: "tu", parent: "storyboard" },
+  { id: "encuadres",  label: "Encuadres",  sub: "La imagen clave de cada escena",  actor: "tu", parent: "storyboard" },
+  { id: "animatic",   label: "Animatic",   sub: "La pelicula en poses",           actor: "tu", parent: "storyboard" },
+  { id: "producir",   n: 3, label: "Producir",   sub: "Armar el video y el paquete",    actor: "ia"  },
 ];
+
+// Las mesas que nutren el Storyboard (sub-etapas), en orden.
+export const FEEDERS = STAGES.filter((s) => s.parent === "storyboard");
+// Las etapas del bucle numerado (sin las sub-etapas ni Inicio).
+export const TOPLEVEL = STAGES.filter((s) => !s.parent);
 
 // Configuración (claves de API): setup transversal, fuera del bucle numerado (#4).
 export const CONFIG = { id: "ajustes", label: "Configuración", sub: "Claves de API" };

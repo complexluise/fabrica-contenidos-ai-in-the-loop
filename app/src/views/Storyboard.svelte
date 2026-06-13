@@ -6,7 +6,8 @@
 
   let { slug } = $props();
   let doc   = $state(null);
-  let cand  = $state({ keyframes: {}, cast: {}, selections: {} });
+  let cand  = $state({ keyframes: {}, cast: {}, selections: {}, cast_selections: {} });
+  let strip = $state([]);        // D-086: poses por plano del animatic (nutre el board)
   let knownChars = $state([]);   // personajes del proyecto (para asignar a escenas)
   let editing = $state({});      // { [sceneId]: true } tarjetas en modo edicion
   let expanded = $state({});     // { [sceneId]: true } vista detalle en modo lectura
@@ -101,7 +102,30 @@
     get(`/api/projects/${slug}/candidates`)
       .then((c) => { cand = c; })
       .catch(() => {});
+
+    // D-086: el animatic nutre el Storyboard — las poses por plano se ven acá.
+    get(`/api/projects/${slug}/animatic`)
+      .then((a) => { strip = a.strip || []; })
+      .catch(() => {});
   });
+
+  // D-086: el Storyboard es el centro donde TODO se valida (D-061). Estas
+  // ayudas leen lo que produjeron las mesas (casting/encuadres/animatic).
+  // Cara elegida de un personaje (casting.yaml) -> URL servible, o null.
+  function castFace(name) {
+    const p = cand.cast_selections?.[name];
+    return p ? `/files/${slug}/${String(p).replace(/\\/g, "/")}` : null;
+  }
+  // Poses por plano de la escena (del animatic): [{shot_id, url|null, ready}].
+  const scenePoses = (sceneId) => strip.filter((e) => e.scene === sceneId)
+    .map((e) => ({ shot_id: e.shot_id, url: e.destino, ready: e.ready }));
+  // Estado de validación de la escena (para los badges).
+  const castReady = (s) => s.characters.length === 0
+    || s.characters.every((c) => !!castFace(c));
+  function posesReady(sceneId) {
+    const ps = scenePoses(sceneId);
+    return { ready: ps.filter((p) => p.url).length, total: ps.length };
+  }
 
   const touch = () => { dirty = true; msg = ""; };
   const sceneDur = (s) => s.shots.reduce((a, sh) => a + (Number(sh.duration_s) || 0), 0);
@@ -374,6 +398,8 @@
     {@const isExpanded = !!expanded[s.id]}
     {@const kfUrl = selectedKf(s.id)}
     {@const hasCands = hasKfCands(s.id)}
+    {@const scenePoseList = scenePoses(s.id)}
+    {@const scenePoseStat = posesReady(s.id)}
 
     <section class="scene" class:is-editing={isEditing}>
 
@@ -591,6 +617,20 @@
                   </span>
                 {/each}
               </div>
+              <!-- D-086: validación de un vistazo (lo que nutrió el board) -->
+              <div class="val-chips">
+                {#if s.characters.length}
+                  <span class="vchip" class:ok={castReady(s)}>
+                    {castReady(s) ? "✓" : "○"} casting
+                  </span>
+                {/if}
+                <span class="vchip" class:ok={kfUrl}>{kfUrl ? "✓" : "○"} encuadre</span>
+                {#if scenePoseStat.total > 0}
+                  <span class="vchip" class:ok={scenePoseStat.ready >= scenePoseStat.total}>
+                    {scenePoseStat.ready >= scenePoseStat.total ? "✓" : "○"} poses {scenePoseStat.ready}/{scenePoseStat.total}
+                  </span>
+                {/if}
+              </div>
             </div>
             {#if kfUrl}
               <img class="kf-mini" src={kfUrl} alt="keyframe {s.id}" />
@@ -670,18 +710,57 @@
               </div>
             </div>
 
-            <!-- Keyframe -->
-            <div class="rf-kf-row">
-              {#if kfUrl}
-                <img class="rf-thumb" src={kfUrl} alt="keyframe {s.id}" />
-                <button class="small ghost" onclick={() => goTo("encuadres")}>Cambiar →</button>
-              {:else if hasCands}
-                <span class="muted" style="font-size:12px">◈ candidatos listos —</span>
-                <button class="small machine" onclick={() => goTo("encuadres")}>Elegir →</button>
-              {:else}
-                <span class="muted" style="font-size:12px">◇ sin keyframe —</span>
-                <button class="small ghost" onclick={() => goTo("encuadres")}>Generar →</button>
+            <!-- D-086: Lo visual — acá converge y se valida lo que produjeron las
+                 mesas (casting/encuadres/animatic). El Storyboard es el centro. -->
+            <div class="rf-section rf-hub">
+              <span class="rf-lbl">Lo visual — acá se valida</span>
+
+              <!-- Casting: las caras de los personajes de la escena -->
+              {#if s.characters.length}
+                {@const ok = castReady(s)}
+                <div class="hub-row">
+                  <span class="hub-tag" class:ok>Casting {ok ? "✓" : ""}</span>
+                  {#each s.characters as ch}
+                    {@const face = castFace(ch)}
+                    <span class="cast-chip" title={ch}>
+                      {#if face}<img src={face} alt={ch} />{:else}<span class="cast-hole">?</span>{/if}
+                      <span class="cast-name">{ch}</span>
+                    </span>
+                  {/each}
+                  <button class="small ghost hub-go" onclick={() => goTo("casting")}>
+                    {ok ? "Casting →" : "Elegir caras →"}
+                  </button>
+                </div>
               {/if}
+
+              <!-- Encuadres + Animatic: una pose (still) por plano de la escena -->
+              <div class="hub-row">
+                <span class="hub-tag" class:ok={scenePoseStat.total > 0 && scenePoseStat.ready >= scenePoseStat.total}>
+                  Planos {scenePoseStat.total ? `${scenePoseStat.ready}/${scenePoseStat.total}` : ""}
+                </span>
+                {#if scenePoseList.length}
+                  {#each scenePoseList as p, j}
+                    {#if p.url}
+                      <img class="pose-thumb" src={p.url} alt="plano {j + 1}" loading="lazy" />
+                    {:else}
+                      <span class="pose-hole" title="sin generar">P{j + 1}</span>
+                    {/if}
+                  {/each}
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Encuadres →</button>
+                  {#if scenePoseStat.ready < scenePoseStat.total}
+                    <button class="small machine hub-go" onclick={() => goTo("animatic")}>Completar →</button>
+                  {/if}
+                {:else if kfUrl}
+                  <img class="pose-thumb" src={kfUrl} alt="keyframe {s.id}" loading="lazy" />
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Cambiar →</button>
+                {:else if hasCands}
+                  <span class="muted" style="font-size:12px">◈ candidatos listos</span>
+                  <button class="small machine hub-go" onclick={() => goTo("encuadres")}>Elegir →</button>
+                {:else}
+                  <span class="muted" style="font-size:12px">◇ sin imagen</span>
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Generar →</button>
+                {/if}
+              </div>
             </div>
 
           </div>
@@ -813,6 +892,13 @@
     flex: 1; padding: 13px 18px; display: flex; flex-direction: column; gap: 8px;
   }
   .shots-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  /* D-086: chips de validación de un vistazo en la vista colapsada */
+  .val-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .vchip {
+    font-size: 10.5px; font-weight: 600; color: var(--ink-soft);
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  }
+  .vchip.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-wash); }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
     background: var(--paper-2); border: 1px solid var(--line);
@@ -873,14 +959,31 @@
   .vo-cue .cue-tag  { color: var(--ink-soft); }
   .cc-cue .cue-tag  { color: var(--ink-soft); }
 
-  /* Keyframe en modo expandido */
-  .rf-kf-row {
-    padding-top: 14px; display: flex; align-items: center; gap: 12px;
+  /* D-086: el hub visual — caras + poses por plano, donde se valida */
+  .rf-hub { display: flex; flex-direction: column; gap: 10px; }
+  .hub-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .hub-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft); min-width: 64px;
   }
-  .rf-thumb {
-    height: 80px; border-radius: var(--r-sm);
-    border: 1px solid var(--line-2); object-fit: cover;
-    aspect-ratio: 16 / 9; display: block;
+  .hub-tag.ok { color: var(--ok); }
+  .hub-go { margin-left: 4px; }
+  .cast-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+  .cast-chip img, .cast-hole {
+    width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+    border: 2px solid var(--line-2); display: grid; place-items: center;
+  }
+  .cast-chip img { border-color: var(--red); }
+  .cast-hole { background: var(--paper-2); color: var(--ink-soft); font-size: 16px; }
+  .cast-name { font-size: 10px; color: var(--ink-soft); max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pose-thumb {
+    height: 64px; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-sm);
+    border: 1px solid var(--line-2); display: block;
+  }
+  .pose-hole {
+    height: 64px; width: 64px; display: grid; place-items: center; border-radius: var(--r-sm);
+    border: 1.5px dashed var(--line-2); color: var(--ink-soft); font-size: 11px;
+    font-family: var(--font-mono); background: var(--paper-2);
   }
 
   /* Boton expand en cabecera */

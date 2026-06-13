@@ -130,15 +130,26 @@
       {#each STAGES as s, i}
         {@const state = stageState(s.id)}
         {@const isCurrent = next && next.tab === s.id && studio.tab !== s.id && state !== "done"}
+        {@const isFeeder = s.parent === "storyboard"}
+        {@const feederFirst = isFeeder && STAGES[i - 1]?.parent !== "storyboard"}
+        {#if feederFirst}
+          <!-- D-086: las mesas que NUTREN el Storyboard, agrupadas bajo él -->
+          <div class="feeders-cap">nutren el storyboard</div>
+        {/if}
         <button
           class="step actor-{s.actor} state-{state}"
           class:active={studio.tab === s.id}
           class:current={isCurrent}
+          class:feeder={isFeeder}
           onclick={() => goTo(s.id)}
         >
-          {#if i > 0}<span class="rail" class:last={i === STAGES.length - 1}></span>{/if}
-          <StageNode n={s.n} actor={s.actor} done={state === "done"}
-                     icon={s.id === "inicio" ? "home" : ""} />
+          {#if i > 0 && !isFeeder && !feederFirst}<span class="rail"></span>{/if}
+          {#if isFeeder}
+            <span class="feeder-mark" class:done={state === "done"}></span>
+          {:else}
+            <StageNode n={s.n} actor={s.actor} done={state === "done"}
+                       icon={s.id === "inicio" ? "home" : ""} />
+          {/if}
           <span class="txt">
             <span class="lbl">{s.label}</span>
             <span class="sub">{s.sub}</span>
@@ -272,6 +283,24 @@
     height: 18px;
     background: var(--line-2);
   }
+
+  /* D-086: las mesas que nutren el Storyboard — sub-etapas indentadas */
+  .feeders-cap {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft); padding: 6px 0 2px 40px;
+  }
+  .step.feeder {
+    padding-left: 40px; gap: 10px;
+    margin-left: 18px; border-left: 2px solid var(--line-2);
+    border-radius: 0 var(--r) var(--r) 0;
+  }
+  .step.feeder .lbl { font-size: 13px; font-weight: 600; }
+  .step.feeder .sub { font-size: 10.5px; }
+  .feeder-mark {
+    width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%;
+    border: 2px solid var(--red); background: var(--paper);
+  }
+  .feeder-mark.done { background: var(--ok); border-color: var(--ok); }
 
 
   /* color por actor (quien decide en ese paso) */
