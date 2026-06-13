@@ -246,7 +246,10 @@ async def _shot_boundaries(*, project, cfg, keyframer, scene, shot, shot_id, idx
     if idx == 0 and scene.id in keyframe_overrides:  # ancla elegida (D-022/D-025)
         destino = keyframe_overrides[scene.id]
         kf_key = f"picked:{destino.name}"
-        logger.info("[%s] %s | destino directo (ancla): %s", shot_id, scene.class_, destino.name)
+        # Solo en el render REAL: en el strip dry (status/animatic, que se recalcula
+        # en cada navegación) este INFO por-plano inunda la consola sin aportar.
+        logger.log(logging.DEBUG if dry else logging.INFO,
+                   "[%s] %s | destino directo (ancla): %s", shot_id, scene.class_, destino.name)
     else:
         destino = project.cache_lookup("keyframes", kf_key, ".png")
         if destino is None and not dry:
