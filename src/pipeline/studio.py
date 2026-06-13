@@ -178,6 +178,126 @@ def record_cast_picks(project: Project, picks: dict[str, int]) -> Path:
     return project.dir / "casting.yaml"
 
 
+async def gen_cast_character(
+    project: Project, spec: ProjectSpec, cfg: Config,
+    name: str, n: int, prompt_tweak: str = "", backend: str | None = None,
+) -> None:
+    """[D-084] Genera N caras MÁS para UN personaje y hace MERGE en
+    cast_candidates.yaml (espejo de `gen_keyframes_scene`).
+
+    `prompt_tweak` ('más serio', 'de perfil', 'más joven') se concatena al prompt
+    de diseño antes de generar: cambia el cache key sin tocar el `design` del spec.
+    Seeds monótonos (cast_seeds.yaml) para que "más variantes" jamás reuse un seed
+    ya emitido — borrar y re-pedir no devuelve la cara recién descartada (D-078)."""
+    ch = spec.characters.get(name)
+    if ch is None or not ch.design:
+        raise ValueError(f"El personaje '{name}' no existe o no tiene 'design:'.")
+
+    keyframer = KeyframeGenerator(cfg.style, out_dir=project.dir / "_scratch", backend=backend,
+                                  fmt=spec.format)  # D-071: stills en el formato del spec
+    ref_sig = sorted(str(r) for r in ch.design.refs)
+    refs_resolved = resolve_refs(project.dir, ch.design.refs)
+    base_prompt = compose_character_prompt(ch.design)
+    cast_prompt = f"{base_prompt}, {prompt_tweak}".strip(", ") if prompt_tweak else base_prompt
+
+    cand_path = project.dir / "cast_candidates.yaml"
+    manifest = read_yaml(cand_path)
+    existing = manifest.get(name, [])
+    seeds_path = project.dir / "cast_seeds.yaml"
+    seeds = read_yaml(seeds_path)
+    seed_offset = candidate_seed_offset(seeds.get(name), len(existing))
+
+    new_paths: list[str] = []
+    for i in range(n):
+        seed = seed_offset + i
+        try:
+            key = cache_key("cast", {
+                "character": name, "prompt": cast_prompt,
+                "refs": ref_sig, "ref_model": cfg.style.keyframe.ref_model, "seed": seed,
+                "aspect": spec.format,  # D-078: cambiar el formato regenera caras
+            })
+            hit = project.cache_lookup("cast", key, ".png")
+            if hit is not None:
+                stored = hit
+                logger.info("[%s] cara seed=%d (cache hit)", name, seed)
+            else:
+                logger.info("[%s] cara seed=%d | generando...", name, seed)
+                tmp = await keyframer.generate_design(cast_prompt, refs_resolved, seed=seed)
+                stored = project.cache_store("cast", key, tmp, ".png")
+            _alias(project, "faces", name, "cara", seed, stored)
+            new_paths.append(str(stored))
+            logger.info("[%s] cara seed=%d lista", name, seed)
+        except Exception as exc:  # noqa: BLE001 — una cara que falla no tira las demás
+            logger.error("[%s] cara seed=%d FALLO: %s", name, seed, exc)
+            logger.debug("[%s] traceback", name, exc_info=True)
+
+    manifest[name] = existing + new_paths
+    cand_path.write_text(
+        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    seeds[name] = seed_offset + n  # D-078: el contador avanza siempre
+    seeds_path.write_text(yaml.safe_dump(seeds, sort_keys=False), encoding="utf-8")
+
+
+def add_cast_upload(project: Project, name: str, data: bytes, suffix: str) -> Path:
+    """[D-084] Guarda una cara subida a mano como candidato de casting (espejo de
+    `add_candidate_upload`). El oficio manual también propone: una foto, un dibujo
+    — entra al pool y se elige igual que una generada (FILOSOFIA §2)."""
+    import hashlib
+
+    if not suffix.startswith("."):
+        suffix = f".{suffix}"
+    key = hashlib.sha256(data).hexdigest()[:16]
+    dest = project.cache_dir / "cast" / f"upload_{key}{suffix}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+
+    cand_path = project.dir / "cast_candidates.yaml"
+    manifest = read_yaml(cand_path)
+    existing = manifest.get(name, [])
+    if str(dest) not in existing:
+        manifest[name] = existing + [str(dest)]
+        cand_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return dest
+
+
+def delete_cast_candidate(project: Project, name: str, idx: int) -> dict:
+    """[D-084] Descarta el candidato `idx` de un personaje (espejo de
+    `delete_candidate`). Reconcilia casting.yaml por PATH: si esa cara estaba
+    elegida, se descarta la elección."""
+    cand_path = project.dir / "cast_candidates.yaml"
+    if not cand_path.exists():
+        raise RuntimeError("No hay candidatos de casting.")
+    manifest = read_yaml(cand_path)
+    cands = manifest.get(name)
+    if not cands:
+        raise ValueError(f"No hay candidatos de casting para '{name}'.")
+    if not 0 <= idx < len(cands):
+        raise ValueError(f"Índice {idx} fuera de rango para '{name}' (0..{len(cands) - 1}).")
+    removed = cands.pop(idx)
+    manifest[name] = cands
+    cand_path.write_text(
+        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    casting = load_casting(project)
+    casting_dropped = False
+    if casting.get(name) == relativize(project.dir, removed):
+        casting.pop(name, None)
+        (project.dir / "casting.yaml").write_text(
+            yaml.safe_dump(casting, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+        casting_dropped = True
+    return {"removed": removed, "remaining": len(cands), "casting_dropped": casting_dropped}
+
+
+def is_cast_upload(path) -> bool:
+    """True si la cara la subió el humano (cast/upload_<hash>.png). Para el badge
+    'tu foto' en la mesa de luz del casting (espejo de `is_upload`)."""
+    return Path(path).name.startswith("upload_")
+
+
 def set_cast_faces(project: Project, faces: dict[str, Path]) -> Path:
     """Fija caras canónicas **directas** (D-025), sin pasar por `cast`/`pick-cast`.
 

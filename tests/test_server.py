@@ -372,3 +372,31 @@ def test_concurrent_same_job_is_409(tmp_path, monkeypatch):
         assert "trabajo" in r.json()["detail"].lower()
     finally:
         gate.set()  # liberar el worker bloqueado (teardown limpio)
+
+
+# --- D-084: casting con el patrón fluido de los keyframes ------------------------
+
+def test_candidates_exposes_cast_sources(tmp_path):
+    # La mesa de luz del casting necesita cast_sources para el badge "tu foto".
+    _make_project(tmp_path)
+    body = _client(tmp_path).get("/api/projects/demo/candidates").json()
+    assert "cast_sources" in body and isinstance(body["cast_sources"], dict)
+
+
+def test_cast_character_404_for_unknown(tmp_path):
+    _make_project(tmp_path)
+    r = _client(tmp_path).post("/api/projects/demo/cast/fantasma", json={})
+    assert r.status_code == 404
+
+
+def test_cast_upload_404_for_unknown_character(tmp_path):
+    _make_project(tmp_path)
+    r = _client(tmp_path).post("/api/projects/demo/cast-candidates/fantasma/upload",
+                               json={"data": "Zm9v", "filename": "x.png"})
+    assert r.status_code == 404
+
+
+def test_discard_cast_candidate_422_when_no_candidates(tmp_path):
+    _make_project(tmp_path)
+    r = _client(tmp_path).delete("/api/projects/demo/cast-candidates/juan/0")
+    assert r.status_code == 422

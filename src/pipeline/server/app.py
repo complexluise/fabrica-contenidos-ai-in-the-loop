@@ -514,6 +514,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"keyframes": read(project.candidates_path),
                 "keyframe_sources": sources(project.candidates_path),  # T11
                 "cast": read(project.dir / "cast_candidates.yaml"),
+                "cast_sources": sources(project.dir / "cast_candidates.yaml"),  # D-084
                 "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
                 "selections": read_yaml(project.selections_path),
                 "cast_selections": read_yaml(project.dir / "casting.yaml")}
@@ -802,6 +803,59 @@ def create_app(projects_dir: Path = Path("projects"),
             return {"sheet": str(sheet)}
 
         return jobs.spawn("cast", slug, coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/cast/{character}")
+    async def gen_cast_character(slug: str, character: str, n: int = 2,
+                                 backend: str | None = None, body: dict = {}):
+        """[D-084] Genera N caras MÁS para UN personaje con prompt_tweak opcional
+        (espejo de keyframes/{scene_id}). Job/SSE; project = '{slug}/{character}'."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if character not in spec.characters:
+            raise HTTPException(404, f"Personaje '{character}' no encontrado.")
+        tweak = (body.get("prompt_tweak") or "").strip()
+
+        async def coro():
+            await studio.gen_cast_character(project, spec, cfg, character, n,
+                                            prompt_tweak=tweak, backend=backend)
+            return {"character": character, "n": n}
+
+        return jobs.spawn("cast", f"{slug}/{character}", coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/cast-candidates/{character}/upload")
+    async def upload_cast_candidate(slug: str, character: str, body: UploadBody):
+        """[D-084] Sube una cara como candidato manual de casting (base64 en JSON)."""
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        if character not in spec.characters:
+            raise HTTPException(404, f"Personaje '{character}' no encontrado.")
+        raw = body.data.strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 de la imagen).")
+        suffix = Path(body.filename or "upload.png").suffix.lower() or ".png"
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}. Usá PNG, JPG o WEBP.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = studio.add_cast_upload(project, character, data, suffix)
+        return {"url": file_url(dest), "character": character, "file": dest.name}
+
+    @app.delete("/api/projects/{slug}/cast-candidates/{character}/{idx}")
+    def discard_cast_candidate(slug: str, character: str, idx: int):
+        """[D-084] Descarta el candidato `idx` de un personaje; reconcilia casting.yaml."""
+        from .. import studio
+
+        project, _spec, _cfg = load(slug)
+        try:
+            return studio.delete_cast_candidate(project, character, idx)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(422, str(exc))
 
     @app.post("/api/projects/{slug}/render")
     async def render(slug: str, body: RenderBody | None = None):
