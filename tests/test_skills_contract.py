@@ -2,8 +2,8 @@
 
 Una skill (`skills/<nombre>/SKILL.md`) es prosa que codifica conocimiento del CLI.
 Si un subcomando o flag que la skill menciona desaparece, la skill queda obsoleta
-**sin que nada falle** -> el mismo "Known drift" que el SPEC de referencia documenta
-(docs/SPEC-organic-illustration-pipeline.md §10/F10).
+**sin que nada falle** -> el mismo "Known drift" que el spec de referencia documenta
+(docs/notas/idea-organic-illustration-pipeline.md §10/F10).
 
 Contramedida: cada SKILL.md declara al final un bloque
 

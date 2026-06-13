@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 API-only multi-model **AI video generation pipeline**. Orchestrates Kling / Seedance / Veo (video) and Flux / nano-banana (keyframes) through **fal.ai**, with a Claude-vision Quality Gate, content-addressed caching, and **"AI-in-the-Loop" human checkpoints** (a human picks the character face and the keyframe among N candidates). Default style is LEGO; style is parametrizable.
 
-Authoritative docs (read these before large changes): `SPEC.md` (architecture + contracts), `ROADMAP.md` (sprints + acceptance criteria), `docs/decisiones/` (numbered ADRs, max 10 per file — the *why* behind every choice). For authoring shots/prompts, `docs/oficio-video-ai.md` holds the sourced craft rules (i2v prompt dialect, brickfilm grammar, finishing recipe, takes economy) behind D-070..D-074.
+Authoritative docs (read these before large changes): `PRD.md` (the what/for-whom + per-actor journeys), `ARCHITECTURE.md` (the how — layers + contracts), `ROADMAP.md` (index of sprints + acceptance criteria; closed work archived under `docs/roadmap/`), `docs/decisiones/` (numbered ADRs, max 10 per file — the *why* behind every choice). For authoring shots/prompts, `docs/oficio-video-ai.md` holds the sourced craft rules (i2v prompt dialect, brickfilm grammar, finishing recipe, takes economy) behind D-070..D-074.
 
 ## Commands
 

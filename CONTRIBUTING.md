@@ -11,10 +11,11 @@ Al participar aceptás el [Código de Conducta](./CODE_OF_CONDUCT.md).
 
 Lee, en este orden, lo que sea relevante a tu cambio:
 
-1. [`FILOSOFIA.md`](./FILOSOFIA.md) — el *por qué*.
-2. [`SPEC.md`](./SPEC.md) — arquitectura y contratos (las 10 capas).
-3. [`ROADMAP.md`](./ROADMAP.md) — sprints y criterios de aceptación.
-4. [`docs/decisiones/`](./docs/decisiones/) — los ADR: el *por qué* de cada elección técnica.
+1. [`FILOSOFIA.md`](./FILOSOFIA.md) — el *por qué* (valores).
+2. [`PRD.md`](./PRD.md) — el *qué/para-quién* + recorridos por actor.
+3. [`ARCHITECTURE.md`](./ARCHITECTURE.md) — el *cómo*: arquitectura y contratos (las 10 capas).
+4. [`ROADMAP.md`](./ROADMAP.md) — sprints y criterios de aceptación (cerrados en `docs/roadmap/`).
+5. [`docs/decisiones/`](./docs/decisiones/) — los ADR: el *por qué* de cada elección técnica.
 
 ## Preparar el entorno
 

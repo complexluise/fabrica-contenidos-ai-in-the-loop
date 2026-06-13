@@ -1,4 +1,4 @@
-"""Orquestador de proyecto con caché content-addressed (SPEC §7).
+"""Orquestador de proyecto con caché content-addressed (ARCHITECTURE §7).
 
 Por cada escena: keyframe y video se llavean por hash de sus inputs y se buscan
 en el cache del proyecto. Si hay hit -> no se llama a la API (costo 0). Si hay

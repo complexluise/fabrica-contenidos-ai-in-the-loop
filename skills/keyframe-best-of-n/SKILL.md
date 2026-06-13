@@ -12,7 +12,7 @@ metadata:
 **Checkpoint humano #4 de [D-021]** (keyframe best-of-N): el corazón del flujo
 AI-in-the-Loop. La IA genera **N candidatos por escena** y el Gate los **ordena**
 (mejor primero, [D-021]); el humano elige uno por escena; el render hereda esos
-keyframes elegidos como `init_image` de los modelos image-to-video ([SPEC §0](../../SPEC.md)).
+keyframes elegidos como `init_image` de los modelos image-to-video ([ARCHITECTURE §1, capa L3](../../ARCHITECTURE.md)).
 
 ## Cuándo usar esto
 

@@ -1,4 +1,4 @@
-# SPEC — Industrialización de Video con IA (Multi-modelo, API-only)
+# ARQUITECTURA — Pipeline de Video IA (multi-modelo, API-only)
 
 > **Caso ancla:** video estilo **LEGO**. Diseñado para generalizar a cualquier estilo
 > (sci-fi, claymation, anime, producto…) intercambiando el *style slot* sin tocar la
@@ -6,29 +6,10 @@
 >
 > **Enfoque:** solo API (sin self-hosting en MVP), priorizando ahorro y mezcla de modelos.
 >
-> **Estado:** v0.2 — este documento describe **arquitectura y contratos**. El *por qué* de cada
+> **Qué es esto:** el **CÓMO** está construido — capas, contratos e interfaces. El **qué/para-quién**
+> vive en [`PRD.md`](PRD.md); el **plan** en [`ROADMAP.md`](ROADMAP.md); el *por qué* de cada
 > elección (con estado y "qué cambió") vive en el registro de decisiones: **[`docs/decisiones/`](docs/decisiones/)**.
 > Revalidar precios de cada API antes de cerrar presupuesto.
-
----
-
-## 0. Resumen ejecutivo
-
-Pipeline que convierte un **brief/guion** en un **video multi-formato** atravesando 10 capas
-desacopladas por contratos tipados. El núcleo es **Python + asyncio** orquestando varios
-modelos de video por API a través de una **interfaz `Provider` única**, con un **Quality Gate
-común** y **telemetría de costo/latencia por escena desde el día 1**.
-
-**Insight central:** el cuello de botella no es el modelo, es (a) la **consistencia entre tomas**
-y (b) el **control de costo por escena**. Toda la arquitectura gira en torno a un
-**clasificador de escenas + quality gate**, y a enrutar cada escena al modelo más barato que
-cumpla el requisito.
-
-**Decisión técnica más importante:** en API-only el **LoRA de estilo no vive en el modelo de
-video** (Veo/Kling/Seedance no aceptan pesos custom). Vive en una **etapa de imagen previa**
-(Flux + LoRA) que genera un *keyframe* de estilo, el cual se inyecta como `init_image` a los
-modelos **image-to-video**. Esto añade la capa L3 (Keyframe) y es lo que da el look LEGO + la
-consistencia.
 
 ---
 
@@ -403,43 +384,6 @@ En estricto: en fallo → reintento / escalado de tier (según estrategia) y, ú
 
 ---
 
-## 6. Plan de entrega por capas
-
-### MVP (hoy) — slice vertical
-`brief → un video LEGO ensamblado`, atravesando todas las capas en su versión mínima. Lo que
-importa es **fijar los contratos**; el músculo se añade después.
-
-| Capa | Versión MVP | Se difiere |
-|---|---|---|
-| L0 Contracts | Completo (Pydantic) | — |
-| L1 Decomp | Claude: guion → `list[Scene]` | edición humana de escenas |
-| L2 Classifier | Reglas + Claude | calibración fina / entrenado |
-| L3 Keyframe | Flux + LEGO LoRA (fal) → 1 img/escena | banco de personajes, multi-ref |
-| L4 Adapter | **1 provider: Kling** (i2v) vía fal | Seedance, Veo, Runway, Luma |
-| L5 Orchestrator | **solo Smart Router** | cascade + ensemble |
-| L6 Gate | **VLM-judge** pasa/falla + 1 reintento | CLIP/insightface/aesthetic |
-| L7 Assembly | ffmpeg concat + música + captions | color grade, transiciones, Remotion |
-| L8 Delivery | 1 formato **9:16** | 1:1 y 16:9 |
-| L9 Observability | log `cost_usd`+`latency_s` → SQLite | dashboard |
-
-El MVP se construyó así (histórico). Hoy el comando vive sobre un **proyecto** (ver README/§7):
-```bash
-uv run pipeline run lego_demo                      # autónomo, con caché
-uv run pipeline run --brief briefs/example.yaml    # smoke suelto a out/ (sin proyecto)
-```
-
-**Orden de construcción (MVP):** `contracts` → `telemetry` → adapter `fal_kling` → `keyframe` →
-`router` → `gate` → `assemble` → `cli`.
-
-### Roadmap
-El plan vivo, con estado por sprint, vive en **[`ROADMAP.md`](ROADMAP.md)** (fuente canónica).
-Resumen al día: Sprints 1–4.6 cerrados (MVP → caché/proyecto → multi-modelo → gate duro →
-consistencia → checkpoints interactivos casting+keyframe). **Siguiente: Sprint 5 — Producción
-mínima** (música + captions por escena + robustez). Luego: audio/voz ElevenLabs (6), escala/ops (7),
-internalización (8).
-
----
-
 ## 7. Modelo de proyecto, iteración y caché
 
 > Decisión de diseño (Sprint 1.5). El cuello de botella al iterar **no es el orden en disco,
@@ -569,7 +513,9 @@ legible y tomable a mano:
 
 ```
 video_gen_pipeline/
-├─ SPEC.md
+├─ PRD.md                   # qué/para-quién + recorridos por actor
+├─ ARCHITECTURE.md          # este archivo: cómo (capas + contratos)
+├─ ROADMAP.md               # plan (índice; cerrados en docs/roadmap/)
 ├─ pyproject.toml
 ├─ .mcp.json               # registra mcp-video (MCP, vía uvx) para edición autónoma ([D-042])
 ├─ config/
