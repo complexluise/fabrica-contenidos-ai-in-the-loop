@@ -293,11 +293,17 @@ de ejecución. Las referencias `archivo:línea` son del estado auditado (commit 
 
 ### Acceptance Criteria
 - [ ] AC1 — Se pueden encolar varios jobs y corren **en paralelo** hasta un límite (semáforo) configurable en Ajustes.
-- [ ] AC2 — El dashboard muestra **todos** los jobs activos con su progreso.
+- [x] AC2 — El dashboard muestra **todos** los jobs activos con su progreso. ([D-083])
 
 ### Tasks
 - [ ] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
-- [ ] T3.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
+- [x] T3.2 — Dashboard de jobs: **dock siempre visible** en el sidebar (descubrimiento por poll
+  de `/api/jobs` + progreso por SSE por job; reusa `attachJob`/multi-consumer de D-082). Clic en
+  un job → su proyecto + pestaña. ([D-083])
+
+> **Parcial:** AC2/T3.2 cerrados ([D-083], 2026-06-12); build de UI limpio. **Pendiente AC1/T3.1**
+> (semáforo de concurrencia): el dock MUESTRA lo que corre; limitar cuántos corren es backend aparte.
+> Hoy el guard 409 (D-082) ya impide el mismo job duplicado.
 
 ---
 

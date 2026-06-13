@@ -3,7 +3,9 @@
   import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
            createProject, deleteProject, parseHash, initRouting, writeHash } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
+  import { startJobsMonitor } from "./lib/jobs.svelte.js";
   import StageNode from "./components/StageNode.svelte";
+  import JobsDock from "./components/JobsDock.svelte";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
@@ -38,6 +40,7 @@
     }
     writeHash();
     initRouting();
+    startJobsMonitor();  // D-083: el dashboard de jobs, vivo desde cualquier vista
     try {
       const s = await get("/api/styles");
       if (s?.length) { styles = s; newStyle = s.includes("lego") ? "lego" : s[0]; }
@@ -145,6 +148,8 @@
     </nav>
 
     <div class="foot">
+      <JobsDock />
+
       <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
               onclick={() => goTo(CONFIG.id)}>
         <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">

@@ -85,3 +85,59 @@ export async function findLiveJob(kinds, slug = "") {
     return null; // sin lista de jobs no hay re-enganche, pero tampoco rotura
   }
 }
+
+// --- [Fase 3 / D-083] Monitor GLOBAL de jobs ---------------------------------
+// Un dashboard siempre visible: TODOS los jobs activos con su progreso, sin
+// importar en qué vista estés. Descubre jobs nuevos polleando /api/jobs (barato,
+// sin logs) y sigue el progreso de cada uno por SSE (replay desde la línea 0).
+// Coexiste con el re-enganche por vista (T2.6.9) gracias al stream multi-
+// consumidor (T2.6.23): la misma generación alimenta el dock y su pantalla.
+export const jobsMonitor = $state({ items: {} });  // id -> {id,kind,project,progress,status}
+
+const _streams = new Map();   // id -> cancel()
+let _pollTimer = null;
+
+function _drop(id, delay = 0) {
+  const cancel = _streams.get(id);
+  if (cancel) { cancel(); _streams.delete(id); }
+  if (delay) setTimeout(() => { delete jobsMonitor.items[id]; }, delay);
+  else delete jobsMonitor.items[id];
+}
+
+function _watch(job) {
+  jobsMonitor.items[job.id] = {
+    id: job.id, kind: job.kind, project: job.project,
+    progress: "", status: job.status,
+  };
+  const cancel = attachJob(job.id, {
+    onLine: (l) => { const it = jobsMonitor.items[job.id]; if (it) it.progress = l; },
+    onDone: (status) => {
+      const it = jobsMonitor.items[job.id];
+      if (it) { it.status = status; if (status !== "done") it.progress = "terminó con error"; }
+      // dejar el desenlace visible un instante (✓ rápido, error más tiempo).
+      _drop(job.id, status === "done" ? 1800 : 4500);
+    },
+    onError: () => _drop(job.id, 0),
+  });
+  _streams.set(job.id, cancel);
+}
+
+export function startJobsMonitor() {
+  if (_pollTimer || typeof window === "undefined") return;
+  const tick = async () => {
+    let all;
+    try { all = await get("/api/jobs"); } catch { return; }
+    for (const j of all) {
+      if ((j.status === "running" || j.status === "queued") && !_streams.has(j.id)) {
+        _watch(j);  // job nuevo (de cualquier vista): engancharse a su progreso
+      }
+    }
+  };
+  tick();
+  _pollTimer = setInterval(tick, 3000);
+}
+
+export function stopJobsMonitor() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  for (const id of [..._streams.keys()]) _drop(id, 0);
+}
