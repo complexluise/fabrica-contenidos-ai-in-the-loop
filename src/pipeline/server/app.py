@@ -13,13 +13,13 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import DEFAULT_PROFILE
 from ..settings import get_settings
-from .jobs import JobManager
+from .jobs import JobConflictError, JobManager
 
 
 # --- Bodies tipados (D-077). `update_project` queda como dict a proposito:
@@ -125,6 +125,11 @@ def create_app(projects_dir: Path = Path("projects"),
     app = FastAPI(title="Video Studio (local)")
     jobs = JobManager()
 
+    @app.exception_handler(JobConflictError)
+    async def _job_conflict(_request, exc: JobConflictError):
+        # Fase 2.6/T2.6.6: doble clic / F5 + re-disparo no pagan dos veces.
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     # --- helpers ----------------------------------------------------------
     def safe_project(slug: str):
         """Resuelve el proyecto verificando que quede DENTRO de projects/ (D-077).
@@ -186,6 +191,11 @@ def create_app(projects_dir: Path = Path("projects"),
                 "badge": meta.get("badge", key),
                 "color": meta.get("color", "gray"),
                 "providers": hero_providers,
+                # Fase 2.6/T2.6.14: el default viaja desde el server (D-076, un
+                # solo lugar) y el costo por escena alimenta el estimado del
+                # Animatic (sin el, la UI calculaba NaN).
+                "est_cost_per_scene_usd": rules.get("est_cost_per_scene_usd", 0.05),
+                "default": key == DEFAULT_PROFILE,
             })
         return out
 
@@ -313,6 +323,7 @@ def create_app(projects_dir: Path = Path("projects"),
         guard de selecciones (D-022) si se renombraron/eliminaron escenas."""
         from ..contracts import Scene
         from ..project import load_project_spec, write_spec
+        from ..state import plan_fingerprint
         from ..studio import prune_selections
 
         project = safe_project(slug)
@@ -320,6 +331,7 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
         existing = {s.id: s for s in spec.scenes}
+        plan_before = plan_fingerprint(spec.scenes)  # D-082
 
         raw_scenes = body.get("scenes")
         if not raw_scenes:
@@ -374,12 +386,13 @@ def create_app(projects_dir: Path = Path("projects"),
             spec.voice_backend = body["voice_backend"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
-        # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
-        # limpia (el plan cambió → hay que volver a firmar). Estado derivado (D-032).
+        # "Firmar el plan" (D-021/#5): un marcador en disco. D-082: solo un cambio
+        # NARRATIVO (huella del plan) lo limpia — editar el prompt visual desde
+        # Encuadres o cambiar el backend de imagen NO des-firma en silencio.
         signed_marker = project.dir / "storyboard.signed"
         if body.get("sign"):
             signed_marker.write_text("", encoding="utf-8")
-        else:
+        elif plan_fingerprint(new_scenes) != plan_before:
             signed_marker.unlink(missing_ok=True)
         # T7/T13/D-055: avisos no bloqueantes (clase fuera del perfil, escena sin
         # planos) al momento de firmar — "advertir, no invalidar" (D-046).
@@ -391,8 +404,9 @@ def create_app(projects_dir: Path = Path("projects"),
             advisories = signing_advisories(spec, cfg.routing, cfg.providers)
         except Exception:
             advisories = []
+        # D-082: `signed` refleja el estado REAL (puede haberse preservado).
         return {"saved": str(project.spec_path), "scenes": len(ids),
-                "dropped_selections": dropped, "signed": bool(body.get("sign")),
+                "dropped_selections": dropped, "signed": signed_marker.exists(),
                 "advisories": advisories}
 
     @app.get("/api/projects/{slug}")
@@ -410,6 +424,11 @@ def create_app(projects_dir: Path = Path("projects"),
             "shots": [{
                 "intention": sh.intention, "action": sh.action,  # D-047
                 "framing": sh.framing, "duration_s": sh.duration_s,
+                # Fase 2.6/T2.6.1: los campos del MOTOR viajan en el GET. Su
+                # ausencia hacia que la UI leyera undefined y el siguiente PUT
+                # pisara los valores reales con defaults (wipe silencioso).
+                "motion": sh.motion, "lands": sh.lands, "media": sh.media,  # D-070/072/074
+                "takes": sh.takes, "speed": sh.speed,                        # D-073/074
                 "camera": sh.camera.model_dump(), "visual": sh.visual.model_dump(),  # D-047
                 "transition": sh.transition,
                 "voiceover": sh.voiceover, "caption": sh.caption, "sfx": sh.sfx,

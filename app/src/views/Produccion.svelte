@@ -1,8 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { get } from "../lib/api.js";
+  import { get, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import JobLog from "../components/JobLog.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
   import WarnStrip from "../components/WarnStrip.svelte";
@@ -14,9 +14,11 @@
   let cur = $derived(jobs[active]);
   let running = $derived(jobs.render.busy ? "render" : jobs.export.busy ? "export" : "");
   let err = $derived(jobs.render.err || jobs.export.err);
-  let profile = $state("fal-ultra-cheap");  // D-076: el mismo default que el motor
+  // T2.6.14: el default del perfil viene del server (D-076, sin hardcodear acá).
+  let profile = $state("");
   let concurrency = $state(3);
-  let profiles = $state([]);   // cargados desde /api/profiles
+  let profiles = $state([]);     // cargados desde /api/profiles
+  let profilesErr = $state("");  // sin perfiles no hay costo visible -> no se gasta
 
   let st = $derived(studio.status);
   let hasFal = $derived(!!st?.keys?.fal_key);
@@ -57,19 +59,25 @@
   onMount(async () => {
     loadCosts();  // D-079: la plata visible
     try {
-      const res = await fetch("/api/profiles");
-      profiles = await res.json();
-      // mantener seleccion si el perfil actual sigue disponible
-      if (profiles.length && !profiles.find(p => p.key === profile)) {
-        profile = profiles[0].key;
+      profiles = await get("/api/profiles");
+      // T2.6.16: SIN fallback hardcodeado — si no hay perfiles, no se renderiza
+      // (el costo tiene que estar visible antes del boton que gasta, D-052).
+      if (!profiles.length) profilesErr = "El servidor no devolvió perfiles. Revisá config/routing.yaml.";
+      if (!profiles.find((p) => p.key === profile)) {
+        profile = profiles.find((p) => p.default)?.key ?? profiles[0]?.key ?? "";
       }
-    } catch {
-      // si el servidor no responde, mostrar solo los dos basicos
-      profiles = [
-        { key: "proto",     label: "Prototipo fal",    badge: "fal.ai",  color: "yellow", desc: "Kling directo.", providers: ["kling"] },
-        { key: "proto_veo", label: "Prototipo Google", badge: "google",  color: "blue",   desc: "Veo directo.",   providers: ["veo"]   },
-        { key: "prod",      label: "Produccion",       badge: "calidad", color: "green",  desc: "Ensemble + gate.", providers: [] },
-      ];
+    } catch (e) {
+      profiles = [];
+      profilesErr = humanError(e);
+    }
+    // T2.6.9: F5 a mitad de un render/export -> re-engancharse al job vivo
+    // (en vez de mostrar la UI ociosa y dejar pagar dos veces).
+    for (const kind of ["render", "export"]) {
+      const live = await findLiveJob([kind], slug);
+      if (live) {
+        active = kind;
+        jobs[kind].attach(live.id, { onDone: async () => { await refreshStatus(); loadCosts(); } });
+      }
     }
   });
 
@@ -125,7 +133,9 @@
         {#if jobs.render.status && jobs.render.status !== "done"}
           <span class="badge {jobs.render.busy ? 'warn' : 'red'}">{jobs.render.status}</span>
         {/if}
-        <button class="machine" onclick={() => run("render")} disabled={!!running || !hasFal}>
+        <button class="machine" onclick={() => run("render")}
+                disabled={!!running || !hasFal || !profile}
+                title={profile ? "" : "Sin perfiles no hay costo visible: no se renderiza"}>
           {running === "render" ? "Renderizando…" : renderDone ? "Re-renderizar" : "Armar el video"}
         </button>
       </div>
@@ -134,7 +144,9 @@
     <!-- Selector de perfil dinamico -->
     <div class="profile-section">
       <div class="section-label eyebrow">Perfil de generacion</div>
-      {#if profiles.length === 0}
+      {#if profilesErr}
+        <p class="error" style="font-size:13px">{profilesErr}</p>
+      {:else if profiles.length === 0}
         <p class="muted" style="font-size:13px">Cargando perfiles…</p>
       {:else}
         <div class="profile-row">

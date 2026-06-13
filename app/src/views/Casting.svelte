@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import { get, post, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import { picksFromDisk } from "../lib/picks.js";
   import BackendToggle from "../components/BackendToggle.svelte";
   import GenerateBar from "../components/GenerateBar.svelte";
@@ -46,7 +46,12 @@
       picks = { ...picksFromDisk(c.cast_selections, cast), ...picks };
     } catch (e) { err = humanError(e); }
   }
-  onMount(load);
+  onMount(async () => {
+    await load();
+    // T2.6.9: F5 a mitad de la generación -> re-engancharse al job vivo.
+    const live = await findLiveJob(["cast"], slug);
+    if (live) gen.attach(live.id, { onDone: async () => { await load(); await refreshStatus(); } });
+  });
 
   function generate() {
     err = ""; saved = false;

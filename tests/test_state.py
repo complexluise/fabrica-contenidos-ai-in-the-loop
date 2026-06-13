@@ -172,3 +172,30 @@ def test_derive_render_hecho_con_final(tmp_path):
     st = derive_state(proj, spec, has_fal_key=True)
     assert st.render.done is True
     assert st.stage is Stage.PAQUETE
+
+
+# --- D-082: huella del plan narrativo (que invalida la firma y que no) -------
+
+def test_plan_fingerprint_ignores_prompt_and_framing():
+    from pipeline.contracts import Shot
+    from pipeline.state import plan_fingerprint
+
+    a = [Scene(id="s1", prompt="ciudad", duration_s=4,
+               shots=[Shot(framing="wide", duration_s=4)])]
+    b = [Scene(id="s1", prompt="ciudad NEON", duration_s=4,
+               shots=[Shot(framing="close", duration_s=4)])]
+    assert plan_fingerprint(a) == plan_fingerprint(b)
+
+
+def test_plan_fingerprint_changes_on_narrative_edit():
+    from pipeline.contracts import Shot
+    from pipeline.state import plan_fingerprint
+
+    base = [Scene(id="s1", prompt="x", duration_s=4,
+                  shots=[Shot(duration_s=4)])]
+    dialogo = [Scene(id="s1", prompt="x", duration_s=4, dialogue="Juan: hola.",
+                     shots=[Shot(duration_s=4)])]
+    motor = [Scene(id="s1", prompt="x", duration_s=4,
+                   shots=[Shot(duration_s=4, motion="the camera pushes in slowly")])]
+    assert plan_fingerprint(base) != plan_fingerprint(dialogo)
+    assert plan_fingerprint(base) != plan_fingerprint(motor)

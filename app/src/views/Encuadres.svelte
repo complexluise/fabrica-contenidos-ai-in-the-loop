@@ -7,7 +7,7 @@
   import { onMount } from "svelte";
   import { get, post, put, del, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import { picksFromDisk } from "../lib/picks.js";
   import BackendToggle from "../components/BackendToggle.svelte";
   import GenerateBar from "../components/GenerateBar.svelte";
@@ -83,7 +83,19 @@
       picks = { ...picksFromDisk(cand.selections, cand.keyframes), ...picks };
     } catch (e) { err = humanError(e); }
   }
-  onMount(load);
+  onMount(async () => {
+    await load();
+    // T2.6.9: F5 a mitad de la generación -> re-engancharse al job vivo.
+    // El project del job es "slug" (global) o "slug/<escena>" (por escena).
+    const live = await findLiveJob(["keyframes", "shots"], slug);
+    if (!live) return;
+    const onDone = async () => { await load(); await refreshStatus(); };
+    if (live.project.includes("/")) {
+      sceneGen.attach(live.id, { key: live.project.slice(slug.length + 1), onDone });
+    } else {
+      gen.attach(live.id, { onDone });
+    }
+  });
 
   function generate() {
     err = ""; saved = false;
@@ -317,11 +329,13 @@
               </button>
             </div>
             <textarea class="prompt-ta" rows="3" bind:value={promptEdits[sceneId].prompt}
+                      oninput={() => (promptsSaved[sceneId] = false)}
                       placeholder="setting + personajes + acción física" disabled={anyBusy || compiling}></textarea>
             {#each (promptEdits[sceneId].framings ?? []) as _f, j}
               <div class="shot-prompt-row">
                 <span class="ptag-sm">P{j + 1}</span>
                 <input class="frame-in" bind:value={promptEdits[sceneId].framings[j]}
+                       oninput={() => (promptsSaved[sceneId] = false)}
                        placeholder="encuadre del plano {j + 1}" disabled={anyBusy || compiling} />
               </div>
             {/each}

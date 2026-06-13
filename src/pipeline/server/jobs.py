@@ -27,6 +27,13 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class JobConflictError(RuntimeError):
+    """Ya hay un job VIVO del mismo tipo para el mismo proyecto (Fase 2.6).
+
+    Anti doble-gasto: un segundo render/keyframes/cast identico mientras el
+    primero corre pagaria dos veces. El server lo mapea a HTTP 409."""
+
+
 @dataclass
 class Job:
     id: str
@@ -69,13 +76,14 @@ class JobManager:
 
     def __init__(self):
         self._jobs: dict[str, Job] = {}
-        self._events: dict[str, asyncio.Event] = {}
+        # T2.6.23: un Event POR CONSUMIDOR del stream. Con uno compartido, dos
+        # SSE del mismo job se robaban el despertar (clear ajeno -> cuelgue).
+        self._watchers: dict[str, list[asyncio.Event]] = {}
 
     # --- registro (lógica pura) -------------------------------------------
     def create(self, kind: str, project: str) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project)
         self._jobs[job.id] = job
-        self._events[job.id] = asyncio.Event()
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -83,6 +91,13 @@ class JobManager:
 
     def list(self) -> list[Job]:
         return list(self._jobs.values())
+
+    def find_active(self, kind: str, project: str) -> Job | None:
+        """El job VIVO (queued/running) de este kind+proyecto, si existe."""
+        for job in self._jobs.values():
+            if job.kind == kind and job.project == project and not job.done:
+                return job
+        return None
 
     def append_log(self, job_id: str, line: str) -> None:
         job = self._jobs.get(job_id)
@@ -103,8 +118,7 @@ class JobManager:
         self._wake(job_id)
 
     def _wake(self, job_id: str) -> None:
-        ev = self._events.get(job_id)
-        if ev is not None:
+        for ev in self._watchers.get(job_id, []):
             ev.set()
 
     # --- ejecución (async, smoke) -----------------------------------------
@@ -124,7 +138,17 @@ class JobManager:
             logging.getLogger(_PKG_LOGGER).removeHandler(handler)
 
     def spawn(self, kind: str, project: str, coro: Awaitable) -> Job:
-        """Crea el job y lo lanza en segundo plano; devuelve el job al instante."""
+        """Crea el job y lo lanza en segundo plano; devuelve el job al instante.
+
+        T2.6.6: si ya hay un job vivo del mismo kind+proyecto, NO lanza otro
+        (JobConflictError -> 409): el doble clic / F5 no debe pagar dos veces."""
+        live = self.find_active(kind, project)
+        if live is not None:
+            if hasattr(coro, "close"):
+                coro.close()  # la corrutina rechazada no debe quedar sin esperar
+            raise JobConflictError(
+                f"Ya hay un trabajo de '{kind}' corriendo para '{project}' "
+                f"(job {live.id}). Mira su registro o espera a que termine.")
         job = self.create(kind, project)
         asyncio.create_task(self.run(job, coro))
         return job
@@ -134,14 +158,20 @@ class JobManager:
         job = self._jobs.get(job_id)
         if job is None:
             return
-        sent = 0
-        while True:
-            while sent < len(job.logs):
-                yield job.logs[sent]
-                sent += 1
-            if job.done:
-                yield f"__status__:{job.status.value}"
-                return
-            ev = self._events[job_id]
-            await ev.wait()
-            ev.clear()
+        ev = asyncio.Event()
+        self._watchers.setdefault(job_id, []).append(ev)
+        try:
+            sent = 0
+            while True:
+                while sent < len(job.logs):
+                    yield job.logs[sent]
+                    sent += 1
+                if job.done:
+                    yield f"__status__:{job.status.value}"
+                    return
+                await ev.wait()
+                ev.clear()
+        finally:
+            watchers = self._watchers.get(job_id, [])
+            if ev in watchers:
+                watchers.remove(ev)

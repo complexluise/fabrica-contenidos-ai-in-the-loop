@@ -3,10 +3,10 @@
   // de pagar video. Cada plano = apertura → destino; el render interpola entre
   // ellas (en paralelo). Curación por excepción: todo viene propuesto; regenerás
   // solo la pose que no convence.
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { get, post, del, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import Progress from "../components/Progress.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
 
@@ -49,7 +49,17 @@
       data = a; profiles = p || [];
     } catch (e) { err = humanError(e); }
   }
-  onMount(load);  // D-081: App remonta con {#key slug} — sin vigilar el slug
+  onMount(async () => {  // D-081: App remonta con {#key slug} — sin vigilar el slug
+    await load();
+    // T2.6.9: F5 a mitad de una generación -> re-engancharse al job vivo.
+    const liveGen = await findLiveJob(["animatic"], slug);
+    if (liveGen) gen.attach(liveGen.id, { onDone: async () => { await load(); await refreshStatus(); } });
+    const liveVar = await findLiveJob(["pose_variants"], slug);
+    if (liveVar) variants.attach(liveVar.id, {
+      key: liveVar.project.slice(slug.length + 1),  // "slug/shot/which" -> "shot/which"
+      onDone: load,
+    });
+  });
 
   function generate() {
     err = "";
@@ -90,6 +100,7 @@
   let playPose = $state("start"); // "start" | "destino" dentro del plano
   let playTimer = null;
   function stopPlay() { playing = false; if (playTimer) clearTimeout(playTimer); playTimer = null; }
+  onDestroy(stopPlay);  // T2.6.17: navegar con el player abierto no deja timers vivos
   function play() {
     if (!strip.length) return;
     playing = true; playIdx = 0; playPose = "start";
@@ -112,6 +123,9 @@
   let playerShot = $derived(strip[playIdx] ?? null);
   let playerImg = $derived(playerShot ? (playPose === "start" ? playerShot.start : playerShot.destino) : null);
 </script>
+
+<!-- T2.6.18: Escape cierra el player desde cualquier foco -->
+<svelte:window onkeydown={(e) => { if (e.key === "Escape" && playing) stopPlay(); }} />
 
 <ViewHeader eyebrow="Paso 5 · vos decidís" title="Animatic">
   <span title={GLOSARIO.animatic}>La película completa en poses</span>, <b class="r">antes</b> de pagar
@@ -161,7 +175,8 @@
   </div>
 
   {#if playing && playerShot}
-    <div class="player" onclick={stopPlay} role="button" tabindex="0">
+    <div class="player" onclick={stopPlay} role="button" tabindex="0"
+         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stopPlay(); } }}>
       {#if playerImg}
         <img src={playerImg} alt={playerShot.shot_id} />
       {:else}
@@ -201,7 +216,10 @@
               {#each (e.lands ? ["start", "destino"] : ["destino"]) as which, wi}
                 {#if e.lands && wi === 1}<span class="arrow">→</span>{/if}
                 {@const img = which === "start" ? e.start : e.destino}
-                {@const variants = e[`${which}_variants`] || []}
+                <!-- T2.6.5: "poseVariants", NO "variants" — el nombre corto hacía
+                     sombra al jobState y el botón ⊞ nunca se deshabilitaba (doble
+                     clic = dos jobs pagos en paralelo). -->
+                {@const poseVariants = e[`${which}_variants`] || []}
                 {@const vBusy = variants.busy && variants.key === `${e.shot_id}/${which}`}
                 <div class="pose">
                   {#if img}
@@ -217,9 +235,9 @@
                     <div class="hole">{which === "start" ? "apertura" : "destino"}</div>
                   {/if}
                   <span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>
-                  {#if variants.length}
+                  {#if poseVariants.length}
                     <div class="variants">
-                      {#each variants as v}
+                      {#each poseVariants as v}
                         <button class="vthumb" title="Elegir esta variante"
                                 onclick={() => pickVariant(e.shot_id, which, v)}>
                           <img src={v} alt="variante" loading="lazy" />

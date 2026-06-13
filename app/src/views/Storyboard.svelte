@@ -2,11 +2,12 @@
   import { onMount } from "svelte";
   import { get, post, put, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus, nextStep } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
 
   let { slug } = $props();
   let doc   = $state(null);
   let cand  = $state({ keyframes: {}, cast: {}, selections: {} });
+  let knownChars = $state([]);   // personajes del proyecto (para asignar a escenas)
   let editing = $state({});      // { [sceneId]: true } tarjetas en modo edicion
   let expanded = $state({});     // { [sceneId]: true } vista detalle en modo lectura
   let expandedAudio = $state({}); // { "sceneId_shotIdx": true } audio por plano
@@ -16,10 +17,12 @@
   let saving = $state(false);
   let music = $state(null);       // URL del archivo de música cargado
   let musicPrompt = $state("");
-  let musicBusy = $derived(musicJob.busy || musicUploading);
   const musicJob = jobState();  // D-081: el ciclo de job, una sola implementacion
   let musicErr = $state("");
   let musicUploading = $state(false);
+  // T2.6.20: declarado DESPUÉS de musicJob — el $derived lo captura por cierre
+  // y el orden inverso era una trampa TDZ esperando un refactor.
+  let musicBusy = $derived(musicJob.busy || musicUploading);
   let showMusicGen = $state(false);
   let backends = $state([]);         // D-053: backends disponibles
   let activeBackend = $state("fal"); // D-053: backend activo del proyecto
@@ -64,10 +67,22 @@
       .then((b) => { backends = b; })
       .catch(() => {});
 
+    // T2.6.9: F5 con la música generándose -> re-engancharse al job vivo.
+    findLiveJob(["music"], slug).then((live) => {
+      if (live) musicJob.attach(live.id, {
+        onDone: async (status, jobId) => {
+          if (status !== "done") { musicErr = musicJob.err; return; }
+          const j = await get(`/api/jobs/${jobId}`).catch(() => null);
+          music = j?.result?.url || music;
+        },
+      });
+    });
+
     get(`/api/projects/${slug}`)
       .then((d) => {
         music = d.music || null;
         activeBackend = d.storyboard_backend || "fal";  // D-053
+        knownChars = (d.characters || []).map((c) => c.name);  // T2.6.22
         doc = {
           title: d.title || "",
           brief: d.brief || "",
@@ -112,6 +127,21 @@
 
   function toggleExpand(id) {
     expanded[id] = !expanded[id];
+  }
+
+  // a11y (T2.6.19): los click-targets también operan con Enter/Espacio.
+  function keyActivate(fn) {
+    return (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+    };
+  }
+
+  // T2.6.22: asignar personajes del proyecto a la escena (afecta el casting).
+  function toggleChar(s, name) {
+    const i = s.characters.indexOf(name);
+    if (i >= 0) s.characters.splice(i, 1);
+    else s.characters.push(name);
+    touch();
   }
 
   function toggleEdit(id) {
@@ -213,6 +243,7 @@
         id: s.id, beat: s.beat || null, prompt: s.prompt,
         dialogue: s.dialogue || null, ambience: s.ambience || null,
         visual_intensity: s.visual_intensity ?? null,            // D-047
+        characters: s.characters || [],                          // T2.6.22
         shots: s.shots.map((sh) => ({
           intention: sh.intention || null, action: sh.action || null,  // D-047
           motion: sh.motion || null,                                    // D-072
@@ -227,6 +258,7 @@
         })),
       })),
     };
+    const signedBefore = signed;  // T2.6.13: para avisar si esta acción des-firmó
     try {
       const r = await put(`/api/projects/${slug}`, body);
       dirty = false;
@@ -234,7 +266,11 @@
       expandedAudio = {};
       const dropped = r.dropped_selections?.length
         ? ` (selecciones limpiadas: ${r.dropped_selections.join(", ")})` : "";
-      msg = (sign ? "Plan firmado." : "Borrador guardado.") + dropped;
+      // D-082: el server preserva la firma si solo cambió lo no-narrativo;
+      // si la limpió, decirlo acá mismo (nunca en silencio).
+      const unsigned = !sign && signedBefore && r.signed === false
+        ? " La narrativa cambió: el plan quedó SIN firmar." : "";
+      msg = (sign ? "Plan firmado." : "Borrador guardado.") + dropped + unsigned;
       await refreshStatus();
     } catch (e) {
       error = humanError(e);
@@ -341,9 +377,14 @@
 
     <section class="scene" class:is-editing={isEditing}>
 
-      <!-- Cabecera: siempre visible -->
+      <!-- Cabecera: siempre visible. role/tabindex/handlers van JUNTOS (gated en
+           !isEditing): en lectura es un botón; en edición es un contenedor de
+           inputs. El analizador no correlaciona el par, de ahí el ignore. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="shead" class:clickable={!isEditing}
-           onclick={!isEditing ? () => toggleExpand(s.id) : null}>
+           role={!isEditing ? "button" : null} tabindex={!isEditing ? 0 : null}
+           onclick={!isEditing ? () => toggleExpand(s.id) : null}
+           onkeydown={!isEditing ? keyActivate(() => toggleExpand(s.id)) : null}>
         <span class="sid mono">{s.id}</span>
         {#if isEditing}
           <input class="beat-in" bind:value={s.beat} oninput={touch} placeholder="beat / título de la escena" />
@@ -370,6 +411,19 @@
       {#if isEditing}
         <!-- MODO EDICIÓN: narrativa → planos → prompt IA (colapsable) -->
         <div class="sbody">
+
+          <!-- T2.6.22: personajes de la escena (chips de los del proyecto).
+               Define qué caras viajan a los encuadres y qué casting hace falta. -->
+          {#if knownChars.length}
+            <div class="chars-row">
+              <span class="audio-lbl">Personajes</span>
+              {#each knownChars as name}
+                <button class="char-chip" class:on={s.characters.includes(name)}
+                        title={s.characters.includes(name) ? "Quitar de la escena" : "Agregar a la escena"}
+                        onclick={() => toggleChar(s, name)}>{name}</button>
+              {/each}
+            </div>
+          {/if}
 
           <!-- Dialogo y ambience de la escena -->
           <div class="scene-audio">
@@ -505,7 +559,8 @@
         <!-- MODO LECTURA -->
         {#if !isExpanded}
           <!-- COLAPSADO: resumen compacto, click para expandir -->
-          <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0">
+          <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0"
+               onkeydown={keyActivate(() => toggleExpand(s.id))}>
             <div class="read-compact-text">
               <!-- B1: QUÉ SE VE primero (la escena, no solo lo que se dice) -->
               {#if shotDesc(s.shots[0])}
@@ -832,6 +887,15 @@
 
   /* --- MODO EDICIÓN --- */
   .sbody { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* T2.6.22 — personajes de la escena (chips) */
+  .chars-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .char-chip {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px; box-shadow: none;
+    border: 1.5px solid var(--line-2); background: var(--paper-2); color: var(--ink-soft);
+  }
+  .char-chip:hover { border-color: var(--ink-soft); color: var(--ink); box-shadow: none; }
+  .char-chip.on { border-color: var(--red); background: var(--red-wash); color: var(--red-deep); font-weight: 600; }
 
   /* L2 — Audio de escena (secundario, agrupado) */
   .scene-audio {

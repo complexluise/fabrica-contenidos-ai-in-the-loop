@@ -150,7 +150,8 @@ def test_update_project_preserves_non_editable_scene_fields(tmp_path):
 
 
 def test_update_project_sign_toggles_storyboard_signed(tmp_path):
-    # #5: firmar marca el storyboard como firmado; editar sin firmar lo limpia.
+    # #5: firmar marca el storyboard como firmado; un cambio NARRATIVO sin
+    # firmar lo limpia (D-082: el prompt ya no cuenta como narrativo).
     _make_project(tmp_path)
     c = _client(tmp_path)
     assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is False
@@ -160,7 +161,8 @@ def test_update_project_sign_toggles_storyboard_signed(tmp_path):
     assert r.json()["signed"] is True
     assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is True
 
-    c.put("/api/projects/demo", json={"scenes": [{"id": "s1", "prompt": "y", "duration_s": 4}]})
+    c.put("/api/projects/demo", json={"scenes": [
+        {"id": "s1", "prompt": "x", "duration_s": 4, "dialogue": "Juan: hola."}]})
     assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is False
 
 
@@ -232,3 +234,141 @@ def test_costs_endpoint_returns_summary(tmp_path):
     assert r.status_code == 200
     body = r.json()
     assert "total_usd" in body and "by_project" in body and "by_provider" in body
+
+
+# --- Fase 2.6 (hardening post-auditoría) ---------------------------------------
+
+def _make_engine_project(tmp_path, slug="motor"):
+    """Proyecto con los campos del motor (D-070..D-074) poblados en un plano."""
+    d = tmp_path / slug
+    d.mkdir()
+    (d / "project.yaml").write_text(
+        "project: " + slug + "\nstyle: lego\ntitle: Motor\nscenes:\n"
+        "  - id: s1\n    prompt: ciudad\n    duration_s: 4\n"
+        "    shots:\n"
+        "      - framing: wide\n"
+        "        duration_s: 4\n"
+        "        motion: the camera orbits him quickly, then settles\n"
+        "        lands: true\n"
+        "        media: video\n"
+        "        takes: 3\n"
+        "        speed: 1.2\n",
+        encoding="utf-8",
+    )
+    return d
+
+
+def test_project_detail_exposes_engine_fields(tmp_path):
+    # T2.6.1: el GET serializa motion/lands/media/takes/speed. Su ausencia era
+    # la causa del wipe: la UI leía undefined y guardaba defaults encima.
+    _make_engine_project(tmp_path)
+    sh = _client(tmp_path).get("/api/projects/motor").json()["scenes"][0]["shots"][0]
+    assert sh["motion"] == "the camera orbits him quickly, then settles"
+    assert sh["lands"] is True and sh["media"] == "video"
+    assert sh["takes"] == 3 and sh["speed"] == 1.2
+
+
+def test_storyboard_roundtrip_preserves_engine_fields(tmp_path):
+    # T2.6.2: PUT(GET(x)) no pierde nada — el guard permanente del contrato
+    # UI<->server. Este test habría atrapado el bug de la auditoría 2026-06-12.
+    _make_engine_project(tmp_path)
+    c = _client(tmp_path)
+    detail = c.get("/api/projects/motor").json()
+    body = {"title": detail["title"], "brief": detail["brief"] or "",
+            "scenes": detail["scenes"]}
+    assert c.put("/api/projects/motor", json=body).status_code == 200
+
+    from pipeline.project import Project, load_project_spec
+    sh = load_project_spec(Project("motor", root=tmp_path).spec_path).scenes[0].shots[0]
+    assert sh.motion == "the camera orbits him quickly, then settles"
+    assert sh.lands is True and sh.media == "video"
+    assert sh.takes == 3 and sh.speed == 1.2
+
+
+# --- D-082: la firma atestigua el plan NARRATIVO --------------------------------
+
+def _signed_demo(tmp_path):
+    _make_project(tmp_path)
+    c = _client(tmp_path)
+    c.put("/api/projects/demo", json={"sign": True, "scenes": [
+        {"id": "s1", "prompt": "ciudad", "duration_s": 4},
+        {"id": "s2", "prompt": "plaza", "duration_s": 4},
+    ]})
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is True
+    return c
+
+
+def test_prompt_only_edit_preserves_signature(tmp_path):
+    # Encuadres edita el prompt visual post-firma; eso NO des-firma (D-082).
+    c = _signed_demo(tmp_path)
+    r = c.put("/api/projects/demo", json={"scenes": [
+        {"id": "s1", "prompt": "ciudad neon de noche", "duration_s": 4},
+        {"id": "s2", "prompt": "plaza", "duration_s": 4},
+    ]})
+    assert r.json()["signed"] is True
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is True
+
+
+def test_backend_switch_preserves_signature(tmp_path):
+    # Cambiar el motor de imagen es una preferencia, no un cambio del plan.
+    c = _signed_demo(tmp_path)
+    r = c.put("/api/projects/demo", json={"storyboard_backend": "google", "scenes": [
+        {"id": "s1", "prompt": "ciudad", "duration_s": 4},
+        {"id": "s2", "prompt": "plaza", "duration_s": 4},
+    ]})
+    assert r.json()["signed"] is True
+
+
+def test_narrative_edit_clears_signature(tmp_path):
+    # Tocar un plano (duración) SI es el plan: la firma se limpia.
+    c = _signed_demo(tmp_path)
+    r = c.put("/api/projects/demo", json={"scenes": [
+        {"id": "s1", "prompt": "ciudad", "duration_s": 6},
+        {"id": "s2", "prompt": "plaza", "duration_s": 4},
+    ]})
+    assert r.json()["signed"] is False
+    assert c.get("/api/projects/demo/status").json()["storyboard"]["signed"] is False
+
+
+# --- Fase 2.6: perfiles sin drift (D-076) ---------------------------------------
+
+def test_profiles_expose_default_and_scene_cost(tmp_path):
+    # T2.6.14: el default viene del server (la UI no hardcodea fal-ultra-cheap)
+    # y est_cost_per_scene_usd viaja (el estimado del Animatic era NaN sin él).
+    from pipeline.config import DEFAULT_PROFILE
+
+    profs = _client(tmp_path).get("/api/profiles").json()
+    assert sum(1 for p in profs if p.get("default")) == 1
+    assert any(p["key"] == DEFAULT_PROFILE and p["default"] for p in profs)
+    assert all(isinstance(p["est_cost_per_scene_usd"], (int, float)) for p in profs)
+
+
+# --- Fase 2.6: anti doble-gasto (T2.6.6) -----------------------------------------
+
+def test_concurrent_same_job_is_409(tmp_path, monkeypatch):
+    # T2.6.6: un segundo import del mismo proyecto mientras el primero está vivo
+    # se rechaza con 409 (no se paga dos veces). Acá probamos el MAPEO HTTP; que
+    # re-disparar tras 'done' vuelva a estar permitido se cubre, sin la fragilidad
+    # de TestClient+to_thread, en test_jobs.py::test_spawn_allowed_again_after_done.
+    import threading
+
+    from pipeline import author
+
+    gate = threading.Event()
+    draft = author.ProjectDraft(
+        title="X", scenes=[author.Scene(id="s1", prompt="a", duration_s=4)])
+
+    def slow_draft(text):
+        gate.wait(timeout=5)  # el job queda vivo hasta que el test lo libere
+        return draft
+
+    monkeypatch.setattr(author, "draft_project", slow_draft)
+    c = _client(tmp_path)
+    try:
+        c.post("/api/projects/import", json={"text": "hola", "slug": "uno"})
+        # mismo kind+proyecto con el primero vivo -> 409 con mensaje legible
+        r = c.post("/api/projects/import", json={"text": "hola", "slug": "uno"})
+        assert r.status_code == 409
+        assert "trabajo" in r.json()["detail"].lower()
+    finally:
+        gate.set()  # liberar el worker bloqueado (teardown limpio)

@@ -150,6 +150,143 @@ frames por plano (#2) son aparte (ver [D-036]/[D-037] y el ROADMAP del motor).
 
 ---
 
+## Fase 2.6 — Hardening post-auditoría del frontend (2026-06-12)
+
+**Objetivo:** cerrar TODO lo que salió de la auditoría del frontend (2026-06-12): una pérdida de
+datos activa en el round-trip del Storyboard, dos vías de doble gasto, y una cola de deudas de UX.
+Nada de esto gasta en APIs — es solo código. Ordenado por severidad; dentro de cada bloque, en orden
+de ejecución. Las referencias `archivo:línea` son del estado auditado (commit `8e72d8c`).
+
+### Acceptance Criteria
+- [x] AC1 — **Round-trip sin pérdida:** guardar/firmar el Storyboard NO altera `motion`, `lands`,
+  `media`, `takes` ni `speed` de ningún plano; la UI muestra los valores reales del YAML
+  (chip "sin motion" y checkbox "aterriza" dicen la verdad). 🔬 *(test de contrato PUT→GET)*
+- [x] AC2 — **Imposible duplicar gasto desde la UI:** todo botón que dispara un job pago se
+  deshabilita mientras corre; el server rechaza un segundo job concurrente equivalente; tras un
+  F5 a mitad de job, la vista se re-engancha al job vivo en vez de mostrar la UI ociosa. 🔬
+- [x] AC3 — **La firma nunca cambia en silencio:** ninguna acción des-firma el plan sin que el
+  usuario lo vea (o directamente no lo des-firma, según lo que decida el ADR).
+- [x] AC4 — **Un solo default de perfil:** el frontend no hardcodea `fal-ultra-cheap` ni una lista
+  de perfiles fallback; el default viene del server (D-076 sin duplicación).
+- [x] AC5 — **Sin fugas ni trampas de teclado:** timers del player limpiados al desmontar; los
+  elementos clickeables principales operables con teclado; build de Svelte sin warnings de a11y
+  en los archivos tocados.
+
+### Bloque A — CRÍTICO: pérdida de datos en el round-trip del Storyboard
+- [x] T2.6.1 — Backend: `project_detail` (`server/app.py:410-416`) serializa los 5 campos del motor
+  que hoy omite: `motion`, `lands`, `media`, `takes`, `speed` (el modelo `Shot` ya los tiene,
+  `contracts.py:139-152`).
+- [x] T2.6.2 — 🔬 Test de contrato en `test_server.py`: PUT de un storyboard con `motion`/`lands`/
+  `media`/`takes`/`speed` poblados → GET devuelve los mismos valores → segundo PUT con lo que
+  devolvió el GET (round-trip literal) no cambia el `project.yaml`. Este es el test que habría
+  atrapado el bug; queda como guard permanente del contrato UI↔server.
+- [x] T2.6.3 — Smoke UI: proyecto con `motion` y `lands: true` en el YAML → abrir Storyboard →
+  verificar que el chip "sin motion" (`Storyboard.svelte:529`) NO aparece, el checkbox "aterriza"
+  está marcado y `tomas`/`vel.` muestran lo del YAML → "Guardar borrador" → re-leer el YAML
+  intacto.
+- [x] T2.6.4 — Revisar proyectos existentes en `projects/*/project.yaml`: si algún guardado previo
+  desde la UI ya borró `motion`/`lands`/`takes`, avisar al usuario qué proyectos quedaron
+  afectados (no se pueden recuperar solos; restaurar de git/backup si existe).
+
+### Bloque B — ALTO: doble gasto
+- [x] T2.6.5 — `Animatic.svelte:204-205`: renombrar el `{@const variants}` del each (p.ej.
+  `poseVariants`) que hace sombra al jobState `variants` de la línea 19. Con eso `vBusy` vuelve a
+  funcionar: el botón ⊞ se deshabilita y muestra "…" mientras el job de variantes corre.
+- [x] T2.6.6 — Backend: guard de concurrencia en `JobManager.spawn` (o en los endpoints): si ya hay
+  un job `running` del mismo `kind` para el mismo proyecto, responder 409 con mensaje legible en
+  vez de lanzar otro. 🔬 *(spawn duplicado → 409; kinds distintos o proyectos distintos → OK)*
+- [x] T2.6.7 — `humanError` (`api.js`): traducir ese 409 a algo humano ("Ya hay un trabajo de este
+  tipo corriendo — mirá el registro").
+- [x] T2.6.8 — Re-attach tras F5: helper en `jobs.svelte.js` (p.ej. `jobState.attach(jobId)`) que
+  se suscribe al SSE de un job ya corriendo y repuebla `busy/log/progress` (el stream del server
+  ya hace replay desde la línea 0, `jobs.py:137-141` — no hay que tocar el backend).
+- [x] T2.6.9 — Al montar cada vista con jobs, consultar `GET /api/jobs` y si hay un job `running`
+  del proyecto re-engancharse con el helper de T2.6.8. Cubrir las SEIS superficies que disparan
+  jobs: Producción (render/export), Encuadres (keyframes global y por escena), Casting (cast),
+  Animatic (completar poses y variantes), Importar (import) y Storyboard (música generada).
+- [x] T2.6.10 — Smoke: lanzar un render → F5 → la vista Producción muestra "Renderizando…" con el
+  log repoblado y el botón deshabilitado; intentar un segundo render por API directa → 409.
+
+### Bloque C — MEDIO: la firma que se borra en silencio
+- [x] T2.6.11 — ADR en `docs/decisiones/`: decidir la semántica de des-firmado. Hoy CUALQUIER
+  `PUT` sin `sign` borra `storyboard.signed` (`server/app.py:383`), lo que incluye dos acciones
+  que no editan el plan narrativo: guardar prompts desde Encuadres (`savePrompts`) y cambiar el
+  backend de imagen en Storyboard (`switchBackend` → `save(false)`). Opciones: (a) el PUT
+  preserva la firma cuando solo cambian campos no-narrativos (prompt/backend), o (b) se mantiene
+  el des-firmado pero SIEMPRE con aviso visible. Documentar el porqué.
+- [x] T2.6.12 — Implementar lo decidido en el server (qué campos disparan el unlink del marcador) +
+  🔬 test: PUT solo-prompts / solo-backend vs PUT que toca escenas → firma preservada o no según
+  el ADR.
+- [x] T2.6.13 — UI: si una acción des-firma, decirlo donde ocurre (toast/aviso en Encuadres y en
+  el toggle de backend), no solo con el cambio sutil de la espina.
+
+### Bloque D — MEDIO: perfiles de Producción
+- [x] T2.6.14 — Backend: exponer el default de perfil (D-076) en la API — p.ej. campo `default: true`
+  en `GET /api/profiles` o `default_profile` en `/api/health` — para que el frontend deje de
+  hardcodear `"fal-ultra-cheap"` (`Produccion.svelte:17`).
+- [x] T2.6.15 — `Produccion.svelte`: usar `get()` de `api.js` en vez del `fetch` crudo (línea 60),
+  con `humanError` en el catch.
+- [x] T2.6.16 — Eliminar la lista fallback hardcodeada de perfiles (líneas 68-73): si
+  `/api/profiles` falla, mostrar el error y deshabilitar el render (sin perfiles visibles no hay
+  costo visible → no se gasta, D-052/D-055). Hoy el fallback ni siquiera contiene el perfil
+  seleccionado, así que ninguna tarjeta aparece activa.
+
+### Bloque E — MEDIO: player del Animatic
+- [x] T2.6.17 — `Animatic.svelte`: `onDestroy(stopPlay)` — hoy la cadena de `setTimeout`
+  (`playTimer`, líneas 92-111) sigue corriendo tras desmontar la vista.
+- [x] T2.6.18 — Tecla Escape cierra el overlay del player (además del clic).
+
+### Bloque F — BAJO: pulido y deudas menores
+- [x] T2.6.19 — a11y teclado: `.shead` clickeable de Storyboard sin `role`/`tabindex`/teclado
+  (`Storyboard.svelte:345`); `.read-compact` tiene `role="button"` pero no `onkeydown`
+  (`Storyboard.svelte:508`); overlay `.player` de Animatic ídem (`Animatic.svelte:164`).
+  Enter/Espacio activan; revisar que el build no emita warnings a11y en estos archivos.
+- [x] T2.6.20 — `Storyboard.svelte:19-20`: mover `const musicJob = jobState()` ANTES del
+  `$derived(musicJob.busy …)` que lo referencia — funciona por evaluación lazy pero es orden
+  frágil (TDZ si algo lo evalúa temprano).
+- [x] T2.6.21 — `Encuadres.svelte`: limpiar `promptsSaved[sceneId]` cuando el usuario vuelve a
+  editar el prompt o los framings (hoy el "✓ guardado" queda pegado para siempre).
+- [x] T2.6.22 — Personajes de escena: decidir (y anotar en este ROADMAP o un ADR) si se agrega UI
+  para asignar `characters` a una escena — hoy `addScene` crea con `characters: []` y no hay
+  ningún control para poblarlo, lo que afecta el contador de casting necesario. Si se difiere,
+  que quede explícito como diferido (no perdido).
+- [x] T2.6.23 — `server/jobs.py:145-147`: un `asyncio.Event` por consumidor en `stream()` (hoy dos
+  pestañas que streamean el mismo job comparten el evento y ambas hacen `clear()` → despertares
+  perdidos). Single-user lo tolera; es una mina enterrada para la Fase 3 (dashboard multi-job),
+  así que puede resolverse acá o como primera task de la Fase 3 — pero que no se pierda.
+- [x] T2.6.24 — Fuentes auto-hosteadas: `index.html` carga Fraunces/Hanken Grotesk desde Google
+  Fonts CDN; app local-first sin red arranca con fuentes fallback. Empaquetarlas en `app/`
+  (woff2 + `@font-face` en `app.css`) y quitar los `<link>` al CDN.
+
+> Salido de la auditoría del frontend del 2026-06-12 (sin gasto de API: solo código y tests).
+> Regla de cierre: cada bloque se marca al mergear con sus tests en verde; el AC2 exige el smoke
+> T2.6.10 además de los unit tests.
+
+> **✅ Fase 2.6 CERRADA** (2026-06-12, [D-082]). Los seis bloques resueltos; **411 tests del core en
+> verde** (+10: round-trip del motor + `project_detail` lo expone; huella de la firma ×4 en
+> `test_state.py`; 409 en `test_jobs.py` ×2 + HTTP en `test_server.py`; stream multi-consumidor) y
+> **build de la UI limpio** (cero warnings a11y). Notas de cierre por bloque:
+> - **A (crítico):** el `GET` expone los 5 campos del motor; el test round-trip queda como guard
+>   permanente del contrato. **T2.6.4:** al 2026-06-12 ningún `project.yaml` versionado perdió datos
+>   — `esquiva_conversemos` conserva sus `motion` intactos y el resto no tenía campos de motor
+>   autorados (`projects/*` no se versiona salvo `lego_demo`, así que no hay más que revisar).
+> - **B (doble gasto):** 409 en el server (`JobConflictError`), re-enganche en las 6 superficies
+>   (`findLiveJob` + `jobState.attach`), shadowing del Animatic muerto. **T2.6.10** (smoke F5) queda
+>   como verificación manual: la lógica está cubierta por unit tests; el smoke vivo lo corre el
+>   operador al levantar `pipeline studio` (no automatizable sin uvicorn real, ver nota de Fase 2).
+> - **C (firma):** [D-082] decide la opción (a) — la firma atestigua el plan NARRATIVO
+>   (`state.plan_fingerprint`); prompt/framing/backend no des-firman; si la huella cambia, la UI lo
+>   dice. **T2.6.13** integrado en el `msg` del Storyboard (sin sistema de toasts: aviso inline).
+> - **D (perfiles):** `default` + `est_cost_per_scene_usd` viajan en `/api/profiles`; sin fallback
+>   hardcodeado; `Produccion` usa `api.get`.
+> - **E (player):** `onDestroy(stopPlay)` + Escape.
+> - **F (pulido):** a11y de teclado (con `svelte-ignore` justificado donde role/tabindex van
+>   acoplados), orden TDZ de `musicBusy`, `promptsSaved` se limpia al re-editar, **T2.6.22 hecho**
+>   (chips de personajes en el Storyboard, no diferido), un `Event` por consumidor del stream,
+>   fuentes auto-hosteadas en `app/public/fonts/`.
+
+---
+
 ## Fase 3 — Paralelo entre jobs
 
 **Objetivo:** varias generaciones a la vez sin reventar la API ni la máquina.

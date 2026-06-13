@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { get, humanError } from "../lib/api.js";
   import { studio, goTo, loadProjects, setSlug } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import JobLog from "../components/JobLog.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
   import WarnStrip from "../components/WarnStrip.svelte";
@@ -23,7 +23,22 @@
       const s = await get("/api/styles");
       if (s?.length) { styles = s; if (!s.includes(style)) style = s[0]; }
     } catch { /* deja el default */ }
+    // T2.6.9: F5 con un import corriendo -> re-engancharse (el registro vuelve).
+    const live = await findLiveJob(["import"]);
+    if (live) imp.attach(live.id, { onDone: openImported });
   });
+
+  // Al terminar un import (recién disparado o re-enganchado): abrir el borrador.
+  async function openImported(status, jobId) {
+    if (status !== "done") return;  // imp.err ya lo cuenta
+    const detail = await get(`/api/jobs/${jobId}`);
+    const newSlug = detail.result?.slug;
+    await loadProjects();
+    if (newSlug) {
+      await setSlug(newSlug);
+      goTo("storyboard"); // a editar el borrador propuesto
+    }
+  }
 
   async function readFile(file) {
     if (!file) return;
@@ -50,16 +65,7 @@
     }
     imp.run("/api/projects/import", {
       body: { text, slug: slug.trim() || undefined, style },
-      onDone: async (status, jobId) => {
-        if (status !== "done") return;  // imp.err ya lo cuenta
-        const detail = await get(`/api/jobs/${jobId}`);
-        const newSlug = detail.result?.slug;
-        await loadProjects();
-        if (newSlug) {
-          await setSlug(newSlug);
-          goTo("storyboard"); // a editar el borrador propuesto
-        }
-      },
+      onDone: openImported,
     });
   }
 </script>
