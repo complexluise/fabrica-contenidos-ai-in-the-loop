@@ -232,9 +232,12 @@
                             disabled={gen.busy || vBusy || !hasFal}
                             onclick={() => genVariants(e.shot_id, which)}>{vBusy ? "…" : "⊞"}</button>
                   {:else}
-                    <div class="hole">{which === "start" ? "apertura" : "destino"}</div>
+                    <div class="hole">{e.lands ? (which === "start" ? "apertura" : "destino") : "sin generar"}</div>
                   {/if}
-                  <span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>
+                  <!-- D-070: la etiqueta apertura/destino solo aporta cuando HAY dos
+                       poses (planos `aterriza`). En cámara-actúa el still ES el plano:
+                       rotularlo "destino" hacía parecer que faltaba la otra mitad. -->
+                  {#if e.lands}<span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>{/if}
                   {#if poseVariants.length}
                     <div class="variants">
                       {#each poseVariants as v}
