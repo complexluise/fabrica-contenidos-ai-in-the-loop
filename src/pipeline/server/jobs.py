@@ -18,6 +18,16 @@ Persistencia (Ciclo 1 — historia en SQLite):
   - Transiciones que persisten: create (queued), set_status (running/done/failed).
   - El log completo NO va en SQLite (puede ser MB). Se guarda el tail al
     terminar via `job_store.set_done` / `set_failed`.
+
+Semaforo de concurrencia (Ciclo 2 — D-092):
+  - `max_concurrency` (default 2) limita cuantos jobs pueden estar RUNNING
+    en paralelo. El semaforo se adquiere en `run()` ANTES de set_status(RUNNING).
+  - Un job creado con `spawn()` queda inmediatamente visible como QUEUED en
+    el dict en memoria (el dock lo muestra, el guard 409 lo ve). Solo pasa a
+    RUNNING cuando hay cupo en el semaforo.
+  - La configuracion persiste en `config/studio.yaml` (config operativa del
+    studio, no secretos). Se lee al arrancar y se puede cambiar en caliente
+    via PUT /api/studio-settings.
 """
 
 from __future__ import annotations
@@ -87,18 +97,33 @@ class _JobLogHandler(logging.Handler):
             pass
 
 
+_DEFAULT_MAX_CONCURRENCY = 2
+
+
 class JobManager:
     """Registro de jobs en memoria + ejecución async con captura de logs.
 
     La memoria es la verdad de lo VIVO (SSE/watchers). SQLite (JobStore)
     es la verdad durable del historial.
+
+    `max_concurrency` limita cuantos jobs de generacion corren en paralelo
+    (default 2). El semaforo se adquiere en run() antes de pasar a RUNNING,
+    no en spawn(): el job existe y es visible como QUEUED desde el instante
+    del spawn, y arranca cuando hay cupo.
     """
 
-    def __init__(self, db_path: Path = LEDGER_PATH):
+    def __init__(self, db_path: Path = LEDGER_PATH,
+                 max_concurrency: int = _DEFAULT_MAX_CONCURRENCY):
         self._jobs: dict[str, Job] = {}
         # T2.6.23: un Event POR CONSUMIDOR del stream. Con uno compartido, dos
         # SSE del mismo job se robaban el despertar (clear ajeno -> cuelgue).
         self._watchers: dict[str, list[asyncio.Event]] = {}
+
+        # Semaforo de concurrencia (D-092): limita los jobs RUNNING en paralelo.
+        # Se inicializa aqui; el valor configurable viene de studio.yaml via
+        # create_app(), que lo lee antes de construir el JobManager.
+        self._sem = asyncio.Semaphore(max(1, int(max_concurrency)))
+        self._max_concurrency = max(1, int(max_concurrency))
 
         # Persistencia: abre el store y barre los jobs huerfanos del proceso
         # anterior ANTES de que lleguen requests (barrido al boot critico).
@@ -178,19 +203,26 @@ class JobManager:
 
     # --- ejecución (async, smoke) -----------------------------------------
     async def run(self, job: Job, coro: Awaitable) -> None:
-        """Ejecuta la corrutina del job capturando los logs del pipeline."""
-        self.set_status(job.id, JobStatus.RUNNING)
-        handler = _JobLogHandler(self, job.id)
-        logging.getLogger(_PKG_LOGGER).addHandler(handler)
-        try:
-            result = await coro
-            self.set_status(job.id, JobStatus.DONE,
-                            result=result if isinstance(result, dict) else {"ok": True})
-        except Exception as exc:  # noqa: BLE001 — el fallo del job no tumba el server
-            logging.getLogger(_PKG_LOGGER).error("job %s (%s) FALLO: %s", job.id, job.kind, exc)
-            self.set_status(job.id, JobStatus.FAILED, error=str(exc))
-        finally:
-            logging.getLogger(_PKG_LOGGER).removeHandler(handler)
+        """Ejecuta la corrutina del job capturando los logs del pipeline.
+
+        El job espera aqui en QUEUED hasta que haya cupo en el semaforo de
+        concurrencia. Solo entonces pasa a RUNNING y ejecuta la corrutina.
+        Esto garantiza que el job es visible (dock, guard 409) desde spawn()
+        aunque aun no haya arrancado.
+        """
+        async with self._sem:
+            self.set_status(job.id, JobStatus.RUNNING)
+            handler = _JobLogHandler(self, job.id)
+            logging.getLogger(_PKG_LOGGER).addHandler(handler)
+            try:
+                result = await coro
+                self.set_status(job.id, JobStatus.DONE,
+                                result=result if isinstance(result, dict) else {"ok": True})
+            except Exception as exc:  # noqa: BLE001 — el fallo del job no tumba el server
+                logging.getLogger(_PKG_LOGGER).error("job %s (%s) FALLO: %s", job.id, job.kind, exc)
+                self.set_status(job.id, JobStatus.FAILED, error=str(exc))
+            finally:
+                logging.getLogger(_PKG_LOGGER).removeHandler(handler)
 
     def spawn(self, kind: str, project: str, coro: Awaitable) -> Job:
         """Crea el job y lo lanza en segundo plano; devuelve el job al instante.

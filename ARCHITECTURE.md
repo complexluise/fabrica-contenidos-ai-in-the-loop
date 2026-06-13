@@ -489,6 +489,17 @@ projects/<slug>/
 > `GET /api/jobs/{id}` cae a SQLite para jobs terminados. El `JobManager` (dict en memoria) es la
 > verdad de lo VIVO; SQLite, la verdad durable. Al boot, los jobs huérfanos queued/running de un
 > proceso anterior se marcan `failed` (evita el deadlock del guard 409, [D-082]).
+>
+> **Concurrencia entre jobs (server, [D-092]).** El `JobManager` lleva un
+> `asyncio.Semaphore(max_concurrency)` (default 2, rango 1–16) que limita cuántos jobs corren en
+> paralelo. El gate se adquiere en `run()` **antes** de pasar a RUNNING: un job en cola es QUEUED
+> **visible** (lo muestra el dock de [D-083] y cuenta para el guard 409 de [D-082]) — **encola, no
+> rechaza** (ortogonal al 409: el 409 impide el job DUPLICADO, el semáforo limita los SIMULTÁNEOS).
+> `max_concurrency` es **config OPERATIVA** del Studio en `config/studio.yaml`
+> (`server/studio_settings.py`), aparte de `.env` (secretos) y `routing.yaml` (pipeline de video).
+> Contrato: `GET/PUT /api/studio-settings` (separado de `/api/settings`, que gestiona las keys); el
+> PUT persiste y hace **hot-swap no estricto** del semáforo (aplica a los próximos jobs; los que ya
+> corren terminan con el límite viejo — trade-off consciente para local mono-usuario).
 
 ### 7.4 Modelo de datos (`project.py`)
 
@@ -533,6 +544,7 @@ video_gen_pipeline/
 ├─ config/
 │  ├─ providers.yaml        # costo/seg, capabilities por backend
 │  ├─ routing.yaml          # escena→estrategia→provider + umbrales + enforce (gate)
+│  ├─ studio.yaml           # config OPERATIVA del Studio: max_concurrency (semáforo de jobs, [D-092])
 │  └─ styles/lego.yaml      # prompt template, negative, keyframe model + ref_model
 ├─ src/pipeline/
 │  ├─ contracts.py          # L0 — tipos entre capas
@@ -556,8 +568,9 @@ video_gen_pipeline/
 │  ├─ studio.py             # modo interactivo: cast / pick-cast / keyframes / pick / render
 │  ├─ contact_sheet.py      # hoja de contactos HTML (elegir candidatos)
 │  ├─ server/               # Studio local (FastAPI, [D-031]): app.py (endpoints), jobs.py
-│  │                        #   (JobManager: dict en memoria = verdad de lo VIVO),
-│  │                        #   job_store.py (SQLite: historia durable de jobs, [D-090])
+│  │                        #   (JobManager: dict en memoria = verdad de lo VIVO + semáforo de
+│  │                        #   concurrencia, [D-092]), job_store.py (SQLite: historia durable de
+│  │                        #   jobs, [D-090]), studio_settings.py (config operativa, [D-092])
 │  └─ cli.py
 ├─ skills/<nombre>/SKILL.md # capa de discoverability para agentes ([D-023]); apunta al CLI
 ├─ briefs/example.yaml      # modo --brief (smoke suelto)

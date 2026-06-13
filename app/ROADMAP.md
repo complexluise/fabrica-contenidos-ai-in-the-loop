@@ -36,23 +36,41 @@ hardening post-auditoría. Detalle completo en
 
 ## Activo / futuro
 
-## Fase 3 — Paralelo entre jobs
+## Fase 3 — Paralelo entre jobs  ✅ CERRADA
 
 **Objetivo:** varias generaciones a la vez sin reventar la API ni la máquina.
 
 ### Acceptance Criteria
-- [ ] AC1 — Se pueden encolar varios jobs y corren **en paralelo** hasta un límite (semáforo) configurable en Ajustes.
+- [x] AC1 — Se pueden encolar varios jobs y corren **en paralelo** hasta un límite (semáforo) configurable en Ajustes. ([D-092])
 - [x] AC2 — El dashboard muestra **todos** los jobs activos con su progreso. ([D-083])
 
 ### Tasks
-- [ ] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
+- [x] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`. ([D-092])
 - [x] T3.2 — Dashboard de jobs: **dock siempre visible** en el sidebar (descubrimiento por poll
   de `/api/jobs` + progreso por SSE por job; reusa `attachJob`/multi-consumer de D-082). Clic en
   un job → su proyecto + pestaña. ([D-083])
 
-> **Parcial:** AC2/T3.2 cerrados ([D-083], 2026-06-12); build de UI limpio. **Pendiente AC1/T3.1**
-> (semáforo de concurrencia): el dock MUESTRA lo que corre; limitar cuántos corren es backend aparte.
-> Hoy el guard 409 (D-082) ya impide el mismo job duplicado.
+> **Cerrada** (2026-06-13): AC2/T3.2 con [D-083] (2026-06-12); AC1/T3.1 con [D-092] (2026-06-13,
+> Ciclo 2 de 3). El semáforo (`asyncio.Semaphore(max_concurrency)`, default 2, rango 1–16) vive en
+> el `JobManager`: el gate va en `run()` ANTES de RUNNING, así un job en cola es QUEUED **visible**
+> (lo muestra el dock) y **cuenta para el guard 409** — encola, no rechaza. `max_concurrency`
+> persiste en `config/studio.yaml` (config operativa, separada de `.env`/secretos y de
+> `routing.yaml`/pipeline) y se ajusta desde Ajustes vía `GET/PUT /api/studio-settings`. Hot-swap
+> no estricto (aplica a los próximos jobs; trade-off consciente para local mono-usuario). NO toca
+> `RenderBody.concurrency` (planos intra-render, Fase 4).
+
+---
+
+## Ciclo 3 — Pantalla de historial de jobs + sidebar (pendiente)
+
+> Trabajo NUEVO, no parte del AC original de Fase 3 (ese era el dock de activos + el semáforo, ya
+> cerrados). Es el **Ciclo 3 de 3** del plan abierto en [D-090] (Ciclo 1 = persistencia, hecho;
+> Ciclo 2 = semáforo, [D-092], hecho). ADR reservado: [D-091].
+
+- [ ] Pantalla/sección de **historial** que lea `GET /api/jobs/history` (paginado, ya existe por
+  [D-090]): qué generé, cuándo, cuánto tardó, por qué falló.
+- [ ] Integrar el plano histórico al **dock/sidebar** de [D-083] (que hoy solo muestra activos);
+  **revisa D-083** al sumarle memoria.
 
 ---
 

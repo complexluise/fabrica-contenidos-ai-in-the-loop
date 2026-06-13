@@ -135,3 +135,9 @@ es continua entre archivos.
 | D-088 | Arquitectura de documentos: una pregunta por archivo, índice que no miente | Vigente |
 | D-089 | Orquestación multi-agente: PO humano + architect / coder / verifier | Vigente |
 | D-090 | Los jobs ganan historia: persistencia en SQLite (event-source liviano), barrido al boot | Vigente |
+
+### [0091-0100.md](0091-0100.md)
+| # | Decisión | Estado |
+|---|---|---|
+| D-091 | Reservado: pantalla de historial de jobs + sidebar (Ciclo 3 de 3) | Diferida |
+| D-092 | Semáforo de concurrencia entre jobs: encolar, no rechazar (Ciclo 2 de 3) | Vigente |

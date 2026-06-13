@@ -128,12 +128,17 @@ def create_app(projects_dir: Path = Path("projects"),
     de telemetry (LEDGER_PATH).
     """
     from ..telemetry import LEDGER_PATH
+    from .studio_settings import StudioConfig, load_studio_config, save_studio_config
 
     projects_dir = Path(projects_dir)
     config_dir = Path(config_dir)
     app = FastAPI(title="Video Studio (local)")
     _db = Path(db_path) if db_path is not None else LEDGER_PATH
-    jobs = JobManager(db_path=_db)
+
+    # Leer ajustes operativos del studio (config/studio.yaml) al arrancar.
+    # max_concurrency determina cuantos jobs de generacion corren en paralelo.
+    _studio_cfg = load_studio_config(config_dir)
+    jobs = JobManager(db_path=_db, max_concurrency=_studio_cfg.max_concurrency)
 
     @app.exception_handler(JobConflictError)
     async def _job_conflict(_request, exc: JobConflictError):
@@ -1045,6 +1050,43 @@ def create_app(projects_dir: Path = Path("projects"),
         env.write_text("\n".join(merge_env_lines(lines, updates)) + "\n", encoding="utf-8")
         get_settings.cache_clear()  # que el próximo get_settings lea las nuevas keys
         return get_settings_status()
+
+    # --- ajustes operativos del studio (D-092) ----------------------------
+
+    @app.get("/api/studio-settings")
+    def get_studio_settings():
+        """Ajustes operativos del Studio (no secretos). Incluye max_concurrency."""
+        cfg = load_studio_config(config_dir)
+        return {
+            "max_concurrency": cfg.max_concurrency,
+            "max_concurrency_min": 1,
+            "max_concurrency_max": 16,
+        }
+
+    @app.put("/api/studio-settings")
+    def put_studio_settings(body: dict):
+        """Actualiza los ajustes operativos del Studio y los persiste en studio.yaml.
+
+        Tambien actualiza el semaforo del JobManager en caliente (sin reinicio).
+        Body: { "max_concurrency": N }
+        """
+        try:
+            cfg = StudioConfig(**{k: v for k, v in body.items()
+                                  if k in StudioConfig.model_fields})
+        except Exception as exc:  # noqa: BLE001 — validacion -> 422 legible
+            raise HTTPException(422, f"Ajustes invalidos: {exc}")
+        save_studio_config(cfg, config_dir)
+        # Actualizar el semaforo en caliente: reconstruirlo con el nuevo valor.
+        # asyncio.Semaphore no tiene un metodo para cambiar el limite, pero podemos
+        # reemplazarlo. Los jobs ya en curso mantienen su referencia al semaforo
+        # anterior, lo que esta bien: el nuevo limite aplica a los proximos spawns.
+        jobs._sem = asyncio.Semaphore(cfg.max_concurrency)
+        jobs._max_concurrency = cfg.max_concurrency
+        return {
+            "max_concurrency": cfg.max_concurrency,
+            "max_concurrency_min": 1,
+            "max_concurrency_max": 16,
+        }
 
     # --- estáticos (imágenes de candidatos + UI build) -------------------
     if projects_dir.exists():

@@ -339,3 +339,136 @@ def test_job_events_written_per_transition(tmp_path):
     assert "queued" in events
     assert "running" in events
     assert "done" in events
+
+
+# --- Ciclo 2: semaforo de concurrencia (D-092) -----------------------------------
+
+
+async def test_semaphore_limits_concurrency(tmp_path):
+    """Con max_concurrency=1: el segundo job queda QUEUED hasta que el primero
+    libera el semaforo; luego pasa a RUNNING.
+
+    La secuencia esperada:
+      1. job1 spawn -> RUNNING (toma el semaforo)
+      2. job2 spawn -> QUEUED (esperando semaforo)
+      3. job1 libera -> job2 pasa a RUNNING -> luego DONE
+    """
+    m = JobManager(db_path=tmp_path / "sem.sqlite", max_concurrency=1)
+
+    # Evento para bloquear job1 hasta que decidamos liberarlo
+    release1 = asyncio.Event()
+    # Evento para saber que job2 esta corriendo
+    job2_started = asyncio.Event()
+
+    async def work1():
+        await release1.wait()
+        return {"job": 1}
+
+    async def work2():
+        job2_started.set()
+        return {"job": 2}
+
+    job1 = m.spawn("render", "p1", work1())
+    job2 = m.spawn("render", "p2", work2())
+
+    # Dar tiempo al event loop para arrancar job1 y que job2 quede esperando
+    await asyncio.sleep(0.05)
+
+    # job1 debe estar RUNNING (tomo el semaforo)
+    assert job1.status == JobStatus.RUNNING, f"job1 esperado RUNNING, got {job1.status}"
+    # job2 debe estar QUEUED (semaforo ocupado)
+    assert job2.status == JobStatus.QUEUED, f"job2 esperado QUEUED, got {job2.status}"
+
+    # Liberar job1
+    release1.set()
+
+    # Esperar a que job2 arranque y termine
+    await asyncio.wait_for(job2_started.wait(), timeout=3)
+    await _wait_all_done(m)
+
+    assert job1.status == JobStatus.DONE
+    assert job2.status == JobStatus.DONE
+
+
+async def test_semaphore_queued_job_still_triggers_409_conflict(tmp_path):
+    """Un job en QUEUED (esperando semaforo) sigue siendo "vivo" para el guard 409.
+
+    El guard anti doble-gasto no distingue QUEUED de RUNNING: ambos son vivos.
+    Un segundo disparo identico debe dar JobConflictError aunque el primero
+    este en cola.
+    """
+    m = JobManager(db_path=tmp_path / "sem.sqlite", max_concurrency=1)
+
+    release = asyncio.Event()
+
+    async def slow():
+        await release.wait()
+        return {"ok": True}
+
+    # job1 ocupa el semaforo
+    job1 = m.spawn("render", "proj1", slow())
+    # job2 queda en cola (semaforo lleno, proyecto diferente -> no conflict)
+    job2 = m.spawn("render", "proj2", slow())
+
+    await asyncio.sleep(0.05)
+    assert job2.status == JobStatus.QUEUED
+
+    # Ahora intentar re-disparar job2 (mismo kind+proyecto) -> 409
+    with pytest.raises(JobConflictError):
+        m.spawn("render", "proj2", slow())
+
+    # limpieza
+    release.set()
+    await _wait_all_done(m)
+
+
+async def test_semaphore_default_concurrency_is_2(tmp_path):
+    """El default de max_concurrency es 2: dos jobs corren en paralelo sin bloquearse."""
+    m = JobManager(db_path=tmp_path / "sem2.sqlite")  # sin pasar max_concurrency
+
+    release = asyncio.Event()
+    started = []
+
+    async def work(n):
+        started.append(n)
+        await release.wait()
+        return {"n": n}
+
+    job1 = m.spawn("render", "p1", work(1))
+    job2 = m.spawn("keyframes", "p2", work(2))
+    job3 = m.spawn("render", "p3", work(3))  # el tercero debe quedar en cola
+
+    await asyncio.sleep(0.05)
+
+    # Con default=2: job1 y job2 RUNNING, job3 QUEUED
+    assert job1.status == JobStatus.RUNNING
+    assert job2.status == JobStatus.RUNNING
+    assert job3.status == JobStatus.QUEUED
+
+    release.set()
+    await _wait_all_done(m)
+    assert job3.status == JobStatus.DONE
+
+
+async def test_semaphore_queued_job_visible_in_list(tmp_path):
+    """Un job QUEUED (esperando semaforo) aparece en list() y find_active()."""
+    m = JobManager(db_path=tmp_path / "sem.sqlite", max_concurrency=1)
+
+    release = asyncio.Event()
+
+    async def slow():
+        await release.wait()
+        return {"ok": True}
+
+    m.spawn("render", "p1", slow())
+    job2 = m.spawn("keyframes", "p2", slow())
+
+    await asyncio.sleep(0.05)
+    assert job2.status == JobStatus.QUEUED
+
+    # Debe ser visible en list() y en find_active()
+    assert job2 in m.list()
+    assert m.find_active("keyframes", "p2") is job2
+
+    release.set()
+    await _wait_all_done(m)

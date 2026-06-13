@@ -559,3 +559,84 @@ def test_job_detail_unknown_returns_404(tmp_path):
     """GET /api/jobs/{id} devuelve 404 si el job no existe ni en memoria ni en SQLite."""
     r = _client(tmp_path).get("/api/jobs/nonexistent123")
     assert r.status_code == 404
+
+
+# --- Ciclo 2: studio-settings (D-092) ----------------------------------------
+
+def test_studio_settings_get_returns_defaults(tmp_path):
+    """GET /api/studio-settings devuelve max_concurrency con su default (2)."""
+    r = _client(tmp_path).get("/api/studio-settings")
+    assert r.status_code == 200
+    body = r.json()
+    assert "max_concurrency" in body
+    assert isinstance(body["max_concurrency"], int)
+    assert body["max_concurrency"] >= 1
+    assert "max_concurrency_min" in body and "max_concurrency_max" in body
+
+
+def _client_with_tmp_config(tmp_path):
+    """Cliente con config_dir propio en tmp_path (para tests que escriben studio.yaml)."""
+    import shutil
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    for f in Path("config").iterdir():
+        if f.is_file():
+            shutil.copy(f, cfg_dir / f.name)
+    styles_dst = cfg_dir / "styles"
+    styles_dst.mkdir(exist_ok=True)
+    for f in (Path("config") / "styles").iterdir():
+        shutil.copy(f, styles_dst / f.name)
+    return TestClient(create_app(
+        projects_dir=tmp_path / "projects",
+        config_dir=cfg_dir,
+        db_path=tmp_path / "jobs.sqlite",
+    ))
+
+
+def test_studio_settings_put_persists_and_returns(tmp_path):
+    """PUT /api/studio-settings persiste y devuelve el nuevo valor."""
+    c = _client_with_tmp_config(tmp_path)
+    r = c.put("/api/studio-settings", json={"max_concurrency": 3})
+    assert r.status_code == 200
+    assert r.json()["max_concurrency"] == 3
+    # El GET siguiente refleja el valor guardado (studio.yaml en el tmp config dir)
+    r2 = c.get("/api/studio-settings")
+    assert r2.json()["max_concurrency"] == 3
+
+
+def test_studio_settings_put_rejects_zero(tmp_path):
+    """PUT /api/studio-settings rechaza max_concurrency < 1 con 422."""
+    r = _client_with_tmp_config(tmp_path).put("/api/studio-settings",
+                                              json={"max_concurrency": 0})
+    assert r.status_code == 422
+
+
+def test_studio_settings_put_rejects_above_max(tmp_path):
+    """PUT /api/studio-settings rechaza max_concurrency > 16 con 422."""
+    r = _client_with_tmp_config(tmp_path).put("/api/studio-settings",
+                                              json={"max_concurrency": 99})
+    assert r.status_code == 422
+
+
+def test_studio_settings_reads_from_config_dir(tmp_path):
+    """El GET lee config/studio.yaml del config_dir inyectado en create_app."""
+    import shutil
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    for f in Path("config").iterdir():
+        if f.is_file():
+            shutil.copy(f, cfg_dir / f.name)
+    styles_dst = cfg_dir / "styles"
+    styles_dst.mkdir(exist_ok=True)
+    for f in (Path("config") / "styles").iterdir():
+        shutil.copy(f, styles_dst / f.name)
+    # Sobreescribir el studio.yaml con max_concurrency=5
+    (cfg_dir / "studio.yaml").write_text("max_concurrency: 5\n", encoding="utf-8")
+
+    client = TestClient(create_app(
+        projects_dir=tmp_path / "projects",
+        config_dir=cfg_dir,
+        db_path=tmp_path / "jobs.sqlite",
+    ))
+    r = client.get("/api/studio-settings")
+    assert r.json()["max_concurrency"] == 5
