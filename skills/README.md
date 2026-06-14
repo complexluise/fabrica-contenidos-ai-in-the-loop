@@ -30,7 +30,7 @@ Más skills se agregan por sprint cuando aparece la necesidad (p.ej.
 
 Una skill es prosa que codifica conocimiento del CLI; si un subcomando o flag cambia,
 la skill queda obsoleta **sin que nada falle**. Es el mismo "Known drift" que el SPEC
-de referencia documenta (`docs/SPEC-organic-illustration-pipeline.md` §10/F10).
+de referencia documenta (`docs/notas/idea-organic-illustration-pipeline.md` §10/F10).
 
 Contramedida: cada `SKILL.md` termina con un bloque que lista las invocaciones
 mínimas que menciona, en modo no-op (solo `--help`, sin gastar):
