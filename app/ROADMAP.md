@@ -14,153 +14,81 @@
 
 ---
 
-## Fase 1 — MVP: el loop completo en UI
+## Estado
 
-**Objetivo:** que el equipo trabaje **sin terminal**. Una corrida de punta a punta: abrir proyecto →
-ver candidatos → **clic** para elegir → render con **progreso en vivo** → descargar el export. Jobs
-de a uno (sin paralelo todavía). Ajustes para las API keys.
+### Cerrado (histórico)
 
-### Acceptance Criteria
-- [x] AC1 — `pipeline studio` levanta el server local y abre `localhost` en el navegador.
-- [x] AC2 — **Ajustes:** configurar las API keys desde la UI (se persisten en `.env` e invalidan el cache de `settings`).
-- [x] AC3 — **Proyectos:** listar `projects/*`, abrir uno, ver sus escenas/planos (vista Guion).
-- [x] AC4 — **Picker:** disparar `keyframes`/`cast`, ver la galería de N candidatos, **elegir con clic** (persiste igual que `pick`/`pick-cast`).
-- [x] AC5 — **Render:** disparar `render`, ver el **progreso en vivo** (SSE) hasta el rough cut.
-- [x] AC6 — **Export:** botón "armar paquete" → `export_bundle`. *(Smoke real con SSE -> done.)*
+Fases 1–2.6 **cerradas**: MVP del loop en UI → entrada por import → gestión de proyectos →
+hardening post-auditoría. Detalle completo en
+[`../docs/roadmap/app-historico.md`](../docs/roadmap/app-historico.md).
 
-### Tasks (orden)
-- [x] T1.1 — `src/pipeline/server/`: app FastAPI + `pipeline studio` (uvicorn + abre browser).
-- [x] T1.2 — **Job manager** async en proceso (estados + buffer de log por job). 🔬 ✅
-- [x] T1.3 — Endpoints del motor (projects, keyframes/cast/render/export -> job, jobs + SSE).
-- [x] T1.4 — Endpoints de selección (`pick`/`pick-cast`).
-- [x] T1.5 — **Ajustes:** `GET/PUT /settings` + invalida el `lru_cache`.
-- [x] T1.6 — Sirve `/files` (imágenes de candidatos) + el build de la UI.
-- [x] T1.7 — **UI Svelte** (`app/`, Vite + pnpm): Guion, Picker (galería + clic), Render/Export (progreso vivo), Ajustes; build servido por FastAPI.
-- [x] T1.8 — Smoke: API con TestClient (4) + uvicorn real (health/projects + ciclo de export con SSE).
+<details><summary>Índice de fases cerradas</summary>
 
-> **✅ Fase 1 CERRADA** (2026-06-05). Backend (131 tests verde, +8) + UI Svelte; `pipeline studio`
-> sirve UI+API+SSE en un origen. **Pendiente:** correr el loop completo con API real (FAL) —
-> generar → elegir en la galería → render con progreso → export.
+- **Fase 1** — MVP: el loop completo en UI
+- **Fase 1.5** — UX para recién llegados
+- **Fase 2** — Entrada desde la app: importar → storyboard editable
+- **Fase 2.5** — Gestión de proyectos y UX del bucle
+- **Fase 2.6** — Hardening post-auditoría del frontend
+
+</details>
 
 ---
 
-## Fase 1.5 — UX para recién llegados (quick wins)
+## Activo / futuro
 
-**Objetivo:** que alguien que abre la app **sin saber nada** entienda el flujo solo. Sale de la
-auditoría de UX: hoy la app asume que ya conocés `casting → keyframes → elegir → render → export`.
-No lo enseña, no lo ordena, ni te dice dónde estás.
-
-### Acceptance Criteria
-- [x] AC1 — **Pantalla de Inicio** con un **checklist de estado** del proyecto (keys · casting · keyframes elegidos · render · export) y el **siguiente paso** sugerido.
-- [x] AC2 — El sidebar **numera y ordena** el flujo (Inicio · 1 Ajustes · 2 Guion · 3 **Elegir** · 4 **Producir**). *(El "Picker" pasó a llamarse Elegir y "Render/Export" a Producir — lenguaje más claro.)*
-- [x] AC3 — **Sin API key**, los botones de "Generar" quedan **deshabilitados** con un cartel claro ("Configurá las keys en Ajustes"); los errores se muestran **en humano** (`humanError`), no como traceback.
-- [x] AC4 — **CTA de siguiente paso**: tras elegir → "Siguiente: Producir"; tras render → "Siguiente: Export".
-- [x] AC5 — **Sub-etiquetas en lenguaje claro** (una línea de ayuda por pantalla; traducir la jerga: keyframes = imagen base, casting = cara del personaje, rough cut = corte de referencia).
-
-### Tasks (orden)
-- [x] T1.5.1 — Backend: `GET /api/projects/{slug}/status` (casting hecho X/Y, candidatos, escenas elegidas X/Y, run, export). 🔬 *(creció a [D-032]: estado **derivado** del disco, fuente única; `state.compute_stage`/`derive_state`)*
-- [x] T1.5.2 — Vista **Inicio**: checklist con ✓/⬜ + botón "siguiente paso" que salta a la pestaña correcta.
-- [x] T1.5.3 — Sidebar numerado + reordenado (la espina del bucle); store compartido (`studio.svelte.js`) para navegar desde Inicio/CTA.
-- [x] T1.5.4 — Elegir: deshabilitar "Generar" sin `fal_key`; banner de error en humano; CTA tras guardar.
-- [x] T1.5.5 — Producir: CTA "Siguiente: Export" tras render; error en humano.
-- [x] T1.5.6 — Sub-etiquetas/ayuda por pantalla (glosario corto inline).
-
-> **✅ Fase 1.5 CERRADA** (2026-06-06, PR #2). UI a dos tintas (azul = la IA propone, rojo = la
-> persona decide) + espina del bucle + Inicio que orienta. El estado del proyecto se **deriva** del
-> disco ([D-032]), fuente única para server y front. **Pendiente:** smoke del loop completo con API real.
-
-[D-021]: ../docs/decisiones/0021-0030.md
-[D-022]: ../docs/decisiones/0021-0030.md
-[D-032]: ../docs/decisiones/0031-0040.md
-[D-035]: ../docs/decisiones/0031-0040.md
-[D-036]: ../docs/decisiones/0031-0040.md
-[D-037]: ../docs/decisiones/0031-0040.md
-
----
-
-## Fase 2 — Entrada desde la app: importar → storyboard editable
-
-**Objetivo:** arrancar un proyecto **sin escribir YAML**. Pegás o subís texto (`.md`/`.txt`), la IA
-propone el borrador (título, brief, escenas), y la persona lo **edita** (agregar/eliminar/reordenar
-escenas) y confirma. Es el **Checkpoint humano #1/#2 de [D-021]** hecho interfaz: la IA descompone y
-propone; la persona decide y firma. Tracker: issue #5.
-
-### Acceptance Criteria
-- [x] AC1 — **Importar:** pegar texto o subir `.md`/`.txt`; la IA lo descompone en un **borrador** de
-  proyecto (título, brief, escenas con planos). `author.draft_project` (Claude) + `parse_draft` 🔬. *(Smoke real con Claude pendiente de `ANTHROPIC_API_KEY`.)*
-- [x] AC2 — Se **crea** `projects/<slug>/project.yaml` desde el borrador (`project.write_spec`, round-trip + idempotente 🔬); el `slug` se deriva (Haiku/`_slugify`) y se puede fijar en el import.
-- [x] AC3 — **Storyboard** (renombra *Guion*) **editable:** editar prompt/beat/duración/voz/caption por escena y plano; **agregar, eliminar y reordenar** escenas; editar título/brief.
-- [x] AC4 — **Guardar** persiste al `project.yaml` con **validación** (Pydantic → 422 en humano), no a mano. 🔬
-- [x] AC5 — **Guard de selecciones:** reordenar **no** corrompe `selections.yaml` (id estable); renombrar/eliminar **poda** las huérfanas (`prune_selections`). 🔬 ([D-022])
-- [x] AC6 — El estado del bucle ([D-032]) reconoce **"sin proyecto"** y `nextStep` guía a *Importar*.
-
-### Tasks (orden)
-- [x] T2.1 — Motor: `ingest.extract_text` (`.md`/`.txt`) + `author.draft_project(text)` → borrador (`ProjectDraft`). 🔬 ✅ *(parseo del LLM)*
-- [x] T2.2 — Motor: `project.write_spec(spec)` → `project.yaml` idempotente + `spec_from_dict` (parseo único). 🔬 ✅
-- [x] T2.3 — Backend: `POST /api/projects/import` (texto) como **job/SSE** → crea el proyecto, devuelve `slug`.
-- [x] T2.4 — Backend: `PUT /api/projects/{slug}` guarda el spec editado (422 si inválido, fusión por id) + guard de selecciones. 🔬
-- [x] T2.5 — UI: vista **Importar** (textarea + drag-drop `.md`/`.txt`, leído client-side) al frente del bucle.
-- [x] T2.6 — UI: **Storyboard** editable (ex-Guion): editar campos, agregar/eliminar/reordenar planos y escenas, Guardar.
-- [x] T2.7 — Estado [D-032]: "sin proyecto" → *Importar*; etapa "Guion" → "Storyboard"; espina del bucle renumerada (Inicio · 1 Ajustes · 2 **Importar** · 3 **Storyboard** · 4 Elegir · 5 Producir).
-
-> **✅ Fase 2 CERRADA** (2026-06-06, [D-033]). 151 tests del core en verde (+20: `test_author.py`
-> + endpoints import/PUT en `test_server.py`); build de la UI limpio. Entrada sin YAML: importar texto
-> → la IA propone borrador → editar/firmar el storyboard → guardar validado. El hash del caché
-> ([D-013]) queda intacto (`write_spec` solo serializa). **Smoke real validado** (uvicorn + Claude):
-> texto → borrador (5 escenas con planos/VO/captions/personaje) → reordenar+editar → guardar (422 en
-> inválido) → guard de selecciones (poda la escena eliminada). *(El `TestClient` de FastAPI se cuelga
-> con `to_thread`+SSE; por eso los unit tests mockean Claude y el smoke va contra uvicorn real.)*
-
-> **Decisión de alcance:** el backend recibe **texto** (la UI lee el archivo client-side; sin
-> `python-multipart`); `extract_text` queda para el motor/CLI.
-
-> **Backlog implementado después del cierre** (2026-06-06): **#8 personajes con `design:` auto** en el
-> import (la IA propone personajes con su prompt de diseño → habilita el casting) y **#10 estilo
-> elegible** al importar (`GET /api/styles` + selector en la UI; default `lego`). +8 tests.
-
-> **Diferido a fases siguientes**: `.docx`/`.pdf` (#7); regenerar una escena del borrador con la IA
-> (#9); subir imágenes de referencia (#11); renombrar el slug de un proyecto ya creado (#12).
-
----
-
-## Fase 2.5 — Gestión de proyectos y UX del bucle (los "detalles")
-
-**Objetivo:** afinar la operación diaria. Salió de una ronda de feedback de uso. Decisiones:
-[`D-035`](../docs/decisiones/0031-0040.md). El banco reusable de assets (#1) y el cambio de
-frames por plano (#2) son aparte (ver [D-036]/[D-037] y el ROADMAP del motor).
-
-### Acceptance Criteria
-- [x] AC1 — **Claves a Configuración (#4):** las API keys salen del bucle numerado a un acceso
-  **Configuración** (engranaje, fuera del loop); Inicio las muestra **solo si faltan**. ([D-035])
-- [x] AC2 — **Firmar el plan (#5):** el Storyboard tiene un acto explícito **"Firmar el plan"** que
-  persiste (`storyboard.signed`); editar sin firmar lo limpia; el paso 2 del bucle **prende el chulo**
-  al firmar. 🔬 *(toggle de firmado)* ([D-035])
-- [x] AC3 — **Administrar proyectos (#3):** crear un proyecto en blanco desde la UI, listarlos, abrirlos
-  y **borrarlos** (con confirmación). El import sigue como alta desde texto. 🔬 *(alta/slug único/borrado/404)*
-
-### Tasks
-- [x] T2.5.1 — Backend: `PUT` acepta `sign`; `GET /status` reporta `storyboard.signed` (marcador en disco).
-- [x] T2.5.2 — UI: `Configuración` fuera del bucle (sidebar + Inicio); bucle renumerado a 1-4.
-- [x] T2.5.3 — UI: Storyboard con "Firmar el plan" / "Guardar borrador" + estado firmado.
-- [x] T2.5.4 — Backend: `POST /api/projects` (alta en blanco) + `DELETE /api/projects/{slug}`. 🔬
-- [x] T2.5.5 — UI: gestión en el sidebar (＋ Nuevo con form inline · selector · 🗑 borrar con confirm).
-
-> **✅ Fase 2.5 CERRADA** (2026-06-07, [D-035]). #4 (claves a Configuración), #5 (firmar el plan) y
-> #3 (administrar proyectos) cerrados; build de UI limpio.
-
----
-
-## Fase 3 — Paralelo entre jobs
+## Fase 3 — Paralelo entre jobs  ✅ CERRADA
 
 **Objetivo:** varias generaciones a la vez sin reventar la API ni la máquina.
 
 ### Acceptance Criteria
-- [ ] AC1 — Se pueden encolar varios jobs y corren **en paralelo** hasta un límite (semáforo) configurable en Ajustes.
-- [ ] AC2 — El dashboard muestra **todos** los jobs activos con su progreso.
+- [x] AC1 — Se pueden encolar varios jobs y corren **en paralelo** hasta un límite (semáforo) configurable en Ajustes. ([D-092])
+- [x] AC2 — El dashboard muestra **todos** los jobs activos con su progreso. ([D-083])
 
 ### Tasks
-- [ ] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`.
-- [ ] T3.2 — Dashboard de jobs (varios SSE / un stream multiplexado).
+- [x] T3.1 — Semáforo de concurrencia en el job manager + setting `max_concurrency`. ([D-092])
+- [x] T3.2 — Dashboard de jobs: **dock siempre visible** en el sidebar (descubrimiento por poll
+  de `/api/jobs` + progreso por SSE por job; reusa `attachJob`/multi-consumer de D-082). Clic en
+  un job → su proyecto + pestaña. ([D-083])
+
+> **Cerrada** (2026-06-13): AC2/T3.2 con [D-083] (2026-06-12); AC1/T3.1 con [D-092] (2026-06-13,
+> Ciclo 2 de 3). El semáforo (`asyncio.Semaphore(max_concurrency)`, default 2, rango 1–16) vive en
+> el `JobManager`: el gate va en `run()` ANTES de RUNNING, así un job en cola es QUEUED **visible**
+> (lo muestra el dock) y **cuenta para el guard 409** — encola, no rechaza. `max_concurrency`
+> persiste en `config/studio.yaml` (config operativa, separada de `.env`/secretos y de
+> `routing.yaml`/pipeline) y se ajusta desde Ajustes vía `GET/PUT /api/studio-settings`. Hot-swap
+> no estricto (aplica a los próximos jobs; trade-off consciente para local mono-usuario). NO toca
+> `RenderBody.concurrency` (planos intra-render, Fase 4).
+
+---
+
+## Ciclo 3 — Pantalla de jobs + sección "Herramientas" del sidebar + Costos a página propia  ✅ CERRADO
+
+> Trabajo NUEVO, no parte del AC original de Fase 3 (ese era el dock de activos + el semáforo, ya
+> cerrados). Es el **Ciclo 3 de 3** del plan abierto en [D-090] (Ciclo 1 = persistencia, hecho;
+> Ciclo 2 = semáforo, [D-092], hecho). ADR: [D-091].
+
+- [x] Pantalla de **Jobs** (`views/Jobs.svelte`) que lee `GET /api/jobs/history` (paginado, ya
+  existe por [D-090]) + activos del monitor global + detalle/log al click (`GET /api/jobs/{id}`,
+  cae a SQLite para terminados): qué generé, cuándo, cuánto tardó, por qué falló. ([D-091])
+- [x] El plano histórico vive en una pantalla dedicada; el **dock de [D-083] se mantiene** (lo
+  vivo de un vistazo). **Revisa D-083**, no lo reemplaza: dock = glance, pantalla = historial +
+  detalle + log. ([D-091])
+- [x] Sección **"Herramientas"** en el foot del sidebar (Configuración + Jobs + Costos), FUERA de
+  la espina del bucle (honra [D-086]/[D-087]); lista `TOOLS` separada de STAGES/PIPELINE_ORDER. ([D-091])
+- [x] **Costos a página propia** (`views/Costos.svelte`); se quita el panel de Producción, queda un
+  link "Ver costos ->" (una verdad, un lugar — [D-088]). ([D-091])
+
+> **Cerrado** (2026-06-13) con [D-091]. Con esto el plan entero de "los jobs ganan historia"
+> (abierto en [D-090]) queda **completo**: Ciclo 1 = persistencia ([D-090]), Ciclo 2 = semáforo
+> ([D-092]), Ciclo 3 = pantalla/sidebar/costos ([D-091]). Sin endpoints nuevos (todo el contrato
+> ya existía). Verifier: PASA CON RESERVAS (cosméticas, ya corregidas).
+>
+> **Refinación del smoke** (2026-06-13, [D-093]): el historial se ahogaba en micro-iteraciones.
+> Se agregó `scope` ('batch'|'item') a los jobs (persistir todo, ocultar las micro por defecto);
+> `GET /api/jobs/history` acepta `?kind=`/`?scope=`/`?include_micro=` y la pantalla de Jobs estrena
+> filtro por tipo + toggle "mostrar micro-iteraciones" (default OFF). Polish de UI sin arquitectura
+> (sidebar scrolleable, iconos de Herramientas consistentes, quitada la barra "Ver costos" de
+> Producción que duplicaba la página de Costos — [D-088]).
 
 ---
 
@@ -168,7 +96,20 @@ frames por plano (#2) son aparte (ver [D-036]/[D-037] y el ROADMAP del motor).
 
 - [ ] Planos **concurrentes dentro de un render** (toca `run_project`: `gather` con cap).
 - [ ] Envoltorio **desktop** (Tauri) para un ícono clickeable, si se quiere.
-- [ ] Reanudar jobs tras reinicio (persistir estado; hoy en memoria, el caché hace barato re-disparar).
+- [ ] **Editor de timeline** (el norte de [D-094], opción (c)): arrastrar la duración de un bloque y
+  **reordenar planos** desde la tira temporal. Hoy la tira **informa + navega, NO edita** (la edición
+  vive en las tarjetas del Storyboard); el player es read-only. **Gate de contrato antes de empezar:**
+  los `shot_id` se derivan por **POSICIÓN** (`s1`, `s1.2`, …) y las selecciones/poses/takes se guardan
+  **por `shot_id`** (`selections.yaml`/`pose_picks.yaml`/`take_picks.yaml`), así que reordenar
+  **invalidaría las selecciones**. Hay que decidir primero la política — re-mapear / descartar con
+  aviso (estilo `dropped_selections`) / bloquear — y eso es **trabajo de motor/contrato**, no de UI.
+- [~] Reanudar jobs tras reinicio. **Parcial** ([D-090], 2026-06-13): los jobs ya **persisten** en
+  SQLite (`out/telemetry.sqlite`, tablas `jobs`/`job_events`) y el historial sobrevive al reinicio;
+  al boot, los huérfanos queued/running se marcan `failed` (rompe el deadlock del guard 409). Falta lo
+  de **reanudar** el trabajo interrumpido en sí (hoy se marca failed, no se retoma; el caché hace
+  barato re-disparar). Era el **Ciclo 1 de 3** (persistencia); el semáforo (Ciclo 2, [D-092]) y la
+  pantalla/sidebar de historial (Ciclo 3, [D-091]) ya están cerrados — el plan de jobs está completo,
+  salvo este ítem de **reanudar** (que sigue diferido).
 
 ---
 

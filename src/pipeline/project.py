@@ -1,4 +1,4 @@
-"""Modelo de proyecto + caché content-addressed (SPEC §7).
+"""Modelo de proyecto + caché content-addressed (ARCHITECTURE §7).
 
 Un proyecto soporta muchas iteraciones baratas: cada paso de cada escena se
 llavea por el hash de sus inputs y se cachea a nivel proyecto, asi re-correr sin

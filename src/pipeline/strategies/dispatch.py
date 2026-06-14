@@ -1,7 +1,7 @@
 """L5 - Dispatcher híbrido.
 
 Mapea la clase de escena -> estrategia + subconjunto de providers, leyendo
-`routing.yaml` (§4.4 del SPEC). Cambiar el YAML cambia el ruteo sin tocar código.
+`routing.yaml` (§4.4 de ARCHITECTURE). Cambiar el YAML cambia el ruteo sin tocar código.
 """
 
 from __future__ import annotations

@@ -4,8 +4,9 @@
 > Y la IA es solo *una* de las herramientas — no la más importante.
 
 Este documento explica el *por qué* del proyecto. Si solo vas a leer una cosa antes
-de contribuir, que sea esta. Lo técnico vive en [`SPEC.md`](./SPEC.md) y el *cómo
-trabajamos en equipo* en [`docs/flujo-de-trabajo.md`](./docs/flujo-de-trabajo.md).
+de contribuir, que sea esta. El *qué/para-quién* vive en [`PRD.md`](./PRD.md), lo técnico en
+[`ARCHITECTURE.md`](./ARCHITECTURE.md), y el *cómo trabajamos en equipo* en
+[`docs/flujo-de-trabajo.md`](./docs/flujo-de-trabajo.md).
 
 ---
 

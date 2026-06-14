@@ -66,6 +66,24 @@ async def test_strip_shows_picked_anchor_as_destino(tmp_path):
     assert s1["start"] is None and s1["ready"] is True
 
 
+async def test_strip_is_quiet_at_info_level(tmp_path, caplog):
+    # El strip dry (status/animatic) se recalcula en cada navegación: NO debe
+    # emitir el INFO por-plano "destino directo (ancla)" que inundaba la consola.
+    # En un render real (dry=False) ese log sigue siendo INFO (visible).
+    import logging
+
+    proj = _project(tmp_path)
+    anchor = proj.cache_dir / "keyframes" / "anchor.png"
+    anchor.write_bytes(b"\x89PNG")
+    proj.selections_path.write_text(
+        yaml.safe_dump({"s1": "cache/keyframes/anchor.png"}), encoding="utf-8")
+    cfg = load_config(CONFIG_DIR, "lego")
+    with caplog.at_level(logging.INFO, logger="pipeline"):
+        await animatic_strip(proj, _spec(), cfg)
+    assert not any("destino directo (ancla)" in r.message
+                   for r in caplog.records if r.levelno >= logging.INFO)
+
+
 async def test_strip_lands_shot_requires_both_poses(tmp_path):
     """D-070: un plano `lands` (interpola) NO está listo solo con el destino."""
     proj = _project(tmp_path)

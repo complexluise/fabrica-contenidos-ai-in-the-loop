@@ -1,4 +1,4 @@
-# SPEC — Industrialización de Video con IA (Multi-modelo, API-only)
+# ARQUITECTURA — Pipeline de Video IA (multi-modelo, API-only)
 
 > **Caso ancla:** video estilo **LEGO**. Diseñado para generalizar a cualquier estilo
 > (sci-fi, claymation, anime, producto…) intercambiando el *style slot* sin tocar la
@@ -6,29 +6,10 @@
 >
 > **Enfoque:** solo API (sin self-hosting en MVP), priorizando ahorro y mezcla de modelos.
 >
-> **Estado:** v0.2 — este documento describe **arquitectura y contratos**. El *por qué* de cada
+> **Qué es esto:** el **CÓMO** está construido — capas, contratos e interfaces. El **qué/para-quién**
+> vive en [`PRD.md`](PRD.md); el **plan** en [`ROADMAP.md`](ROADMAP.md); el *por qué* de cada
 > elección (con estado y "qué cambió") vive en el registro de decisiones: **[`docs/decisiones/`](docs/decisiones/)**.
 > Revalidar precios de cada API antes de cerrar presupuesto.
-
----
-
-## 0. Resumen ejecutivo
-
-Pipeline que convierte un **brief/guion** en un **video multi-formato** atravesando 10 capas
-desacopladas por contratos tipados. El núcleo es **Python + asyncio** orquestando varios
-modelos de video por API a través de una **interfaz `Provider` única**, con un **Quality Gate
-común** y **telemetría de costo/latencia por escena desde el día 1**.
-
-**Insight central:** el cuello de botella no es el modelo, es (a) la **consistencia entre tomas**
-y (b) el **control de costo por escena**. Toda la arquitectura gira en torno a un
-**clasificador de escenas + quality gate**, y a enrutar cada escena al modelo más barato que
-cumpla el requisito.
-
-**Decisión técnica más importante:** en API-only el **LoRA de estilo no vive en el modelo de
-video** (Veo/Kling/Seedance no aceptan pesos custom). Vive en una **etapa de imagen previa**
-(Flux + LoRA) que genera un *keyframe* de estilo, el cual se inyecta como `init_image` a los
-modelos **image-to-video**. Esto añade la capa L3 (Keyframe) y es lo que da el look LEGO + la
-consistencia.
 
 ---
 
@@ -283,7 +264,7 @@ trade-offs):
 | L5 Estrategias | Router / Cascade / Ensemble (híbrido por YAML) | [D-006](docs/decisiones/0001-0010.md) |
 | L6 Quality Gate | VLM-judge → señales enchufables + fusión | [D-007](docs/decisiones/0001-0010.md), [D-016](docs/decisiones/0011-0020.md) |
 | L7/L8 Post | ffmpeg | [D-008](docs/decisiones/0001-0010.md) |
-| L9 Estado/cola | SQLite+asyncio → Temporal+Postgres | [D-009](docs/decisiones/0001-0010.md) |
+| L9 Estado/cola | SQLite+asyncio (jobs ya persisten, D-090) → Temporal+Postgres | [D-009](docs/decisiones/0001-0010.md), [D-090](docs/decisiones/0081-0090.md) |
 | Modelo de proyecto | Spec + caché content-addressed + runs | [D-013](docs/decisiones/0011-0020.md)…[D-015](docs/decisiones/0011-0020.md) |
 | Filosofía de deps | APIs antes que libs pesadas | [D-017](docs/decisiones/0011-0020.md) |
 | Consistencia de personaje | API-first (nano-banana + Claude visión) | [D-019](docs/decisiones/0011-0020.md) |
@@ -403,43 +384,6 @@ En estricto: en fallo → reintento / escalado de tier (según estrategia) y, ú
 
 ---
 
-## 6. Plan de entrega por capas
-
-### MVP (hoy) — slice vertical
-`brief → un video LEGO ensamblado`, atravesando todas las capas en su versión mínima. Lo que
-importa es **fijar los contratos**; el músculo se añade después.
-
-| Capa | Versión MVP | Se difiere |
-|---|---|---|
-| L0 Contracts | Completo (Pydantic) | — |
-| L1 Decomp | Claude: guion → `list[Scene]` | edición humana de escenas |
-| L2 Classifier | Reglas + Claude | calibración fina / entrenado |
-| L3 Keyframe | Flux + LEGO LoRA (fal) → 1 img/escena | banco de personajes, multi-ref |
-| L4 Adapter | **1 provider: Kling** (i2v) vía fal | Seedance, Veo, Runway, Luma |
-| L5 Orchestrator | **solo Smart Router** | cascade + ensemble |
-| L6 Gate | **VLM-judge** pasa/falla + 1 reintento | CLIP/insightface/aesthetic |
-| L7 Assembly | ffmpeg concat + música + captions | color grade, transiciones, Remotion |
-| L8 Delivery | 1 formato **9:16** | 1:1 y 16:9 |
-| L9 Observability | log `cost_usd`+`latency_s` → SQLite | dashboard |
-
-El MVP se construyó así (histórico). Hoy el comando vive sobre un **proyecto** (ver README/§7):
-```bash
-uv run pipeline run lego_demo                      # autónomo, con caché
-uv run pipeline run --brief briefs/example.yaml    # smoke suelto a out/ (sin proyecto)
-```
-
-**Orden de construcción (MVP):** `contracts` → `telemetry` → adapter `fal_kling` → `keyframe` →
-`router` → `gate` → `assemble` → `cli`.
-
-### Roadmap
-El plan vivo, con estado por sprint, vive en **[`ROADMAP.md`](ROADMAP.md)** (fuente canónica).
-Resumen al día: Sprints 1–4.6 cerrados (MVP → caché/proyecto → multi-modelo → gate duro →
-consistencia → checkpoints interactivos casting+keyframe). **Siguiente: Sprint 5 — Producción
-mínima** (música + captions por escena + robustez). Luego: audio/voz ElevenLabs (6), escala/ops (7),
-internalización (8).
-
----
-
 ## 7. Modelo de proyecto, iteración y caché
 
 > Decisión de diseño (Sprint 1.5). El cuello de botella al iterar **no es el orden en disco,
@@ -534,6 +478,61 @@ projects/<slug>/
     final_9x16.mp4
 ```
 
+> **Historia de jobs durable (server, [D-090]).** El run_report por corrida sigue siendo el
+> manifiesto inmutable; aparte, el Studio guarda la **historia de JOBS** (los procesos de
+> generación que dispara la UI) en la **misma** base global `out/telemetry.sqlite` que el libro
+> de costos ([D-079]), en tablas propias `jobs` + `job_events` (event-source liviano). Esto NO
+> contradice [D-032] (el ESTADO del proyecto sigue derivado del disco): los jobs ganan una
+> dimensión que el disco de proyecto nunca capturó — cuándo corriste qué, cuánto tardó, por qué
+> falló. Contrato del server: `GET /api/jobs` = solo **activos** (queued+running, desde memoria;
+> el dock de [D-083] lo pollea); `GET /api/jobs/history` = **historial** paginado (SQLite);
+> `GET /api/jobs/{id}` cae a SQLite para jobs terminados. El `JobManager` (dict en memoria) es la
+> verdad de lo VIVO; SQLite, la verdad durable. Al boot, los jobs huérfanos queued/running de un
+> proceso anterior se marcan `failed` (evita el deadlock del guard 409, [D-082]).
+>
+> **Scope de los jobs: lote vs. micro-iteración (server, [D-093]).** Cada job lleva un campo
+> **`scope` ('batch' | 'item')** calculado al crearlo (`job_store.determine_scope`): es `item` si
+> el `project` contiene `/` (jobs por-escena/personaje/pose, p. ej. `slug/s1`) **o** si el `kind`
+> es micro (`pose_variants`, `shots`); si no, `batch`. **Se persiste TODO** (incluidas las micro,
+> por trazabilidad), pero la **lectura filtra**: `GET /api/jobs/history` acepta `?kind=`, `?scope=`
+> (filtro exacto, prioritario) y `?include_micro=` (default **False** -> solo `batch`); cada fila
+> del history y cada job de `/api/jobs` (activos) reportan su `scope`. Migración defensiva: bases
+> previas ganan la columna con default `batch`. El job significativo es el lote; las micro son ruido
+> que se conserva pero se oculta por defecto.
+>
+> **Concurrencia entre jobs (server, [D-092]).** El `JobManager` lleva un
+> `asyncio.Semaphore(max_concurrency)` (default 2, rango 1–16) que limita cuántos jobs corren en
+> paralelo. El gate se adquiere en `run()` **antes** de pasar a RUNNING: un job en cola es QUEUED
+> **visible** (lo muestra el dock de [D-083] y cuenta para el guard 409 de [D-082]) — **encola, no
+> rechaza** (ortogonal al 409: el 409 impide el job DUPLICADO, el semáforo limita los SIMULTÁNEOS).
+> `max_concurrency` es **config OPERATIVA** del Studio en `config/studio.yaml`
+> (`server/studio_settings.py`), aparte de `.env` (secretos) y `routing.yaml` (pipeline de video).
+> Contrato: `GET/PUT /api/studio-settings` (separado de `/api/settings`, que gestiona las keys); el
+> PUT persiste y hace **hot-swap no estricto** del semáforo (aplica a los próximos jobs; los que ya
+> corren terminan con el límite viejo — trade-off consciente para local mono-usuario).
+>
+> **Superficie de UI de los jobs (Studio, [D-091]).** Dos planos, dos lugares: el **dock**
+> (`components/JobsDock.svelte`, [D-083]) es lo VIVO de un vistazo, omnipresente en el sidebar; la
+> **pantalla de Jobs** (`views/Jobs.svelte`) es el complemento — activos del monitor global +
+> **historial** paginado (`GET /api/jobs/history`) + detalle/log al click (`GET /api/jobs/{id}`).
+> Ambas viven en la nueva sección **"Herramientas"** del foot del sidebar (Configuración + Jobs +
+> Costos), **fuera** de la espina del bucle narrativo ([D-086]/[D-087]): es la lista `TOOLS` de
+> `studio.svelte.js`, separada de `STAGES`/`PIPELINE_ORDER`, con tabs globales (sin slug). El
+> **libro de costos** ([D-079]) es su propia página (`views/Costos.svelte`, `GET /api/costs`), ya
+> no un panel dentro de Producción (una verdad, un lugar — [D-088]). Sin endpoints nuevos: todo el
+> contrato (history, detalle, costs) ya existía.
+>
+> **Vista temporal en el Storyboard ([D-094]).** El Storyboard centro ([D-086]) gana una **tira
+> temporal**: bloques cuyo ancho es proporcional a `duration_s` (el ritmo del montaje, visible de un
+> vistazo). Click navega (scroll a la escena); "▶ reproducir desde acá" lanza el **FilmPlayer**
+> ([D-087]) en ese plano vía la prop `start`. El player gana un **scrubber** (saltar a un plano por
+> tiempo, navegación con teclado) pero **sigue read-only**. La tira **informa + navega, NO edita**:
+> la edición sigue en las tarjetas del Storyboard; la tira solo **LEE** `duration_s` (una verdad, un
+> lugar — [D-088]). Sin cambios de contrato ni backend. **Norte futuro (fuera de alcance):** un
+> editor de timeline (arrastrar duración, **reordenar planos**) — gate de contrato: los `shot_id` se
+> derivan por POSICIÓN y selecciones/poses/takes se guardan por `shot_id`, así que reordenar exige
+> antes una política (re-mapear / descartar con aviso / bloquear), que es trabajo de motor, no de UI.
+
 ### 7.4 Modelo de datos (`project.py`)
 
 - `Project` — resuelve `project.yaml`, conoce sus paths de `cache/` y `runs/`, su estilo único.
@@ -569,12 +568,15 @@ legible y tomable a mano:
 
 ```
 video_gen_pipeline/
-├─ SPEC.md
+├─ PRD.md                   # qué/para-quién + recorridos por actor
+├─ ARCHITECTURE.md          # este archivo: cómo (capas + contratos)
+├─ ROADMAP.md               # plan (índice; cerrados en docs/roadmap/)
 ├─ pyproject.toml
 ├─ .mcp.json               # registra mcp-video (MCP, vía uvx) para edición autónoma ([D-042])
 ├─ config/
 │  ├─ providers.yaml        # costo/seg, capabilities por backend
 │  ├─ routing.yaml          # escena→estrategia→provider + umbrales + enforce (gate)
+│  ├─ studio.yaml           # config OPERATIVA del Studio: max_concurrency (semáforo de jobs, [D-092])
 │  └─ styles/lego.yaml      # prompt template, negative, keyframe model + ref_model
 ├─ src/pipeline/
 │  ├─ contracts.py          # L0 — tipos entre capas
@@ -597,6 +599,10 @@ video_gen_pipeline/
 │  ├─ runner.py             # orquesta una corrida (keyframe→video→gate→ensamblaje)
 │  ├─ studio.py             # modo interactivo: cast / pick-cast / keyframes / pick / render
 │  ├─ contact_sheet.py      # hoja de contactos HTML (elegir candidatos)
+│  ├─ server/               # Studio local (FastAPI, [D-031]): app.py (endpoints), jobs.py
+│  │                        #   (JobManager: dict en memoria = verdad de lo VIVO + semáforo de
+│  │                        #   concurrencia, [D-092]), job_store.py (SQLite: historia durable de
+│  │                        #   jobs, [D-090]), studio_settings.py (config operativa, [D-092])
 │  └─ cli.py
 ├─ skills/<nombre>/SKILL.md # capa de discoverability para agentes ([D-023]); apunta al CLI
 ├─ briefs/example.yaml      # modo --brief (smoke suelto)

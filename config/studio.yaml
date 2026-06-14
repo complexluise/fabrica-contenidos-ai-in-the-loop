@@ -1,0 +1,15 @@
+# Ajustes operativos del Studio local (D-092).
+#
+# Este archivo controla parametros de OPERACION del servidor Studio —
+# no secretos (esos van en .env) ni configuracion del pipeline de video
+# (eso va en providers.yaml / routing.yaml).
+#
+# Editable desde la UI (Ajustes > Concurrencia) o a mano.
+# El servidor lo lee al arrancar y lo escribe via PUT /api/studio-settings.
+
+# Cuantos jobs de generacion (render/keyframes/cast/animatic/etc.) pueden
+# correr en paralelo. El resto espera en cola (QUEUED).
+# - 1: un job a la vez (util si la maquina es lenta o el proveedor tiene rate limit)
+# - 2: default — buen balance entre throughput y no saturar la API
+# - 3+: solo si la conexion y los creditos aguantan la rafaga
+max_concurrency: 2

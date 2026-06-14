@@ -1,9 +1,11 @@
 <script>
   import { onMount } from "svelte";
-  import { studio, STAGES, CONFIG, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
+  import { studio, STAGES, TOPLEVEL, FEEDERS, CONFIG, TOOLS, loadProjects, setSlug, goTo, nextStep, stepDone, hasProject,
            createProject, deleteProject, parseHash, initRouting, writeHash } from "./lib/studio.svelte.js";
   import { get, humanError } from "./lib/api.js";
+  import { startJobsMonitor } from "./lib/jobs.svelte.js";
   import StageNode from "./components/StageNode.svelte";
+  import JobsDock from "./components/JobsDock.svelte";
   import Inicio from "./views/Inicio.svelte";
   import Importar from "./views/Importar.svelte";
   import Storyboard from "./views/Storyboard.svelte";
@@ -12,6 +14,8 @@
   import Animatic from "./views/Animatic.svelte";
   import Produccion from "./views/Produccion.svelte";
   import Ajustes from "./views/Ajustes.svelte";
+  import Jobs from "./views/Jobs.svelte";
+  import Costos from "./views/Costos.svelte";
 
   let current = $derived(studio.projects.find((p) => p.slug === studio.slug) || null);
   let next = $derived(nextStep(studio.status));
@@ -38,6 +42,7 @@
     }
     writeHash();
     initRouting();
+    startJobsMonitor();  // D-083: el dashboard de jobs, vivo desde cualquier vista
     try {
       const s = await get("/api/styles");
       if (s?.length) { styles = s; newStyle = s.includes("lego") ? "lego" : s[0]; }
@@ -123,41 +128,93 @@
       {#if pmErr}<div class="pm-err">{pmErr}</div>{/if}
     </div>
 
-    <nav class="spine">
-      {#each STAGES as s, i}
-        {@const state = stageState(s.id)}
-        {@const isCurrent = next && next.tab === s.id && studio.tab !== s.id && state !== "done"}
-        <button
-          class="step actor-{s.actor} state-{state}"
-          class:active={studio.tab === s.id}
-          class:current={isCurrent}
-          onclick={() => goTo(s.id)}
-        >
-          {#if i > 0}<span class="rail" class:last={i === STAGES.length - 1}></span>{/if}
+    <!-- D-086/D-087: el bucle como ÁRBOL — Guion · Storyboard (centro) · Producir,
+         con las mesas que nutren el Storyboard colgando de una línea guía. -->
+    {#snippet step(s, isFeeder)}
+      {@const state = stageState(s.id)}
+      {@const isCurrent = next && next.tab === s.id && studio.tab !== s.id && state !== "done"}
+      <button
+        class="step actor-{s.actor} state-{state}"
+        class:active={studio.tab === s.id}
+        class:current={isCurrent}
+        class:feeder={isFeeder}
+        onclick={() => goTo(s.id)}
+      >
+        {#if isFeeder}
+          <span class="feeder-mark" class:done={state === "done"}></span>
+        {:else}
           <StageNode n={s.n} actor={s.actor} done={state === "done"}
                      icon={s.id === "inicio" ? "home" : ""} />
-          <span class="txt">
-            <span class="lbl">{s.label}</span>
-            <span class="sub">{s.sub}</span>
-          </span>
-        </button>
+        {/if}
+        <span class="txt">
+          <span class="lbl">{s.label}</span>
+          <span class="sub">{s.sub}</span>
+        </span>
+      </button>
+    {/snippet}
+
+    <nav class="spine">
+      {#each TOPLEVEL as s}
+        {@render step(s, false)}
+        {#if s.id === "storyboard"}
+          <div class="feeders">
+            <span class="feeders-cap">nutren el storyboard</span>
+            {#each FEEDERS as f}{@render step(f, true)}{/each}
+          </div>
+        {/if}
       {/each}
     </nav>
 
     <div class="foot">
-      <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
-              onclick={() => goTo(CONFIG.id)}>
-        <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/>
-          <path d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.7 7.7 0 0 0-1.7-1l-.3-2.5H10.9l-.3 2.5a7.7 7.7 0 0 0-1.7 1l-2.3-1-2 3.4L4.6 11a7.7 7.7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.7 7.7 0 0 0 1.7 1l.3 2.5h3.2l.3-2.5a7.7 7.7 0 0 0 1.7-1l2.3 1 2-3.4z"
-            fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-        </svg>
-        <span class="txt">
-          <span class="lbl">{CONFIG.label}</span>
-          <span class="sub">{keysOk ? "claves listas" : "faltan claves"}</span>
-        </span>
-        {#if !keysOk}<span class="badge-warn">!</span>{/if}
-      </button>
+      <JobsDock />
+
+      <!-- D-088/D-091: seccion Herramientas — utilitarias globales, fuera de la espina -->
+      <div class="tools-group">
+        <span class="tools-eyebrow eyebrow">Herramientas</span>
+
+        <button class="config" class:active={studio.tab === CONFIG.id} class:warn={!keysOk}
+                onclick={() => goTo(CONFIG.id)}>
+          <!-- ajustes tipo "sliders" — mas limpio que el engranaje -->
+          <svg viewBox="0 0 24 24" class="gear" aria-hidden="true">
+            <line x1="4" y1="7"  x2="20" y2="7"  stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="9"  cy="7"  r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="15" cy="12" r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="9"  cy="17" r="2.2" fill="var(--paper-2)" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+          <span class="txt">
+            <span class="lbl">{CONFIG.label}</span>
+            <span class="sub">{keysOk ? "claves listas" : "faltan claves"}</span>
+          </span>
+          {#if !keysOk}<span class="badge-warn">!</span>{/if}
+        </button>
+
+        {#each TOOLS as t}
+          <button class="tool-btn" class:active={studio.tab === t.id}
+                  onclick={() => goTo(t.id)}>
+            {#if t.id === "jobs"}
+              <!-- lista de tareas / stack -->
+              <svg viewBox="0 0 24 24" class="tool-icon" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <rect x="3" y="17" width="11" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            {:else if t.id === "costos"}
+              <!-- moneda / signo peso -->
+              <svg viewBox="0 0 24 24" class="tool-icon" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M12 7v10M9.5 9.5c0-1.4 1.1-2 2.5-2s2.5.9 2.5 2-1.1 1.8-2.5 2.2C10.5 12.1 9.5 13 9.5 14.5s1.1 2 2.5 2 2.5-.6 2.5-2"
+                      fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            {/if}
+            <span class="txt">
+              <span class="lbl">{t.label}</span>
+              <span class="sub">{t.sub}</span>
+            </span>
+          </button>
+        {/each}
+      </div>
 
       <div class="legend">
         <span><i class="dot blue"></i> la IA propone</span>
@@ -175,6 +232,10 @@
       <Importar />
     {:else if studio.tab === "ajustes"}
       <Ajustes />
+    {:else if studio.tab === "jobs"}
+      <Jobs />
+    {:else if studio.tab === "costos"}
+      <Costos />
     {:else if !studio.slug}
       <div class="empty card">
         <h2>No hay proyectos todavía</h2>
@@ -215,6 +276,8 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .brand { display: flex; align-items: center; gap: 11px; }
@@ -241,7 +304,24 @@
   .pm-err { font-size: 11.5px; color: var(--red-deep); }
 
   /* --- la espina del bucle --- */
-  .spine { display: flex; flex-direction: column; }
+  /* Una sola guia vertical continua a x=24px (centro exacto de StageNode).
+     Antes habia dos lineas: .rail (left:27px) y .feeders::before (left:23px)
+     que generaban una "barra doble". Ahora es un unico ::before en .spine. */
+  .spine {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .spine::before {
+    content: "";
+    position: absolute;
+    left: 24px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--line-2);
+    pointer-events: none;
+  }
   .step {
     position: relative;
     display: flex;
@@ -258,15 +338,22 @@
   .step:hover { background: rgba(33, 28, 22, 0.05); box-shadow: none; }
   .step.active { background: var(--card); box-shadow: var(--shadow); }
 
-  /* riel vertical que conecta los nodos (el "bucle") */
-  .rail {
-    position: absolute;
-    left: 27px;
-    top: -10px;
-    width: 2px;
-    height: 18px;
-    background: var(--line-2);
+  /* D-087: las mesas que nutren el Storyboard — cuelgan de la misma guia de .spine. */
+  .feeders-cap {
+    display: block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-soft); padding: 6px 0 4px 44px;
   }
+  /* feeder: padding-left=18px + feeder-mark radio=5.5px => centro en 23.5px (~24px) */
+  .step.feeder { padding-left: 18px; gap: 14px; }
+  .step.feeder .lbl { font-size: 13px; font-weight: 600; }
+  .step.feeder .sub { font-size: 10.5px; }
+  .feeder-mark {
+    position: relative; z-index: 1; width: 11px; height: 11px; flex-shrink: 0;
+    border-radius: 50%; border: 2px solid var(--red); background: var(--paper);
+    margin-left: 0;
+  }
+  .feeder-mark.done { background: var(--ok); border-color: var(--ok); }
+  .step.feeder.active .feeder-mark { box-shadow: 0 0 0 3px var(--red-wash); }
 
 
   /* color por actor (quien decide en ese paso) */
@@ -301,6 +388,14 @@
 
   .foot { margin-top: auto; display: flex; flex-direction: column; gap: 14px; }
 
+  /* D-088/D-091: agrupador de herramientas en el pie del sidebar */
+  .tools-group { display: flex; flex-direction: column; gap: 4px; }
+  .tools-eyebrow {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-soft);
+    padding: 2px 0 4px 2px;
+  }
+
   .config {
     position: relative; display: flex; align-items: center; gap: 11px; width: 100%;
     text-align: left; background: transparent; border: 1px solid var(--line-2);
@@ -317,6 +412,18 @@
     margin-left: auto; width: 18px; height: 18px; border-radius: 50%; background: var(--red);
     color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center;
   }
+
+  /* botones de herramientas (Jobs / Costos) */
+  .tool-btn {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    text-align: left; background: transparent; border: 1px solid var(--line-2);
+    border-radius: var(--r); padding: 9px 11px; box-shadow: none;
+  }
+  .tool-btn:hover { background: rgba(33, 28, 22, 0.05); box-shadow: none; }
+  .tool-btn.active { background: var(--card); box-shadow: var(--shadow); }
+  .tool-btn .lbl { font-weight: 700; font-size: 13.5px; }
+  .tool-btn .sub { font-size: 11px; color: var(--ink-soft); }
+  .tool-icon { width: 22px; height: 22px; color: var(--ink-soft); flex-shrink: 0; }
 
   .legend { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--ink-soft); }
   .legend span { display: flex; align-items: center; gap: 7px; }

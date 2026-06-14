@@ -23,8 +23,11 @@ from pipeline.project import Character, Project, ProjectSpec, relativize
 from pipeline.state import estimate_image_cost, signing_advisories
 from pipeline.strategies.dispatch import select_rule
 from pipeline.studio import (
+    add_cast_upload,
     delete_candidate,
+    delete_cast_candidate,
     invalidate_shot_previews,
+    is_cast_upload,
     is_upload,
     record_picks,
     render,
@@ -186,6 +189,63 @@ def test_delete_candidate_rejects_out_of_range(tmp_path):
     _write(proj.candidates_path, {"s1": [str(a)]})
     with pytest.raises(ValueError):
         delete_candidate(proj, "s1", 5)
+
+
+# --- D-084: descartar / subir candidatos de CASTING (espejo del de keyframes) ---
+
+def _face(proj: Project, name: str) -> Path:
+    (proj.cache_dir / "cast").mkdir(parents=True, exist_ok=True)
+    p = proj.cache_dir / "cast" / name
+    p.write_bytes(b"\x89PNG")
+    return p
+
+
+def test_delete_cast_candidate_drops_casting_when_it_pointed_there(tmp_path):
+    proj = _project(tmp_path)
+    a, b = _face(proj, "a.png"), _face(proj, "b.png")
+    _write(proj.dir / "cast_candidates.yaml", {"juan": [str(a), str(b)]})
+    _write(proj.dir / "casting.yaml", {"juan": relativize(proj.dir, a)})  # elegida idx 0
+
+    res = delete_cast_candidate(proj, "juan", 0)
+
+    assert res["remaining"] == 1 and res["casting_dropped"] is True
+    manifest = yaml.safe_load((proj.dir / "cast_candidates.yaml").read_text(encoding="utf-8"))
+    assert manifest["juan"] == [str(b)]
+    casting = yaml.safe_load((proj.dir / "casting.yaml").read_text(encoding="utf-8")) or {}
+    assert "juan" not in casting
+
+
+def test_delete_cast_candidate_keeps_unrelated_choice(tmp_path):
+    proj = _project(tmp_path)
+    a, b = _face(proj, "a.png"), _face(proj, "b.png")
+    _write(proj.dir / "cast_candidates.yaml", {"juan": [str(a), str(b)]})
+    _write(proj.dir / "casting.yaml", {"juan": relativize(proj.dir, b)})  # elegida idx 1
+
+    res = delete_cast_candidate(proj, "juan", 0)  # borro idx 0 (no elegido)
+
+    assert res["casting_dropped"] is False
+    casting = yaml.safe_load((proj.dir / "casting.yaml").read_text(encoding="utf-8"))
+    assert casting["juan"] == relativize(proj.dir, b)
+
+
+def test_delete_cast_candidate_rejects_out_of_range(tmp_path):
+    proj = _project(tmp_path)
+    a = _face(proj, "a.png")
+    _write(proj.dir / "cast_candidates.yaml", {"juan": [str(a)]})
+    with pytest.raises(ValueError):
+        delete_cast_candidate(proj, "juan", 5)
+
+
+def test_add_cast_upload_appends_and_marks_origin(tmp_path):
+    proj = _project(tmp_path)
+    dest = add_cast_upload(proj, "juan", b"\x89PNGfakeface", ".png")
+    assert dest.exists() and is_cast_upload(dest)
+    manifest = yaml.safe_load((proj.dir / "cast_candidates.yaml").read_text(encoding="utf-8"))
+    assert str(dest) in manifest["juan"]
+    # idempotente: subir el MISMO contenido no duplica (hash del contenido)
+    add_cast_upload(proj, "juan", b"\x89PNGfakeface", ".png")
+    manifest = yaml.safe_load((proj.dir / "cast_candidates.yaml").read_text(encoding="utf-8"))
+    assert manifest["juan"].count(str(dest)) == 1
 
 
 # --- T11: origen del candidato ---------------------------------------------

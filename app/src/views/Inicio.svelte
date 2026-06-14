@@ -1,9 +1,9 @@
 <script>
-  // [D-080] El Inicio proyecta el bucle REAL: las mismas 7 etapas del sidebar,
-  // derivadas de STAGES + stepDone (la fuente unica es el motor, D-032). Antes
-  // mostraba el modelo viejo de 4 estaciones y su "Elegir" llevaba a una
-  // pestaña que ya no existe (pantalla en blanco).
-  import { studio, goTo, nextStep, stepDone, refreshStatus, STAGES } from "../lib/studio.svelte.js";
+  // [D-080] El Inicio proyecta el bucle REAL, derivado de STAGES + stepDone (la
+  // fuente unica es el motor, D-032).
+  // [D-086] La jerarquia: Guion -> Storyboard (el centro) -> Producir, y las
+  // mesas que NUTREN el Storyboard (Casting/Encuadres/Animatic) agrupadas debajo.
+  import { studio, goTo, nextStep, stepDone, refreshStatus, TOPLEVEL, FEEDERS } from "../lib/studio.svelte.js";
   import { onMount } from "svelte";
   import StageNode from "../components/StageNode.svelte";
   import WarnStrip from "../components/WarnStrip.svelte";
@@ -14,9 +14,9 @@
 
   onMount(refreshStatus);
 
-  // Las estaciones = STAGES sin el propio Inicio. El "done" lo decide el motor
-  // (stepDone); el detail (X/Y) es presentacion sobre los contadores del status.
-  let stations = $derived(STAGES.filter((s) => s.id !== "inicio"));
+  // El bucle numerado, sin Inicio (Guion · Storyboard · Producir). Las mesas que
+  // nutren el Storyboard se muestran aparte (FEEDERS). "done" lo decide el motor.
+  let stations = $derived(TOPLEVEL.filter((s) => s.id !== "inicio"));
 
   function detail(id) {
     if (!st) return "—";
@@ -86,8 +86,8 @@
   </div>
 {/if}
 
-<!-- el bucle, etapa por etapa: las MISMAS 7 del sidebar (D-080) -->
-<div class="eyebrow stations-h">El recorrido completo</div>
+<!-- el bucle: Guion -> Storyboard (el centro) -> Producir (D-086) -->
+<div class="eyebrow stations-h">El recorrido</div>
 <div class="stations">
   {#each stations as s (s.id)}
     {@const done = stepDone(s.id, st)}
@@ -97,6 +97,24 @@
       <div class="st-top">
         <StageNode n={s.n} actor={s.actor} {done} size={28} />
         {#if tone}<span class="badge {tone}">{who}</span>{/if}
+      </div>
+      <h3>{s.label}</h3>
+      <p class="desc">{s.sub}</p>
+      <div class="st-foot mono">{detail(s.id)}</div>
+    </button>
+  {/each}
+</div>
+
+<!-- D-086: las mesas que NUTREN el Storyboard -->
+<div class="eyebrow stations-h feeders-h">Nutren el storyboard</div>
+<div class="stations feeders">
+  {#each FEEDERS as s (s.id)}
+    {@const done = stepDone(s.id, st)}
+    <button class="station feeder" class:done class:next={next && next.tab === s.id && !done}
+            onclick={() => goTo(s.id)}>
+      <div class="st-top">
+        <span class="feeder-dot actor-{s.actor}" class:done></span>
+        <span class="badge red">vos decidís</span>
       </div>
       <h3>{s.label}</h3>
       <p class="desc">{s.sub}</p>
@@ -143,5 +161,13 @@
   .station h3 { margin: 2px 0 0; }
   .desc { font-size: 13px; color: var(--ink-2); margin: 0; min-height: 2.6em; }
   .st-foot { font-size: 12px; color: var(--ink-soft); border-top: 1px dashed var(--line); padding-top: 8px; }
+
+  /* D-086: las mesas que nutren el Storyboard — sub-cards, anidadas visualmente */
+  .feeders-h { margin-top: 18px; color: var(--ink-soft); }
+  .stations.feeders { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-left: 18px; border-left: 2px solid var(--line-2); padding-left: 16px; }
+  .station.feeder { padding: 12px 14px; }
+  .station.feeder h3 { font-size: 15px; }
+  .feeder-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--red); background: var(--paper); }
+  .feeder-dot.done { background: var(--ok); border-color: var(--ok); }
 
 </style>

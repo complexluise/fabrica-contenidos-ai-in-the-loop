@@ -263,3 +263,34 @@ def derive_state(project: Project, spec: ProjectSpec, *, has_fal_key: bool) -> P
                         storyboard_signed=storyboard_signed,
                         casting=casting, keyframes=keyframes, render=render,
                         export_done=export_done)
+
+
+# --- D-082: que parte del spec atestigua la firma -----------------------------
+# La firma del storyboard atestigua el PLAN NARRATIVO (escenas, dialogo, planos
+# y sus knobs de motor). Los prompts visuales (derivados de la narrativa, D-046,
+# editables post-firma en Encuadres), el `framing` legacy del plano y las
+# preferencias del proyecto (backend, titulo, brief) NO son plan: cambiarlos no
+# debe des-firmar en silencio.
+_NON_NARRATIVE_SCENE = ("prompt", "prompt_manual", "prompt_stale")
+_NON_NARRATIVE_SHOT = ("framing",)
+
+
+def plan_fingerprint(scenes) -> str:
+    """Huella sha256 del plan narrativo (D-082). Pura.
+
+    El server compara la huella antes/despues de un PUT: si no cambio, la firma
+    se preserva; si cambio (y no vino `sign`), se limpia como siempre (D-035)."""
+    import hashlib
+    import json
+
+    items = []
+    for s in scenes:
+        d = s.model_dump(mode="json", by_alias=True)
+        for k in _NON_NARRATIVE_SCENE:
+            d.pop(k, None)
+        for sh in d.get("shots") or []:
+            for k in _NON_NARRATIVE_SHOT:
+                sh.pop(k, None)
+        items.append(d)
+    payload = json.dumps(items, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

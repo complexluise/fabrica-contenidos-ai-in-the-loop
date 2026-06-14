@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for agentic coding agents working in this repository. For deeper context (architecture, philosophy, sprint status) read [`CLAUDE.md`](./CLAUDE.md), [`SPEC.md`](./SPEC.md), and [`docs/decisiones/`](./docs/decisiones/) before large changes.
+Guidance for agentic coding agents working in this repository. For deeper context read [`CLAUDE.md`](./CLAUDE.md), [`PRD.md`](./PRD.md) (what/for-whom), [`ARCHITECTURE.md`](./ARCHITECTURE.md) (how — layers + contracts), and [`docs/decisiones/`](./docs/decisiones/) (the why) before large changes.
 
 ## Environment
 

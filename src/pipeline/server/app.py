@@ -13,13 +13,13 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import DEFAULT_PROFILE
 from ..settings import get_settings
-from .jobs import JobManager
+from .jobs import JobConflictError, JobManager
 
 
 # --- Bodies tipados (D-077). `update_project` queda como dict a proposito:
@@ -119,11 +119,31 @@ def _unique_slug(base: str, projects_dir: Path) -> str:
 
 
 def create_app(projects_dir: Path = Path("projects"),
-               config_dir: Path = Path("config")) -> FastAPI:
+               config_dir: Path = Path("config"),
+               db_path: Path | None = None) -> FastAPI:
+    """Crea la aplicacion FastAPI del Studio.
+
+    `db_path` permite inyectar una base SQLite alternativa (para tests) en
+    vez de la base global `out/telemetry.sqlite`. Si es None usa el default
+    de telemetry (LEDGER_PATH).
+    """
+    from ..telemetry import LEDGER_PATH
+    from .studio_settings import StudioConfig, load_studio_config, save_studio_config
+
     projects_dir = Path(projects_dir)
     config_dir = Path(config_dir)
     app = FastAPI(title="Video Studio (local)")
-    jobs = JobManager()
+    _db = Path(db_path) if db_path is not None else LEDGER_PATH
+
+    # Leer ajustes operativos del studio (config/studio.yaml) al arrancar.
+    # max_concurrency determina cuantos jobs de generacion corren en paralelo.
+    _studio_cfg = load_studio_config(config_dir)
+    jobs = JobManager(db_path=_db, max_concurrency=_studio_cfg.max_concurrency)
+
+    @app.exception_handler(JobConflictError)
+    async def _job_conflict(_request, exc: JobConflictError):
+        # Fase 2.6/T2.6.6: doble clic / F5 + re-disparo no pagan dos veces.
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     # --- helpers ----------------------------------------------------------
     def safe_project(slug: str):
@@ -186,6 +206,11 @@ def create_app(projects_dir: Path = Path("projects"),
                 "badge": meta.get("badge", key),
                 "color": meta.get("color", "gray"),
                 "providers": hero_providers,
+                # Fase 2.6/T2.6.14: el default viaja desde el server (D-076, un
+                # solo lugar) y el costo por escena alimenta el estimado del
+                # Animatic (sin el, la UI calculaba NaN).
+                "est_cost_per_scene_usd": rules.get("est_cost_per_scene_usd", 0.05),
+                "default": key == DEFAULT_PROFILE,
             })
         return out
 
@@ -313,6 +338,7 @@ def create_app(projects_dir: Path = Path("projects"),
         guard de selecciones (D-022) si se renombraron/eliminaron escenas."""
         from ..contracts import Scene
         from ..project import load_project_spec, write_spec
+        from ..state import plan_fingerprint
         from ..studio import prune_selections
 
         project = safe_project(slug)
@@ -320,6 +346,7 @@ def create_app(projects_dir: Path = Path("projects"),
             raise HTTPException(404, f"Proyecto '{slug}' no existe.")
         spec = load_project_spec(project.spec_path)
         existing = {s.id: s for s in spec.scenes}
+        plan_before = plan_fingerprint(spec.scenes)  # D-082
 
         raw_scenes = body.get("scenes")
         if not raw_scenes:
@@ -374,12 +401,13 @@ def create_app(projects_dir: Path = Path("projects"),
             spec.voice_backend = body["voice_backend"]
         write_spec(spec, project.spec_path)
         dropped = prune_selections(project, ids)
-        # "Firmar el plan" (D-021/#5): un marcador en disco; editar sin firmar lo
-        # limpia (el plan cambió → hay que volver a firmar). Estado derivado (D-032).
+        # "Firmar el plan" (D-021/#5): un marcador en disco. D-082: solo un cambio
+        # NARRATIVO (huella del plan) lo limpia — editar el prompt visual desde
+        # Encuadres o cambiar el backend de imagen NO des-firma en silencio.
         signed_marker = project.dir / "storyboard.signed"
         if body.get("sign"):
             signed_marker.write_text("", encoding="utf-8")
-        else:
+        elif plan_fingerprint(new_scenes) != plan_before:
             signed_marker.unlink(missing_ok=True)
         # T7/T13/D-055: avisos no bloqueantes (clase fuera del perfil, escena sin
         # planos) al momento de firmar — "advertir, no invalidar" (D-046).
@@ -391,8 +419,9 @@ def create_app(projects_dir: Path = Path("projects"),
             advisories = signing_advisories(spec, cfg.routing, cfg.providers)
         except Exception:
             advisories = []
+        # D-082: `signed` refleja el estado REAL (puede haberse preservado).
         return {"saved": str(project.spec_path), "scenes": len(ids),
-                "dropped_selections": dropped, "signed": bool(body.get("sign")),
+                "dropped_selections": dropped, "signed": signed_marker.exists(),
                 "advisories": advisories}
 
     @app.get("/api/projects/{slug}")
@@ -410,6 +439,11 @@ def create_app(projects_dir: Path = Path("projects"),
             "shots": [{
                 "intention": sh.intention, "action": sh.action,  # D-047
                 "framing": sh.framing, "duration_s": sh.duration_s,
+                # Fase 2.6/T2.6.1: los campos del MOTOR viajan en el GET. Su
+                # ausencia hacia que la UI leyera undefined y el siguiente PUT
+                # pisara los valores reales con defaults (wipe silencioso).
+                "motion": sh.motion, "lands": sh.lands, "media": sh.media,  # D-070/072/074
+                "takes": sh.takes, "speed": sh.speed,                        # D-073/074
                 "camera": sh.camera.model_dump(), "visual": sh.visual.model_dump(),  # D-047
                 "transition": sh.transition,
                 "voiceover": sh.voiceover, "caption": sh.caption, "sfx": sh.sfx,
@@ -418,6 +452,16 @@ def create_app(projects_dir: Path = Path("projects"),
         characters = [{
             "name": name,
             "design": compose_character_prompt(ch.design) if ch.design else None,  # D-049/B2
+            # D-085: los campos del design viajan EDITABLES (el patrón completo del
+            # casting: ver y tocar el prompt, como Encuadres). `design` es el
+            # compuesto (preview de lo que se envía); `design_fields` son las palancas.
+            "design_fields": ({
+                "prompt": ch.design.prompt,
+                "physical": ch.design.physical,
+                "wardrobe": ch.design.wardrobe,
+                "palette": list(ch.design.palette),
+                "expression": ch.design.expression,
+            } if ch.design else None),
             "refs": [str(r) for r in (ch.refs or [])],
         } for name, ch in spec.characters.items()]
         music_url = file_url(spec.music) if spec.music and Path(spec.music).exists() else None
@@ -426,6 +470,46 @@ def create_app(projects_dir: Path = Path("projects"),
                 "storyboard_backend": spec.storyboard_backend,  # D-053
                 "voice_backend": spec.voice_backend,            # D-058
                 "characters": characters, "scenes": scenes}
+
+    @app.put("/api/projects/{slug}/characters/{name}")
+    def update_character(slug: str, name: str, body: dict):
+        """[D-085] Guarda el design EDITADO de un personaje (el patrón completo del
+        casting). Campos: prompt (base), physical, wardrobe, palette (lista),
+        expression. La cara se regenera al pedir variantes (el compuesto entra al
+        cache key). No toca casting.yaml: la elección vigente sigue hasta regenerar."""
+        from ..prompt_compile import compose_character_prompt
+        from ..project import CharacterDesign, load_project_spec, write_spec
+
+        project = safe_project(slug)
+        if not project.spec_path.exists():
+            raise HTTPException(404, f"Proyecto '{slug}' no existe.")
+        spec = load_project_spec(project.spec_path)
+        ch = spec.characters.get(name)
+        if ch is None:
+            raise HTTPException(404, f"Personaje '{name}' no encontrado.")
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(422, "El personaje necesita un prompt base.")
+        palette = body.get("palette") or []
+        if isinstance(palette, str):  # tolerar "cyan, ámbar" además de lista
+            palette = [p.strip() for p in palette.split(",") if p.strip()]
+        try:
+            ch.design = CharacterDesign(
+                prompt=prompt,
+                refs=(ch.design.refs if ch.design else []),  # las refs no se editan acá
+                physical=(body.get("physical") or "").strip() or None,
+                wardrobe=(body.get("wardrobe") or "").strip() or None,
+                palette=list(palette),
+                expression=(body.get("expression") or "").strip() or None,
+            )
+        except Exception as exc:  # noqa: BLE001 — validación -> 422 legible
+            raise HTTPException(422, f"Design inválido: {exc}")
+        write_spec(spec, project.spec_path)
+        return {"name": name, "design": compose_character_prompt(ch.design),
+                "design_fields": {
+                    "prompt": ch.design.prompt, "physical": ch.design.physical,
+                    "wardrobe": ch.design.wardrobe, "palette": list(ch.design.palette),
+                    "expression": ch.design.expression}}
 
     @app.post("/api/projects/{slug}/prompts/compile")
     async def compile_prompts(slug: str, body: CompileBody | None = None):
@@ -495,6 +579,7 @@ def create_app(projects_dir: Path = Path("projects"),
         return {"keyframes": read(project.candidates_path),
                 "keyframe_sources": sources(project.candidates_path),  # T11
                 "cast": read(project.dir / "cast_candidates.yaml"),
+                "cast_sources": sources(project.dir / "cast_candidates.yaml"),  # D-084
                 "shot_previews": read(project.dir / "shot_previews.yaml"),  # D-048/A4
                 "selections": read_yaml(project.selections_path),
                 "cast_selections": read_yaml(project.dir / "casting.yaml")}
@@ -784,6 +869,59 @@ def create_app(projects_dir: Path = Path("projects"),
 
         return jobs.spawn("cast", slug, coro()).to_dict()
 
+    @app.post("/api/projects/{slug}/cast/{character}")
+    async def gen_cast_character(slug: str, character: str, n: int = 2,
+                                 backend: str | None = None, body: dict = {}):
+        """[D-084] Genera N caras MÁS para UN personaje con prompt_tweak opcional
+        (espejo de keyframes/{scene_id}). Job/SSE; project = '{slug}/{character}'."""
+        from .. import studio
+
+        project, spec, cfg = load(slug)
+        if character not in spec.characters:
+            raise HTTPException(404, f"Personaje '{character}' no encontrado.")
+        tweak = (body.get("prompt_tweak") or "").strip()
+
+        async def coro():
+            await studio.gen_cast_character(project, spec, cfg, character, n,
+                                            prompt_tweak=tweak, backend=backend)
+            return {"character": character, "n": n}
+
+        return jobs.spawn("cast", f"{slug}/{character}", coro()).to_dict()
+
+    @app.post("/api/projects/{slug}/cast-candidates/{character}/upload")
+    async def upload_cast_candidate(slug: str, character: str, body: UploadBody):
+        """[D-084] Sube una cara como candidato manual de casting (base64 en JSON)."""
+        import base64
+
+        from .. import studio
+
+        project, spec, _cfg = load(slug)
+        if character not in spec.characters:
+            raise HTTPException(404, f"Personaje '{character}' no encontrado.")
+        raw = body.data.strip()
+        if not raw:
+            raise HTTPException(422, "Falta 'data' (base64 de la imagen).")
+        suffix = Path(body.filename or "upload.png").suffix.lower() or ".png"
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(422, f"Formato no soportado: {suffix}. Usá PNG, JPG o WEBP.")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(422, "El campo 'data' no es base64 válido.")
+        dest = studio.add_cast_upload(project, character, data, suffix)
+        return {"url": file_url(dest), "character": character, "file": dest.name}
+
+    @app.delete("/api/projects/{slug}/cast-candidates/{character}/{idx}")
+    def discard_cast_candidate(slug: str, character: str, idx: int):
+        """[D-084] Descarta el candidato `idx` de un personaje; reconcilia casting.yaml."""
+        from .. import studio
+
+        project, _spec, _cfg = load(slug)
+        try:
+            return studio.delete_cast_candidate(project, character, idx)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(422, str(exc))
+
     @app.post("/api/projects/{slug}/render")
     async def render(slug: str, body: RenderBody | None = None):
         from .. import studio
@@ -842,19 +980,64 @@ def create_app(projects_dir: Path = Path("projects"),
     # --- jobs: estado + stream -------------------------------------------
     @app.get("/api/jobs")
     def list_jobs():
-        return [j.to_dict() for j in jobs.list()]
+        """Devuelve SOLO los jobs activos (queued/running) en memoria.
+
+        El dock del sidebar (D-083) pollea cada 3s y mostrar cientos de
+        filas historicas lo arruinaria. El historial paginado esta en
+        GET /api/jobs/history.
+        """
+        return [j.to_dict() for j in jobs.list() if not j.done]
+
+    @app.get("/api/jobs/history")
+    def list_jobs_history(limit: int = 50, offset: int = 0,
+                          since: float | None = None,
+                          kind: str | None = None,
+                          scope: str | None = None,
+                          include_micro: bool = False):
+        """Jobs terminados (done/failed) del historial SQLite, mas nuevos primero.
+
+        Paginado con `limit`/`offset`. Filtros opcionales:
+        - `since`         : Unix timestamp — solo jobs terminados despues de ese momento.
+        - `kind`          : filtrar por kind, comma-separated (ej: "render,export").
+        - `scope`         : 'batch' o 'item' (filtro exacto; prioridad sobre include_micro).
+        - `include_micro` : si True incluye micro-iteraciones (scope=item).
+                            Por defecto False: solo lotes (scope=batch).
+        Devuelve `scope` en cada fila.
+        """
+        return jobs.list_history(
+            limit=limit, offset=offset, since=since,
+            kind=kind, scope=scope, include_micro=include_micro,
+        )
 
     @app.get("/api/jobs/{job_id}")
     def job_detail(job_id: str):
+        """Detalle de un job. Si ya no esta en memoria (termino, el server
+        reinicio), cae a SQLite para que el historial sea navegable."""
         job = jobs.get(job_id)
-        if job is None:
+        if job is not None:
+            # Job vivo o reciente en memoria: devuelve log completo
+            return {**job.to_dict(), "logs": job.logs}
+        # Job terminado: buscar en SQLite (historial)
+        row = jobs.get_from_store(job_id)
+        if row is None:
             raise HTTPException(404, "Job desconocido.")
-        return {**job.to_dict(), "logs": job.logs}
+        # log_tail son las ultimas LOG_TAIL_LINES lineas persistidas al terminar
+        return {
+            "id": row["id"], "kind": row["kind"], "project": row["project"],
+            "status": row["status"], "result": row.get("result"),
+            "error": row.get("error"),
+            "log_lines": len(row.get("log_tail") or []),
+            "logs": row.get("log_tail") or [],
+            "created_at": row.get("created_at"),
+            "started_at": row.get("started_at"),
+            "ended_at": row.get("ended_at"),
+        }
 
     @app.get("/api/jobs/{job_id}/stream")
     async def job_stream(job_id: str):
+        # Solo streamea jobs vivos en memoria; los terminados no tienen SSE abierto.
         if jobs.get(job_id) is None:
-            raise HTTPException(404, "Job desconocido.")
+            raise HTTPException(404, "Job desconocido o ya terminado.")
 
         async def gen():
             async for line in jobs.stream(job_id):
@@ -877,6 +1060,43 @@ def create_app(projects_dir: Path = Path("projects"),
         env.write_text("\n".join(merge_env_lines(lines, updates)) + "\n", encoding="utf-8")
         get_settings.cache_clear()  # que el próximo get_settings lea las nuevas keys
         return get_settings_status()
+
+    # --- ajustes operativos del studio (D-092) ----------------------------
+
+    @app.get("/api/studio-settings")
+    def get_studio_settings():
+        """Ajustes operativos del Studio (no secretos). Incluye max_concurrency."""
+        cfg = load_studio_config(config_dir)
+        return {
+            "max_concurrency": cfg.max_concurrency,
+            "max_concurrency_min": 1,
+            "max_concurrency_max": 16,
+        }
+
+    @app.put("/api/studio-settings")
+    def put_studio_settings(body: dict):
+        """Actualiza los ajustes operativos del Studio y los persiste en studio.yaml.
+
+        Tambien actualiza el semaforo del JobManager en caliente (sin reinicio).
+        Body: { "max_concurrency": N }
+        """
+        try:
+            cfg = StudioConfig(**{k: v for k, v in body.items()
+                                  if k in StudioConfig.model_fields})
+        except Exception as exc:  # noqa: BLE001 — validacion -> 422 legible
+            raise HTTPException(422, f"Ajustes invalidos: {exc}")
+        save_studio_config(cfg, config_dir)
+        # Actualizar el semaforo en caliente: reconstruirlo con el nuevo valor.
+        # asyncio.Semaphore no tiene un metodo para cambiar el limite, pero podemos
+        # reemplazarlo. Los jobs ya en curso mantienen su referencia al semaforo
+        # anterior, lo que esta bien: el nuevo limite aplica a los proximos spawns.
+        jobs._sem = asyncio.Semaphore(cfg.max_concurrency)
+        jobs._max_concurrency = cfg.max_concurrency
+        return {
+            "max_concurrency": cfg.max_concurrency,
+            "max_concurrency_min": 1,
+            "max_concurrency_max": 16,
+        }
 
     # --- estáticos (imágenes de candidatos + UI build) -------------------
     if projects_dir.exists():

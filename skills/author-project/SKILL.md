@@ -11,7 +11,7 @@ metadata:
 
 **Checkpoint humano #1+#2 de [D-021]** (guion + shot list). La IA descompone y
 propone; el humano edita y aprueba. La salida es el **spec declarativo** que el
-resto del pipeline consume ([SPEC §7.1](../../SPEC.md)).
+resto del pipeline consume ([ARCHITECTURE §7.1](../../ARCHITECTURE.md)).
 
 ## Cuándo usar esto
 
@@ -36,7 +36,7 @@ pura del spec. Tu trabajo es **escribir ese YAML**, no generar nada todavía.
      si falta). Sube a `hero` solo las tomas marca.
    - `characters` — lista de nombres del banco que aparecen (consistencia).
    - `seed` — `0` por defecto. **Subirlo es un reroll** de esa escena (nueva
-     variante, [SPEC §7.2](../../SPEC.md)).
+     variante, [ARCHITECTURE §7.2](../../ARCHITECTURE.md)).
 3. **Escribe la biblia del mundo** (`world:`, [EN], D-067): UNA descripción canónica
    de set/luz/clima/paleta + la gramática de lente/escala + las reglas físicas del
    universo. Viaja a cada prompt; las escenas solo agregan su delta.

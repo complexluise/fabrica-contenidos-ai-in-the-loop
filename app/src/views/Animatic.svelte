@@ -6,7 +6,8 @@
   import { onMount } from "svelte";
   import { get, post, del, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, GLOSARIO } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
+  import FilmPlayer from "../components/FilmPlayer.svelte";
   import Progress from "../components/Progress.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
 
@@ -49,7 +50,17 @@
       data = a; profiles = p || [];
     } catch (e) { err = humanError(e); }
   }
-  onMount(load);  // D-081: App remonta con {#key slug} — sin vigilar el slug
+  onMount(async () => {  // D-081: App remonta con {#key slug} — sin vigilar el slug
+    await load();
+    // T2.6.9: F5 a mitad de una generación -> re-engancharse al job vivo.
+    const liveGen = await findLiveJob(["animatic"], slug);
+    if (liveGen) gen.attach(liveGen.id, { onDone: async () => { await load(); await refreshStatus(); } });
+    const liveVar = await findLiveJob(["pose_variants"], slug);
+    if (liveVar) variants.attach(liveVar.id, {
+      key: liveVar.project.slice(slug.length + 1),  // "slug/shot/which" -> "shot/which"
+      onDone: load,
+    });
+  });
 
   function generate() {
     err = "";
@@ -84,33 +95,16 @@
     } catch (e) { err = humanError(e); }
   }
 
-  // D-062: ▶ reproducir el animatic — las poses en secuencia con sus duraciones.
+  // [D-087] ▶ reproducir las poses — ahora vía el FilmPlayer compartido (mismo
+  // player que el Storyboard, con el fix de "falta pose"). Acá sin diálogo: es
+  // revisión de poses, no proyección del guion.
   let playing = $state(false);
-  let playIdx = $state(0);
-  let playPose = $state("start"); // "start" | "destino" dentro del plano
-  let playTimer = null;
-  function stopPlay() { playing = false; if (playTimer) clearTimeout(playTimer); playTimer = null; }
-  function play() {
-    if (!strip.length) return;
-    playing = true; playIdx = 0; playPose = "start";
-    stepPlay();
-  }
-  function stepPlay() {
-    const e = strip[playIdx];
-    if (!e) { stopPlay(); return; }
-    const dur = Math.max(1, e.duration_s || 2) * 1000;
-    if (playPose === "start") {
-      // apertura ~40% del plano, destino el resto (el clip ATERRIZA en el destino)
-      playTimer = setTimeout(() => { playPose = "destino"; stepPlay(); }, dur * 0.4);
-    } else {
-      playTimer = setTimeout(() => {
-        if (playIdx + 1 < strip.length) { playIdx += 1; playPose = "start"; stepPlay(); }
-        else stopPlay();
-      }, dur * 0.6);
-    }
-  }
-  let playerShot = $derived(strip[playIdx] ?? null);
-  let playerImg = $derived(playerShot ? (playPose === "start" ? playerShot.start : playerShot.destino) : null);
+  let playerFrames = $derived((strip || []).map((e) => ({
+    shot_id: e.shot_id,
+    sceneLabel: e.scene + (e.beat ? ` · ${e.beat}` : ""),
+    start: e.start, destino: e.destino, lands: e.lands,
+    duration_s: e.duration_s, intention: e.intention || "", action: "", line: "", caption: "",
+  })));
 </script>
 
 <ViewHeader eyebrow="Paso 5 · vos decidís" title="Animatic">
@@ -125,7 +119,7 @@
     <div class="gen-l">
       <div class="eyebrow" style="color:var(--blue-deep)">La IA propone</div>
       <p class="muted gen-help">
-        {data.ready}/{data.total} planos con sus dos poses ·
+        {data.ready}/{data.total} planos con su pose lista{data.missing_poses > 0 ? ` · ${data.missing_poses} sin generar` : ""} ·
         {totalDur.toFixed(0)}s de película en {scenes.length} escena{scenes.length === 1 ? "" : "s"}.
       </p>
       <p class="est-line">
@@ -150,7 +144,7 @@
       {/if}
     </div>
     <div class="gen-controls">
-      <button class="ghost" onclick={play} disabled={playing || !strip.length}
+      <button class="ghost" onclick={() => (playing = true)} disabled={playing || !strip.length}
               title="Las poses en secuencia con sus duraciones: el ritmo de la película, gratis">
         ▶ Reproducir
       </button>
@@ -160,19 +154,7 @@
     </div>
   </div>
 
-  {#if playing && playerShot}
-    <div class="player" onclick={stopPlay} role="button" tabindex="0">
-      {#if playerImg}
-        <img src={playerImg} alt={playerShot.shot_id} />
-      {:else}
-        <div class="player-hole">pose faltante</div>
-      {/if}
-      <div class="player-bar">
-        <span class="mono">{playerShot.shot_id} · {playPose} · {playerShot.duration_s}s</span>
-        <span class="muted">plano {playIdx + 1}/{strip.length} — clic para parar</span>
-      </div>
-    </div>
-  {/if}
+  {#if playing}<FilmPlayer frames={playerFrames} onclose={() => (playing = false)} />{/if}
 
   {#if gen.busy}<Progress text={gen.progress || "Generando las poses que faltan…"} />{/if}
   {#if err || gen.err || variants.err}<p class="error">{err || gen.err || variants.err}</p>{/if}
@@ -201,7 +183,10 @@
               {#each (e.lands ? ["start", "destino"] : ["destino"]) as which, wi}
                 {#if e.lands && wi === 1}<span class="arrow">→</span>{/if}
                 {@const img = which === "start" ? e.start : e.destino}
-                {@const variants = e[`${which}_variants`] || []}
+                <!-- T2.6.5: "poseVariants", NO "variants" — el nombre corto hacía
+                     sombra al jobState y el botón ⊞ nunca se deshabilitaba (doble
+                     clic = dos jobs pagos en paralelo). -->
+                {@const poseVariants = e[`${which}_variants`] || []}
                 {@const vBusy = variants.busy && variants.key === `${e.shot_id}/${which}`}
                 <div class="pose">
                   {#if img}
@@ -214,12 +199,15 @@
                             disabled={gen.busy || vBusy || !hasFal}
                             onclick={() => genVariants(e.shot_id, which)}>{vBusy ? "…" : "⊞"}</button>
                   {:else}
-                    <div class="hole">{which === "start" ? "apertura" : "destino"}</div>
+                    <div class="hole">{e.lands ? (which === "start" ? "apertura" : "destino") : "sin generar"}</div>
                   {/if}
-                  <span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>
-                  {#if variants.length}
+                  <!-- D-070: la etiqueta apertura/destino solo aporta cuando HAY dos
+                       poses (planos `aterriza`). En cámara-actúa el still ES el plano:
+                       rotularlo "destino" hacía parecer que faltaba la otra mitad. -->
+                  {#if e.lands}<span class="pose-lbl">{which === "start" ? "apertura" : "destino"}</span>{/if}
+                  {#if poseVariants.length}
                     <div class="variants">
-                      {#each variants as v}
+                      {#each poseVariants as v}
                         <button class="vthumb" title="Elegir esta variante"
                                 onclick={() => pickVariant(e.shot_id, which, v)}>
                           <img src={v} alt="variante" loading="lazy" />
@@ -311,16 +299,7 @@
   .billing { color: var(--ink-2); }
   .billing .waste { color: var(--warn-deep, #9a6b00); font-size: 11.5px; }
 
-  /* D-062: ▶ reproductor del animatic (poses en secuencia) */
-  .player {
-    position: fixed; inset: 0; z-index: 50; background: rgba(15, 12, 9, 0.92);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 14px; cursor: pointer;
-  }
-  .player img { max-height: 78vh; max-width: 92vw; border-radius: var(--r); box-shadow: 0 12px 60px rgba(0,0,0,0.6); }
-  .player-hole { color: #999; font-size: 14px; }
-  .player-bar { display: flex; gap: 16px; color: #ddd; font-size: 13px; }
-  .player-bar .mono { font-family: var(--font-mono); }
+  /* D-087: el ▶ reproductor vive ahora en components/FilmPlayer.svelte */
 
   /* D-063: variantes por pose (best-of-N) */
   .vary {

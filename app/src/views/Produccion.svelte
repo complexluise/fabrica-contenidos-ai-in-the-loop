@@ -1,8 +1,10 @@
 <script>
   import { onMount } from "svelte";
-  import { get } from "../lib/api.js";
+  import { get, humanError } from "../lib/api.js";
   import { studio, goTo, refreshStatus, PIPELINE_ORDER } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  // D-088: costos movidos a Costos.svelte (una verdad, un lugar).
+  // loadCosts ya no vive aca.
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
   import JobLog from "../components/JobLog.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
   import WarnStrip from "../components/WarnStrip.svelte";
@@ -14,9 +16,11 @@
   let cur = $derived(jobs[active]);
   let running = $derived(jobs.render.busy ? "render" : jobs.export.busy ? "export" : "");
   let err = $derived(jobs.render.err || jobs.export.err);
-  let profile = $state("fal-ultra-cheap");  // D-076: el mismo default que el motor
+  // T2.6.14: el default del perfil viene del server (D-076, sin hardcodear acá).
+  let profile = $state("");
   let concurrency = $state(3);
-  let profiles = $state([]);   // cargados desde /api/profiles
+  let profiles = $state([]);     // cargados desde /api/profiles
+  let profilesErr = $state("");  // sin perfiles no hay costo visible -> no se gasta
 
   let st = $derived(studio.status);
   let hasFal = $derived(!!st?.keys?.fal_key);
@@ -25,7 +29,6 @@
   let finalUrl = $derived(st?.render?.final_url || null);
   // D-080: "elegir" no existe mas — la verdad es el stage del motor.
   let ready = $derived(st ? PIPELINE_ORDER.indexOf(st.stage) > PIPELINE_ORDER.indexOf("encuadres") : false);
-  let costs = $state(null);  // D-079: el libro mayor, visible donde se gasta
   let selectedProfile = $derived(profiles.find(p => p.key === profile) ?? null);
 
   const SPEEDS = [
@@ -50,26 +53,27 @@
     return `background:${c.bg};color:${c.fg}`;
   }
 
-  async function loadCosts() {
-    try { costs = await get(`/api/costs`); } catch { costs = null; }
-  }
-
   onMount(async () => {
-    loadCosts();  // D-079: la plata visible
     try {
-      const res = await fetch("/api/profiles");
-      profiles = await res.json();
-      // mantener seleccion si el perfil actual sigue disponible
-      if (profiles.length && !profiles.find(p => p.key === profile)) {
-        profile = profiles[0].key;
+      profiles = await get("/api/profiles");
+      // T2.6.16: SIN fallback hardcodeado — si no hay perfiles, no se renderiza
+      // (el costo tiene que estar visible antes del boton que gasta, D-052).
+      if (!profiles.length) profilesErr = "El servidor no devolvió perfiles. Revisá config/routing.yaml.";
+      if (!profiles.find((p) => p.key === profile)) {
+        profile = profiles.find((p) => p.default)?.key ?? profiles[0]?.key ?? "";
       }
-    } catch {
-      // si el servidor no responde, mostrar solo los dos basicos
-      profiles = [
-        { key: "proto",     label: "Prototipo fal",    badge: "fal.ai",  color: "yellow", desc: "Kling directo.", providers: ["kling"] },
-        { key: "proto_veo", label: "Prototipo Google", badge: "google",  color: "blue",   desc: "Veo directo.",   providers: ["veo"]   },
-        { key: "prod",      label: "Produccion",       badge: "calidad", color: "green",  desc: "Ensemble + gate.", providers: [] },
-      ];
+    } catch (e) {
+      profiles = [];
+      profilesErr = humanError(e);
+    }
+    // T2.6.9: F5 a mitad de un render/export -> re-engancharse al job vivo
+    // (en vez de mostrar la UI ociosa y dejar pagar dos veces).
+    for (const kind of ["render", "export"]) {
+      const live = await findLiveJob([kind], slug);
+      if (live) {
+        active = kind;
+        jobs[kind].attach(live.id, { onDone: async () => { await refreshStatus(); } });
+      }
     }
   });
 
@@ -80,7 +84,6 @@
       body,
       onDone: async () => {
         await refreshStatus();
-        loadCosts();  // D-079: lo que acaba de costar, al instante
       },
     });
   }
@@ -98,20 +101,6 @@
   </WarnStrip>
 {/if}
 
-{#if costs && costs.scenes > 0}
-  <div class="costs card" title="El libro mayor de costos (D-079): out/telemetry.sqlite">
-    <span class="eyebrow">La plata</span>
-    <span class="costs-total">gastado: <b>${costs.total_usd.toFixed(2)}</b></span>
-    {#if costs.by_project?.[slug] != null}
-      <span class="costs-proj">este proyecto: <b>${costs.by_project[slug].toFixed(2)}</b></span>
-    {/if}
-    <span class="costs-bd muted">
-      video ${costs.breakdown.video_usd.toFixed(2)} · imágenes ${costs.breakdown.keyframe_usd.toFixed(2)}
-      · sfx ${costs.breakdown.sfx_usd.toFixed(2)} · voz ${costs.breakdown.tts_usd.toFixed(2)}
-    </span>
-  </div>
-{/if}
-
 <div class="steps">
   <!-- 1. Render -->
   <section class="step card" class:is-done={renderDone}>
@@ -125,7 +114,9 @@
         {#if jobs.render.status && jobs.render.status !== "done"}
           <span class="badge {jobs.render.busy ? 'warn' : 'red'}">{jobs.render.status}</span>
         {/if}
-        <button class="machine" onclick={() => run("render")} disabled={!!running || !hasFal}>
+        <button class="machine" onclick={() => run("render")}
+                disabled={!!running || !hasFal || !profile}
+                title={profile ? "" : "Sin perfiles no hay costo visible: no se renderiza"}>
           {running === "render" ? "Renderizando…" : renderDone ? "Re-renderizar" : "Armar el video"}
         </button>
       </div>
@@ -134,7 +125,9 @@
     <!-- Selector de perfil dinamico -->
     <div class="profile-section">
       <div class="section-label eyebrow">Perfil de generacion</div>
-      {#if profiles.length === 0}
+      {#if profilesErr}
+        <p class="error" style="font-size:13px">{profilesErr}</p>
+      {:else if profiles.length === 0}
         <p class="muted" style="font-size:13px">Cargando perfiles…</p>
       {:else}
         <div class="profile-row">
@@ -277,9 +270,4 @@
   .ok-line { color: var(--ok); margin: 12px 0 0; font-weight: 600; }
 
 
-  /* D-079: la plata visible donde se gasta */
-  .costs { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 14px; }
-  .costs-total b, .costs-proj b { font-family: var(--font-mono); color: var(--ink); }
-  .costs-total, .costs-proj { font-size: 13px; }
-  .costs-bd { font-size: 11.5px; }
 </style>

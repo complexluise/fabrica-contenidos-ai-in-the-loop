@@ -2,7 +2,15 @@
 
 async function req(path, opts) {
   const r = await fetch(path, opts);
-  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  if (!r.ok) {
+    let raw = (await r.text()) || r.statusText;
+    // FastAPI manda {"detail": "..."} — mostrarle al humano el detalle, no el JSON.
+    try {
+      const j = JSON.parse(raw);
+      if (j && typeof j.detail === "string") raw = j.detail;
+    } catch { /* no era JSON: queda el texto crudo */ }
+    throw new Error(raw);
+  }
   const ct = r.headers.get("content-type") || "";
   return ct.includes("application/json") ? r.json() : r.text();
 }
@@ -52,24 +60,31 @@ export function humanError(e) {
   return last.length > 200 ? last.slice(0, 200) + "…" : last;
 }
 
+// Se suscribe al SSE de un job (nuevo o YA corriendo — el stream del server
+// hace replay desde la línea 0, así que F5 no pierde el registro).
+export function attachJob(jobId, { onLine, onDone, onError } = {}) {
+  const es = new EventSource(`/api/jobs/${jobId}/stream`);
+  es.onmessage = (e) => {
+    if (e.data.startsWith("__status__:")) {
+      es.close();
+      onDone?.(e.data.slice("__status__:".length), jobId);
+    } else {
+      onLine?.(e.data);
+    }
+  };
+  es.onerror = () => { es.close(); onError?.(); };
+  return () => es.close();
+}
+
 // Dispara un job (POST [body]) y transmite su progreso por SSE.
 // onLine(line), onDone(status, jobId) — devuelve una función para cancelar.
 export async function runJob(postPath, { body, onLine, onDone, onError } = {}) {
-  let es;
+  let cancel;
   try {
     const job = await post(postPath, body);
-    es = new EventSource(`/api/jobs/${job.id}/stream`);
-    es.onmessage = (e) => {
-      if (e.data.startsWith("__status__:")) {
-        es.close();
-        onDone?.(e.data.slice("__status__:".length), job.id);
-      } else {
-        onLine?.(e.data);
-      }
-    };
-    es.onerror = () => { es.close(); onError?.(); };
+    cancel = attachJob(job.id, { onLine, onDone, onError });
   } catch (err) {
     onError?.(err);
   }
-  return () => es?.close();
+  return () => cancel?.();
 }

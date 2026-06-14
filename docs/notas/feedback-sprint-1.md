@@ -1,7 +1,7 @@
 # Feedback 1 — Sprint 1 (MVP vertical)
 
-> Evaluación de la implementación del Sprint 1 contra [`SPEC.md`](../../SPEC.md) y
-> [`ROADMAP.md`](../../ROADMAP.md). Tests corridos: **24/24 ✓**.
+> Evaluación de la implementación del Sprint 1 contra [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+> (ex-SPEC.md) y [`ROADMAP.md`](../../ROADMAP.md). Tests corridos: **24/24 ✓**.
 
 ## Veredicto general
 

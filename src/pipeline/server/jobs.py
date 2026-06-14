@@ -6,6 +6,28 @@ se transmite en vivo por SSE. Sin broker: single-user local.
 
 `Job` y las transiciones de estado son lógica pura (core testeable); el `run`/
 `stream` async se valida con smoke.
+
+Persistencia (Ciclo 1 — historia en SQLite):
+  - `JobManager` acepta un `db_path` opcional (por defecto LEDGER_PATH de
+    telemetry.py). En __init__ crea el `JobStore` y barre los jobs
+    queued/running de procesos anteriores (barrido al boot, critico: sin esto
+    el guard 409 / `find_active` bloquearia para siempre re-disparar ese
+    kind+proyecto).
+  - El dict `_jobs` EN MEMORIA sigue siendo la verdad de lo VIVO (el SSE y
+    los watchers dependen de el). SQLite es la verdad durable del historial.
+  - Transiciones que persisten: create (queued), set_status (running/done/failed).
+  - El log completo NO va en SQLite (puede ser MB). Se guarda el tail al
+    terminar via `job_store.set_done` / `set_failed`.
+
+Semaforo de concurrencia (Ciclo 2 — D-092):
+  - `max_concurrency` (default 2) limita cuantos jobs pueden estar RUNNING
+    en paralelo. El semaforo se adquiere en `run()` ANTES de set_status(RUNNING).
+  - Un job creado con `spawn()` queda inmediatamente visible como QUEUED en
+    el dict en memoria (el dock lo muestra, el guard 409 lo ve). Solo pasa a
+    RUNNING cuando hay cupo en el semaforo.
+  - La configuracion persiste en `config/studio.yaml` (config operativa del
+    studio, no secretos). Se lee al arrancar y se puede cambiar en caliente
+    via PUT /api/studio-settings.
 """
 
 from __future__ import annotations
@@ -15,7 +37,11 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Awaitable
+
+from ..telemetry import LEDGER_PATH
+from .job_store import JobStore, determine_scope
 
 _PKG_LOGGER = "pipeline"
 
@@ -27,6 +53,13 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class JobConflictError(RuntimeError):
+    """Ya hay un job VIVO del mismo tipo para el mismo proyecto (Fase 2.6).
+
+    Anti doble-gasto: un segundo render/keyframes/cast identico mientras el
+    primero corre pagaria dos veces. El server lo mapea a HTTP 409."""
+
+
 @dataclass
 class Job:
     id: str
@@ -36,6 +69,7 @@ class Job:
     logs: list[str] = field(default_factory=list)
     result: dict | None = None
     error: str | None = None
+    scope: str = "batch"  # 'batch' | 'item' (D-093)
 
     @property
     def done(self) -> bool:
@@ -45,7 +79,7 @@ class Job:
         return {
             "id": self.id, "kind": self.kind, "project": self.project,
             "status": self.status.value, "result": self.result, "error": self.error,
-            "log_lines": len(self.logs),
+            "log_lines": len(self.logs), "scope": self.scope,
         }
 
 
@@ -64,18 +98,54 @@ class _JobLogHandler(logging.Handler):
             pass
 
 
-class JobManager:
-    """Registro de jobs en memoria + ejecución async con captura de logs."""
+_DEFAULT_MAX_CONCURRENCY = 2
 
-    def __init__(self):
+
+class JobManager:
+    """Registro de jobs en memoria + ejecución async con captura de logs.
+
+    La memoria es la verdad de lo VIVO (SSE/watchers). SQLite (JobStore)
+    es la verdad durable del historial.
+
+    `max_concurrency` limita cuantos jobs de generacion corren en paralelo
+    (default 2). El semaforo se adquiere en run() antes de pasar a RUNNING,
+    no en spawn(): el job existe y es visible como QUEUED desde el instante
+    del spawn, y arranca cuando hay cupo.
+    """
+
+    def __init__(self, db_path: Path | None = None,
+                 max_concurrency: int = _DEFAULT_MAX_CONCURRENCY):
         self._jobs: dict[str, Job] = {}
-        self._events: dict[str, asyncio.Event] = {}
+        # T2.6.23: un Event POR CONSUMIDOR del stream. Con uno compartido, dos
+        # SSE del mismo job se robaban el despertar (clear ajeno -> cuelgue).
+        self._watchers: dict[str, list[asyncio.Event]] = {}
+
+        # Semaforo de concurrencia (D-092): limita los jobs RUNNING en paralelo.
+        # Se inicializa aqui; el valor configurable viene de studio.yaml via
+        # create_app(), que lo lee antes de construir el JobManager.
+        self._sem = asyncio.Semaphore(max(1, int(max_concurrency)))
+        self._max_concurrency = max(1, int(max_concurrency))
+
+        # Persistencia: abre el store y barre los jobs huerfanos del proceso
+        # anterior ANTES de que lleguen requests (barrido al boot critico).
+        # db_path se resuelve AQUI (no en la firma) para que monkeypatch de
+        # LEDGER_PATH en tests sea efectivo (default lazy, no early-bind).
+        resolved_path = db_path if db_path is not None else LEDGER_PATH
+        self._store = JobStore(resolved_path)
+        swept = self._store.sweep_interrupted()
+        if swept:
+            logging.getLogger(_PKG_LOGGER).info(
+                "JobManager boot: %d job(s) interrumpidos marcados como failed: %s",
+                len(swept), swept,
+            )
 
     # --- registro (lógica pura) -------------------------------------------
     def create(self, kind: str, project: str) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project)
+        scope = determine_scope(kind, project)
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project, scope=scope)
         self._jobs[job.id] = job
-        self._events[job.id] = asyncio.Event()
+        # Persistir transicion "queued" con scope calculado
+        self._store.insert_job(job.id, kind, project, scope=scope)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -83,6 +153,13 @@ class JobManager:
 
     def list(self) -> list[Job]:
         return list(self._jobs.values())
+
+    def find_active(self, kind: str, project: str) -> Job | None:
+        """El job VIVO (queued/running) de este kind+proyecto, si existe."""
+        for job in self._jobs.values():
+            if job.kind == kind and job.project == project and not job.done:
+                return job
+        return None
 
     def append_log(self, job_id: str, line: str) -> None:
         job = self._jobs.get(job_id)
@@ -101,30 +178,79 @@ class JobManager:
         if error is not None:
             job.error = error
         self._wake(job_id)
+        # Persistir la transicion en SQLite
+        self._persist_transition(job)
+
+    def _persist_transition(self, job: Job) -> None:
+        """Escribe la transicion de estado en el JobStore."""
+        if job.status == JobStatus.RUNNING:
+            self._store.set_running(job.id)
+        elif job.status == JobStatus.DONE:
+            self._store.set_done(job.id, job.result, log_tail=job.logs)
+        elif job.status == JobStatus.FAILED:
+            self._store.set_failed(job.id, job.error or "", log_tail=job.logs)
+        # QUEUED ya se persiste en create(); los demas no necesitan re-persistir
 
     def _wake(self, job_id: str) -> None:
-        ev = self._events.get(job_id)
-        if ev is not None:
+        for ev in self._watchers.get(job_id, []):
             ev.set()
+
+    # --- consulta historica (SQLite) --------------------------------------
+
+    def get_from_store(self, job_id: str) -> dict | None:
+        """Busca un job en SQLite (para jobs terminados que ya no estan en memoria)."""
+        return self._store.get_job(job_id)
+
+    def list_history(self, limit: int = 50, offset: int = 0,
+                     since: float | None = None,
+                     kind: str | list[str] | None = None,
+                     scope: str | None = None,
+                     include_micro: bool = False) -> list[dict]:
+        """Jobs terminados del historial SQLite, mas nuevos primero.
+
+        Por defecto excluye micro-iteraciones (scope=item). Pasa include_micro=True
+        para incluirlas todas, o scope explicito para filtrar exactamente.
+        """
+        return self._store.list_history(
+            limit=limit, offset=offset, since=since,
+            kind=kind, scope=scope, include_micro=include_micro,
+        )
 
     # --- ejecución (async, smoke) -----------------------------------------
     async def run(self, job: Job, coro: Awaitable) -> None:
-        """Ejecuta la corrutina del job capturando los logs del pipeline."""
-        self.set_status(job.id, JobStatus.RUNNING)
-        handler = _JobLogHandler(self, job.id)
-        logging.getLogger(_PKG_LOGGER).addHandler(handler)
-        try:
-            result = await coro
-            self.set_status(job.id, JobStatus.DONE,
-                            result=result if isinstance(result, dict) else {"ok": True})
-        except Exception as exc:  # noqa: BLE001 — el fallo del job no tumba el server
-            logging.getLogger(_PKG_LOGGER).error("job %s (%s) FALLO: %s", job.id, job.kind, exc)
-            self.set_status(job.id, JobStatus.FAILED, error=str(exc))
-        finally:
-            logging.getLogger(_PKG_LOGGER).removeHandler(handler)
+        """Ejecuta la corrutina del job capturando los logs del pipeline.
+
+        El job espera aqui en QUEUED hasta que haya cupo en el semaforo de
+        concurrencia. Solo entonces pasa a RUNNING y ejecuta la corrutina.
+        Esto garantiza que el job es visible (dock, guard 409) desde spawn()
+        aunque aun no haya arrancado.
+        """
+        async with self._sem:
+            self.set_status(job.id, JobStatus.RUNNING)
+            handler = _JobLogHandler(self, job.id)
+            logging.getLogger(_PKG_LOGGER).addHandler(handler)
+            try:
+                result = await coro
+                self.set_status(job.id, JobStatus.DONE,
+                                result=result if isinstance(result, dict) else {"ok": True})
+            except Exception as exc:  # noqa: BLE001 — el fallo del job no tumba el server
+                logging.getLogger(_PKG_LOGGER).error("job %s (%s) FALLO: %s", job.id, job.kind, exc)
+                self.set_status(job.id, JobStatus.FAILED, error=str(exc))
+            finally:
+                logging.getLogger(_PKG_LOGGER).removeHandler(handler)
 
     def spawn(self, kind: str, project: str, coro: Awaitable) -> Job:
-        """Crea el job y lo lanza en segundo plano; devuelve el job al instante."""
+        """Crea el job y lo lanza en segundo plano; devuelve el job al instante.
+
+        T2.6.6: si ya hay un job vivo del mismo kind+proyecto, NO lanza otro
+        (JobConflictError -> 409): el doble clic / F5 no debe pagar dos veces."""
+        live = self.find_active(kind, project)
+        if live is not None:
+            if hasattr(coro, "close"):
+                coro.close()  # la corrutina rechazada no debe quedar sin esperar
+            raise JobConflictError(
+                f"Ya hay un trabajo de '{kind}' corriendo para '{project}' "
+                f"(job {live.id}). Mira su registro o espera a que termine.")
         job = self.create(kind, project)
         asyncio.create_task(self.run(job, coro))
         return job
@@ -134,14 +260,20 @@ class JobManager:
         job = self._jobs.get(job_id)
         if job is None:
             return
-        sent = 0
-        while True:
-            while sent < len(job.logs):
-                yield job.logs[sent]
-                sent += 1
-            if job.done:
-                yield f"__status__:{job.status.value}"
-                return
-            ev = self._events[job_id]
-            await ev.wait()
-            ev.clear()
+        ev = asyncio.Event()
+        self._watchers.setdefault(job_id, []).append(ev)
+        try:
+            sent = 0
+            while True:
+                while sent < len(job.logs):
+                    yield job.logs[sent]
+                    sent += 1
+                if job.done:
+                    yield f"__status__:{job.status.value}"
+                    return
+                await ev.wait()
+                ev.clear()
+        finally:
+            watchers = self._watchers.get(job_id, [])
+            if ev in watchers:
+                watchers.remove(ev)

@@ -2,11 +2,14 @@
   import { onMount } from "svelte";
   import { get, post, put, humanError, bufToBase64 } from "../lib/api.js";
   import { studio, goTo, refreshStatus, nextStep } from "../lib/studio.svelte.js";
-  import { jobState } from "../lib/jobs.svelte.js";
+  import { jobState, findLiveJob } from "../lib/jobs.svelte.js";
+  import FilmPlayer from "../components/FilmPlayer.svelte";
 
   let { slug } = $props();
   let doc   = $state(null);
-  let cand  = $state({ keyframes: {}, cast: {}, selections: {} });
+  let cand  = $state({ keyframes: {}, cast: {}, selections: {}, cast_selections: {} });
+  let strip = $state([]);        // D-086: poses por plano del animatic (nutre el board)
+  let knownChars = $state([]);   // personajes del proyecto (para asignar a escenas)
   let editing = $state({});      // { [sceneId]: true } tarjetas en modo edicion
   let expanded = $state({});     // { [sceneId]: true } vista detalle en modo lectura
   let expandedAudio = $state({}); // { "sceneId_shotIdx": true } audio por plano
@@ -16,10 +19,12 @@
   let saving = $state(false);
   let music = $state(null);       // URL del archivo de música cargado
   let musicPrompt = $state("");
-  let musicBusy = $derived(musicJob.busy || musicUploading);
   const musicJob = jobState();  // D-081: el ciclo de job, una sola implementacion
   let musicErr = $state("");
   let musicUploading = $state(false);
+  // T2.6.20: declarado DESPUÉS de musicJob — el $derived lo captura por cierre
+  // y el orden inverso era una trampa TDZ esperando un refactor.
+  let musicBusy = $derived(musicJob.busy || musicUploading);
   let showMusicGen = $state(false);
   let backends = $state([]);         // D-053: backends disponibles
   let activeBackend = $state("fal"); // D-053: backend activo del proyecto
@@ -64,10 +69,22 @@
       .then((b) => { backends = b; })
       .catch(() => {});
 
+    // T2.6.9: F5 con la música generándose -> re-engancharse al job vivo.
+    findLiveJob(["music"], slug).then((live) => {
+      if (live) musicJob.attach(live.id, {
+        onDone: async (status, jobId) => {
+          if (status !== "done") { musicErr = musicJob.err; return; }
+          const j = await get(`/api/jobs/${jobId}`).catch(() => null);
+          music = j?.result?.url || music;
+        },
+      });
+    });
+
     get(`/api/projects/${slug}`)
       .then((d) => {
         music = d.music || null;
         activeBackend = d.storyboard_backend || "fal";  // D-053
+        knownChars = (d.characters || []).map((c) => c.name);  // T2.6.22
         doc = {
           title: d.title || "",
           brief: d.brief || "",
@@ -86,7 +103,54 @@
     get(`/api/projects/${slug}/candidates`)
       .then((c) => { cand = c; })
       .catch(() => {});
+
+    // D-086: el animatic nutre el Storyboard — las poses por plano se ven acá.
+    get(`/api/projects/${slug}/animatic`)
+      .then((a) => { strip = a.strip || []; })
+      .catch(() => {});
   });
+
+  // D-086: el Storyboard es el centro donde TODO se valida (D-061). Estas
+  // ayudas leen lo que produjeron las mesas (casting/encuadres/animatic).
+  // Cara elegida de un personaje (casting.yaml) -> URL servible, o null.
+  function castFace(name) {
+    const p = cand.cast_selections?.[name];
+    return p ? `/files/${slug}/${String(p).replace(/\\/g, "/")}` : null;
+  }
+  // Poses por plano de la escena (del animatic): [{shot_id, url|null, ready}].
+  const scenePoses = (sceneId) => strip.filter((e) => e.scene === sceneId)
+    .map((e) => ({ shot_id: e.shot_id, url: e.destino, ready: e.ready }));
+  // Estado de validación de la escena (para los badges).
+  const castReady = (s) => s.characters.length === 0
+    || s.characters.every((c) => !!castFace(c));
+  function posesReady(sceneId) {
+    const ps = scenePoses(sceneId);
+    return { ready: ps.filter((p) => p.url).length, total: ps.length };
+  }
+
+  // [D-087] ▶ Reproducir el plan: la película en stills CON su narrativa. Cruza
+  // el strip del animatic (poses, en orden de cinta) con doc (diálogo/vo/caption).
+  let playing = $state(false);
+  let playerStart = $state(0);  // D-094: índice inicial al reproducir desde la tira
+  function sceneOf(id) { return doc?.scenes.find((s) => s.id === id) || null; }
+  function shotIdxOf(shotId) {
+    const m = String(shotId).match(/\.(\d+)$/);
+    return m ? parseInt(m[1], 10) - 1 : 0;  // "s3"->0, "s3.2"->1, "s3.3"->2
+  }
+  let playerFrames = $derived((strip || []).map((e) => {
+    const sc = sceneOf(e.scene);
+    const sh = sc?.shots?.[shotIdxOf(e.shot_id)] || {};
+    return {
+      shot_id: e.shot_id,
+      sceneLabel: e.scene + (e.beat ? ` · ${e.beat}` : ""),
+      start: e.start, destino: e.destino, lands: e.lands,
+      duration_s: e.duration_s,
+      action: sh.action || "",
+      intention: e.intention || sh.intention || "",
+      line: sh.voiceover || sc?.dialogue || "",
+      caption: sh.caption || "",
+    };
+  }));
 
   const touch = () => { dirty = true; msg = ""; };
   const sceneDur = (s) => s.shots.reduce((a, sh) => a + (Number(sh.duration_s) || 0), 0);
@@ -112,6 +176,21 @@
 
   function toggleExpand(id) {
     expanded[id] = !expanded[id];
+  }
+
+  // a11y (T2.6.19): los click-targets también operan con Enter/Espacio.
+  function keyActivate(fn) {
+    return (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+    };
+  }
+
+  // T2.6.22: asignar personajes del proyecto a la escena (afecta el casting).
+  function toggleChar(s, name) {
+    const i = s.characters.indexOf(name);
+    if (i >= 0) s.characters.splice(i, 1);
+    else s.characters.push(name);
+    touch();
   }
 
   function toggleEdit(id) {
@@ -213,6 +292,7 @@
         id: s.id, beat: s.beat || null, prompt: s.prompt,
         dialogue: s.dialogue || null, ambience: s.ambience || null,
         visual_intensity: s.visual_intensity ?? null,            // D-047
+        characters: s.characters || [],                          // T2.6.22
         shots: s.shots.map((sh) => ({
           intention: sh.intention || null, action: sh.action || null,  // D-047
           motion: sh.motion || null,                                    // D-072
@@ -227,6 +307,7 @@
         })),
       })),
     };
+    const signedBefore = signed;  // T2.6.13: para avisar si esta acción des-firmó
     try {
       const r = await put(`/api/projects/${slug}`, body);
       dirty = false;
@@ -234,7 +315,11 @@
       expandedAudio = {};
       const dropped = r.dropped_selections?.length
         ? ` (selecciones limpiadas: ${r.dropped_selections.join(", ")})` : "";
-      msg = (sign ? "Plan firmado." : "Borrador guardado.") + dropped;
+      // D-082: el server preserva la firma si solo cambió lo no-narrativo;
+      // si la limpió, decirlo acá mismo (nunca en silencio).
+      const unsigned = !sign && signedBefore && r.signed === false
+        ? " La narrativa cambió: el plan quedó SIN firmar." : "";
+      msg = (sign ? "Plan firmado." : "Borrador guardado.") + dropped + unsigned;
       await refreshStatus();
     } catch (e) {
       error = humanError(e);
@@ -244,11 +329,72 @@
   }
 
   let signed = $derived(studio.status?.storyboard?.signed);
+
+  // D-094: índice global en playerFrames para un plano dado (escena + posición)
+  // playerFrames sigue el orden de strip, que viene del animatic (orden de cinta).
+  function playerFrameIdx(sceneId, shotLocalIdx) {
+    // Buscar en playerFrames el plano cuyo shot_id corresponda a esta escena+plano
+    // El formato de shot_id es "s1", "s1.2", "s1.3" etc.
+    const expectedSuffix = shotLocalIdx === 0 ? sceneId : `${sceneId}.${shotLocalIdx + 1}`;
+    const idx = playerFrames.findIndex((pf) => pf.shot_id === expectedSuffix
+      || (shotLocalIdx === 0 && String(pf.shot_id).startsWith(sceneId + ".") === false && pf.shot_id === sceneId));
+    return idx >= 0 ? idx : -1;
+  }
+
+  // Reproducir la película desde un índice de plano específico
+  function playFrom(frameIdx) {
+    playerStart = Math.max(0, frameIdx);
+    playing = true;
+  }
+
+  // Scroll hasta la tarjeta de una escena (y expandirla opcionalmente)
+  function scrollToScene(sceneId) {
+    const el = document.querySelector(`[data-scene-id="${sceneId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!expanded[sceneId]) expanded[sceneId] = true;
+    }
+  }
+
+  // Datos para la tira temporal: lista plana de bloques con ancho proporcional
+  let timelineBlocks = $derived((() => {
+    if (!doc || total <= 0) return [];
+    const blocks = [];
+    for (const s of doc.scenes) {
+      const sceneTotalDur = sceneDur(s);
+      for (let j = 0; j < s.shots.length; j++) {
+        const sh = s.shots[j];
+        const dur = Number(sh.duration_s) || 0;
+        const frameIdx = playerFrameIdx(s.id, j);
+        blocks.push({
+          sceneId: s.id,
+          beat: s.beat || "",
+          shotLocal: j,
+          shotLabel: `P${j + 1}`,
+          dur,
+          widthPct: total > 0 ? (dur / total) * 100 : 0,
+          hasImage: frameIdx >= 0 && !!(playerFrames[frameIdx]?.destino),
+          hasMotion: sh.media !== "still" && !!(sh.motion),
+          isStill: sh.media === "still",
+          frameIdx,
+          sceneFirst: j === 0,  // primer plano de la escena (para rotular)
+          sceneSpan: s.shots.length,  // cuántos planos tiene la escena
+          sceneDurTotal: sceneTotalDur,
+        });
+      }
+    }
+    return blocks;
+  })());
 </script>
 
 {#if error && !doc}
   <p class="error">{error}</p>
 {:else if doc}
+  {#if playing}
+    {#key playerStart}
+      <FilmPlayer frames={playerFrames} start={playerStart} onclose={() => (playing = false)} />
+    {/key}
+  {/if}
   <header class="head">
     <div class="eyebrow">Paso 2 · vos decidís</div>
     <input class="title-in" bind:value={doc.title} oninput={touch} placeholder="Título del proyecto" />
@@ -258,6 +404,13 @@
       <span class="pill">{doc.scenes.length} escena{doc.scenes.length === 1 ? "" : "s"}</span>
       {#if signed && !dirty}<span class="pill ok">✓ firmado</span>
       {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
+      <!-- D-087: la película en stills CON su narrativa — la vista temporal del plan -->
+      {#if playerFrames.length}
+        <button class="play-plan" onclick={() => playFrom(0)}
+                title="Ver la película en stills, plano por plano, con lo que pasa en cada uno">
+          ▶ Reproducir el plan
+        </button>
+      {/if}
     </div>
     {#if backends.length > 1}
       <div class="backend-row">
@@ -285,6 +438,58 @@
             </div>
           {/each}
         </div>
+      </div>
+    {/if}
+
+    <!-- D-094: Tira temporal — cada plano ocupa ancho proporcional a su duration_s.
+         Informa el ritmo del montaje; click navega a la escena; ▶ reproduce desde ahí. -->
+    {#if timelineBlocks.length && total > 0}
+      <div class="tl-wrap" title="Tira temporal: cada bloque = un plano, ancho proporcional a su duración">
+        <span class="tl-lbl">ritmo</span>
+        <div class="tl-track" role="list">
+          {#each timelineBlocks as blk, bi}
+            <div
+              class="tl-block"
+              class:tl-still={blk.isStill}
+              class:tl-no-motion={!blk.hasMotion && !blk.isStill}
+              class:tl-scene-first={blk.sceneFirst}
+              style="width:{blk.widthPct}%; min-width:4px"
+              role="listitem"
+              title="{blk.sceneId} · {blk.shotLabel} — {blk.dur}s{blk.isStill ? ' (still)' : blk.hasMotion ? '' : ' (sin motion)'}"
+            >
+              <!-- Etiqueta de escena encima del primer plano (solo si hay espacio) -->
+              {#if blk.sceneFirst && blk.widthPct * (blk.sceneSpan) > 4}
+                <span class="tl-scene-lbl">{blk.sceneId}{blk.beat ? ' · ' + blk.beat : ''}</span>
+              {/if}
+
+              <!-- Cuerpo del bloque: navegación (click -> scroll) + reproducción (▶) -->
+              <div class="tl-body">
+                <!-- Botón de navegación: ocupa casi todo el ancho del bloque -->
+                <button
+                  class="tl-nav"
+                  onclick={() => scrollToScene(blk.sceneId)}
+                  title="Ir a escena {blk.sceneId} ({blk.shotLabel})"
+                  aria-label="Ir a {blk.sceneId} {blk.shotLabel} — {blk.dur}s"
+                >
+                  {#if blk.widthPct > 4}<span class="tl-dur">{blk.dur}s</span>{/if}
+                </button>
+
+                <!-- Botón ▶ reproducir desde este plano (solo si hay playerFrames) -->
+                {#if blk.frameIdx >= 0 && playerFrames.length}
+                  <button
+                    class="tl-play"
+                    onclick={() => playFrom(blk.frameIdx)}
+                    title="Reproducir desde {blk.sceneId} {blk.shotLabel}"
+                    aria-label="Reproducir desde plano {bi + 1}"
+                  >
+                    &#9654;
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+        <span class="tl-total mono">{total.toFixed(0)}s</span>
       </div>
     {/if}
   </header>
@@ -338,12 +543,19 @@
     {@const isExpanded = !!expanded[s.id]}
     {@const kfUrl = selectedKf(s.id)}
     {@const hasCands = hasKfCands(s.id)}
+    {@const scenePoseList = scenePoses(s.id)}
+    {@const scenePoseStat = posesReady(s.id)}
 
-    <section class="scene" class:is-editing={isEditing}>
+    <section class="scene" class:is-editing={isEditing} data-scene-id={s.id}>
 
-      <!-- Cabecera: siempre visible -->
+      <!-- Cabecera: siempre visible. role/tabindex/handlers van JUNTOS (gated en
+           !isEditing): en lectura es un botón; en edición es un contenedor de
+           inputs. El analizador no correlaciona el par, de ahí el ignore. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="shead" class:clickable={!isEditing}
-           onclick={!isEditing ? () => toggleExpand(s.id) : null}>
+           role={!isEditing ? "button" : null} tabindex={!isEditing ? 0 : null}
+           onclick={!isEditing ? () => toggleExpand(s.id) : null}
+           onkeydown={!isEditing ? keyActivate(() => toggleExpand(s.id)) : null}>
         <span class="sid mono">{s.id}</span>
         {#if isEditing}
           <input class="beat-in" bind:value={s.beat} oninput={touch} placeholder="beat / título de la escena" />
@@ -370,6 +582,19 @@
       {#if isEditing}
         <!-- MODO EDICIÓN: narrativa → planos → prompt IA (colapsable) -->
         <div class="sbody">
+
+          <!-- T2.6.22: personajes de la escena (chips de los del proyecto).
+               Define qué caras viajan a los encuadres y qué casting hace falta. -->
+          {#if knownChars.length}
+            <div class="chars-row">
+              <span class="audio-lbl">Personajes</span>
+              {#each knownChars as name}
+                <button class="char-chip" class:on={s.characters.includes(name)}
+                        title={s.characters.includes(name) ? "Quitar de la escena" : "Agregar a la escena"}
+                        onclick={() => toggleChar(s, name)}>{name}</button>
+              {/each}
+            </div>
+          {/if}
 
           <!-- Dialogo y ambience de la escena -->
           <div class="scene-audio">
@@ -505,7 +730,8 @@
         <!-- MODO LECTURA -->
         {#if !isExpanded}
           <!-- COLAPSADO: resumen compacto, click para expandir -->
-          <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0">
+          <div class="read-compact" onclick={() => toggleExpand(s.id)} role="button" tabindex="0"
+               onkeydown={keyActivate(() => toggleExpand(s.id))}>
             <div class="read-compact-text">
               <!-- B1: QUÉ SE VE primero (la escena, no solo lo que se dice) -->
               {#if shotDesc(s.shots[0])}
@@ -535,6 +761,20 @@
                     {#if sh.caption}<span class="chip-vo" title={sh.caption}>cc</span>{/if}
                   </span>
                 {/each}
+              </div>
+              <!-- D-086: validación de un vistazo (lo que nutrió el board) -->
+              <div class="val-chips">
+                {#if s.characters.length}
+                  <span class="vchip" class:ok={castReady(s)}>
+                    {castReady(s) ? "✓" : "○"} casting
+                  </span>
+                {/if}
+                <span class="vchip" class:ok={kfUrl}>{kfUrl ? "✓" : "○"} encuadre</span>
+                {#if scenePoseStat.total > 0}
+                  <span class="vchip" class:ok={scenePoseStat.ready >= scenePoseStat.total}>
+                    {scenePoseStat.ready >= scenePoseStat.total ? "✓" : "○"} poses {scenePoseStat.ready}/{scenePoseStat.total}
+                  </span>
+                {/if}
               </div>
             </div>
             {#if kfUrl}
@@ -615,18 +855,57 @@
               </div>
             </div>
 
-            <!-- Keyframe -->
-            <div class="rf-kf-row">
-              {#if kfUrl}
-                <img class="rf-thumb" src={kfUrl} alt="keyframe {s.id}" />
-                <button class="small ghost" onclick={() => goTo("encuadres")}>Cambiar →</button>
-              {:else if hasCands}
-                <span class="muted" style="font-size:12px">◈ candidatos listos —</span>
-                <button class="small machine" onclick={() => goTo("encuadres")}>Elegir →</button>
-              {:else}
-                <span class="muted" style="font-size:12px">◇ sin keyframe —</span>
-                <button class="small ghost" onclick={() => goTo("encuadres")}>Generar →</button>
+            <!-- D-086: Lo visual — acá converge y se valida lo que produjeron las
+                 mesas (casting/encuadres/animatic). El Storyboard es el centro. -->
+            <div class="rf-section rf-hub">
+              <span class="rf-lbl">Lo visual — acá se valida</span>
+
+              <!-- Casting: las caras de los personajes de la escena -->
+              {#if s.characters.length}
+                {@const ok = castReady(s)}
+                <div class="hub-row">
+                  <span class="hub-tag" class:ok>Casting {ok ? "✓" : ""}</span>
+                  {#each s.characters as ch}
+                    {@const face = castFace(ch)}
+                    <span class="cast-chip" title={ch}>
+                      {#if face}<img src={face} alt={ch} />{:else}<span class="cast-hole">?</span>{/if}
+                      <span class="cast-name">{ch}</span>
+                    </span>
+                  {/each}
+                  <button class="small ghost hub-go" onclick={() => goTo("casting")}>
+                    {ok ? "Casting →" : "Elegir caras →"}
+                  </button>
+                </div>
               {/if}
+
+              <!-- Encuadres + Animatic: una pose (still) por plano de la escena -->
+              <div class="hub-row">
+                <span class="hub-tag" class:ok={scenePoseStat.total > 0 && scenePoseStat.ready >= scenePoseStat.total}>
+                  Planos {scenePoseStat.total ? `${scenePoseStat.ready}/${scenePoseStat.total}` : ""}
+                </span>
+                {#if scenePoseList.length}
+                  {#each scenePoseList as p, j}
+                    {#if p.url}
+                      <img class="pose-thumb" src={p.url} alt="plano {j + 1}" loading="lazy" />
+                    {:else}
+                      <span class="pose-hole" title="sin generar">P{j + 1}</span>
+                    {/if}
+                  {/each}
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Encuadres →</button>
+                  {#if scenePoseStat.ready < scenePoseStat.total}
+                    <button class="small machine hub-go" onclick={() => goTo("animatic")}>Completar →</button>
+                  {/if}
+                {:else if kfUrl}
+                  <img class="pose-thumb" src={kfUrl} alt="keyframe {s.id}" loading="lazy" />
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Cambiar →</button>
+                {:else if hasCands}
+                  <span class="muted" style="font-size:12px">◈ candidatos listos</span>
+                  <button class="small machine hub-go" onclick={() => goTo("encuadres")}>Elegir →</button>
+                {:else}
+                  <span class="muted" style="font-size:12px">◇ sin imagen</span>
+                  <button class="small ghost hub-go" onclick={() => goTo("encuadres")}>Generar →</button>
+                {/if}
+              </div>
             </div>
 
           </div>
@@ -672,7 +951,14 @@
   .title-in:hover { border-bottom-color: var(--line); }
   .title-in:focus { border-bottom-color: var(--red); outline: none; box-shadow: none; }
   .lede { font-size: 15px; margin: 6px 0 10px; }
-  .meta { display: flex; gap: 7px; }
+  .meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  /* D-087: ▶ Reproducir el plan */
+  .play-plan {
+    margin-left: 4px; font-size: 12.5px; font-weight: 700; padding: 3px 12px;
+    border-radius: 999px; border: 1.5px solid var(--red); color: var(--red-deep);
+    background: var(--red-wash); box-shadow: none;
+  }
+  .play-plan:hover { background: var(--red); color: #fff; box-shadow: none; }
 
   /* D-053: selector de backend del storyboard */
   .backend-row {
@@ -758,6 +1044,13 @@
     flex: 1; padding: 13px 18px; display: flex; flex-direction: column; gap: 8px;
   }
   .shots-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  /* D-086: chips de validación de un vistazo en la vista colapsada */
+  .val-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .vchip {
+    font-size: 10.5px; font-weight: 600; color: var(--ink-soft);
+    background: var(--paper-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  }
+  .vchip.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-wash); }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
     background: var(--paper-2); border: 1px solid var(--line);
@@ -818,20 +1111,46 @@
   .vo-cue .cue-tag  { color: var(--ink-soft); }
   .cc-cue .cue-tag  { color: var(--ink-soft); }
 
-  /* Keyframe en modo expandido */
-  .rf-kf-row {
-    padding-top: 14px; display: flex; align-items: center; gap: 12px;
+  /* D-086: el hub visual — caras + poses por plano, donde se valida */
+  .rf-hub { display: flex; flex-direction: column; gap: 10px; }
+  .hub-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .hub-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft); min-width: 64px;
   }
-  .rf-thumb {
-    height: 80px; border-radius: var(--r-sm);
-    border: 1px solid var(--line-2); object-fit: cover;
-    aspect-ratio: 16 / 9; display: block;
+  .hub-tag.ok { color: var(--ok); }
+  .hub-go { margin-left: 4px; }
+  .cast-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+  .cast-chip img, .cast-hole {
+    width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+    border: 2px solid var(--line-2); display: grid; place-items: center;
+  }
+  .cast-chip img { border-color: var(--red); }
+  .cast-hole { background: var(--paper-2); color: var(--ink-soft); font-size: 16px; }
+  .cast-name { font-size: 10px; color: var(--ink-soft); max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pose-thumb {
+    height: 64px; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-sm);
+    border: 1px solid var(--line-2); display: block;
+  }
+  .pose-hole {
+    height: 64px; width: 64px; display: grid; place-items: center; border-radius: var(--r-sm);
+    border: 1.5px dashed var(--line-2); color: var(--ink-soft); font-size: 11px;
+    font-family: var(--font-mono); background: var(--paper-2);
   }
 
   /* Boton expand en cabecera */
 
   /* --- MODO EDICIÓN --- */
   .sbody { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* T2.6.22 — personajes de la escena (chips) */
+  .chars-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .char-chip {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px; box-shadow: none;
+    border: 1.5px solid var(--line-2); background: var(--paper-2); color: var(--ink-soft);
+  }
+  .char-chip:hover { border-color: var(--ink-soft); color: var(--ink); box-shadow: none; }
+  .char-chip.on { border-color: var(--red); background: var(--red-wash); color: var(--red-deep); font-weight: 600; }
 
   /* L2 — Audio de escena (secundario, agrupado) */
   .scene-audio {
@@ -1063,4 +1382,92 @@
     background: var(--warn-wash); color: #9a6b00; border-radius: 999px; padding: 0 6px;
   }
   .warn-chip { border-color: #e0c089; }
+
+  /* ===== D-094: Tira temporal (timeline) ===== */
+  .tl-wrap {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    min-height: 48px;
+  }
+  .tl-lbl {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-soft); flex-shrink: 0; min-width: 32px;
+  }
+  .tl-total {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-soft); flex-shrink: 0;
+  }
+  .tl-track {
+    flex: 1; display: flex; align-items: stretch; gap: 2px;
+    height: 40px; overflow: hidden;
+  }
+
+  /* Bloque individual de plano */
+  .tl-block {
+    display: flex; flex-direction: column; height: 100%;
+    position: relative; flex-shrink: 0;
+  }
+  /* Separador visual entre escenas */
+  .tl-block.tl-scene-first {
+    margin-left: 3px;
+    border-left: 2px solid var(--line-2);
+    padding-left: 2px;
+  }
+  .tl-block:first-child { margin-left: 0; border-left: none; padding-left: 0; }
+
+  /* Etiqueta del id de escena (encima del primer plano de la escena) */
+  .tl-scene-lbl {
+    font-size: 8.5px; font-weight: 700; color: var(--ink-soft); letter-spacing: 0.04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1; padding-bottom: 2px; max-width: 100%;
+  }
+
+  /* Cuerpo del bloque: botón de nav + botón play */
+  .tl-body {
+    flex: 1; display: flex; align-items: stretch; gap: 0; overflow: hidden;
+    border-radius: var(--r-sm); background: var(--blue-wash);
+    border: 1px solid var(--blue); transition: border-color 0.12s, background 0.12s;
+    min-width: 0;
+  }
+  .tl-block:hover .tl-body {
+    background: var(--blue); border-color: var(--blue-deep);
+  }
+  /* Still: tono diferente (no es video) */
+  .tl-block.tl-still .tl-body {
+    background: var(--paper-2); border-color: var(--line-2);
+  }
+  .tl-block.tl-still:hover .tl-body {
+    background: var(--paper-3); border-color: var(--line);
+  }
+  /* Sin motion: advertencia sutil */
+  .tl-block.tl-no-motion .tl-body {
+    border-color: var(--warn); background: var(--warn-wash);
+  }
+  .tl-block.tl-no-motion:hover .tl-body {
+    background: #f0d9b5; border-color: var(--warn);
+  }
+
+  /* Botón de navegación (la mayor parte del bloque) */
+  .tl-nav {
+    flex: 1; border: none; background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px; min-width: 0; box-shadow: none;
+  }
+  .tl-nav:focus-visible { outline: 2px solid var(--blue-deep); outline-offset: 1px; border-radius: var(--r-sm); }
+  .tl-dur {
+    font-family: var(--font-mono); font-size: 9px; color: var(--blue-deep);
+    overflow: hidden; white-space: nowrap; pointer-events: none;
+  }
+  .tl-block.tl-still .tl-dur { color: var(--ink-soft); }
+  .tl-block.tl-no-motion .tl-dur { color: var(--warn); }
+  .tl-block:hover .tl-dur { color: #fff; }
+  .tl-block.tl-still:hover .tl-dur { color: var(--ink); }
+
+  /* Botón ▶ reproducir desde este plano */
+  .tl-play {
+    flex-shrink: 0; width: 18px; border: none; background: transparent;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--blue-deep); padding: 0; box-shadow: none;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .tl-block:hover .tl-play { opacity: 1; color: #fff; }
+  .tl-play:focus-visible { opacity: 1; outline: 2px solid var(--red); border-radius: 2px; }
 </style>
