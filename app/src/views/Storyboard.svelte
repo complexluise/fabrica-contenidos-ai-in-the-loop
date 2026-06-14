@@ -131,6 +131,7 @@
   // [D-087] ▶ Reproducir el plan: la película en stills CON su narrativa. Cruza
   // el strip del animatic (poses, en orden de cinta) con doc (diálogo/vo/caption).
   let playing = $state(false);
+  let playerStart = $state(0);  // D-094: índice inicial al reproducir desde la tira
   function sceneOf(id) { return doc?.scenes.find((s) => s.id === id) || null; }
   function shotIdxOf(shotId) {
     const m = String(shotId).match(/\.(\d+)$/);
@@ -328,12 +329,72 @@
   }
 
   let signed = $derived(studio.status?.storyboard?.signed);
+
+  // D-094: índice global en playerFrames para un plano dado (escena + posición)
+  // playerFrames sigue el orden de strip, que viene del animatic (orden de cinta).
+  function playerFrameIdx(sceneId, shotLocalIdx) {
+    // Buscar en playerFrames el plano cuyo shot_id corresponda a esta escena+plano
+    // El formato de shot_id es "s1", "s1.2", "s1.3" etc.
+    const expectedSuffix = shotLocalIdx === 0 ? sceneId : `${sceneId}.${shotLocalIdx + 1}`;
+    const idx = playerFrames.findIndex((pf) => pf.shot_id === expectedSuffix
+      || (shotLocalIdx === 0 && String(pf.shot_id).startsWith(sceneId + ".") === false && pf.shot_id === sceneId));
+    return idx >= 0 ? idx : -1;
+  }
+
+  // Reproducir la película desde un índice de plano específico
+  function playFrom(frameIdx) {
+    playerStart = Math.max(0, frameIdx);
+    playing = true;
+  }
+
+  // Scroll hasta la tarjeta de una escena (y expandirla opcionalmente)
+  function scrollToScene(sceneId) {
+    const el = document.querySelector(`[data-scene-id="${sceneId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!expanded[sceneId]) expanded[sceneId] = true;
+    }
+  }
+
+  // Datos para la tira temporal: lista plana de bloques con ancho proporcional
+  let timelineBlocks = $derived((() => {
+    if (!doc || total <= 0) return [];
+    const blocks = [];
+    for (const s of doc.scenes) {
+      const sceneTotalDur = sceneDur(s);
+      for (let j = 0; j < s.shots.length; j++) {
+        const sh = s.shots[j];
+        const dur = Number(sh.duration_s) || 0;
+        const frameIdx = playerFrameIdx(s.id, j);
+        blocks.push({
+          sceneId: s.id,
+          beat: s.beat || "",
+          shotLocal: j,
+          shotLabel: `P${j + 1}`,
+          dur,
+          widthPct: total > 0 ? (dur / total) * 100 : 0,
+          hasImage: frameIdx >= 0 && !!(playerFrames[frameIdx]?.destino),
+          hasMotion: sh.media !== "still" && !!(sh.motion),
+          isStill: sh.media === "still",
+          frameIdx,
+          sceneFirst: j === 0,  // primer plano de la escena (para rotular)
+          sceneSpan: s.shots.length,  // cuántos planos tiene la escena
+          sceneDurTotal: sceneTotalDur,
+        });
+      }
+    }
+    return blocks;
+  })());
 </script>
 
 {#if error && !doc}
   <p class="error">{error}</p>
 {:else if doc}
-  {#if playing}<FilmPlayer frames={playerFrames} onclose={() => (playing = false)} />{/if}
+  {#if playing}
+    {#key playerStart}
+      <FilmPlayer frames={playerFrames} start={playerStart} onclose={() => (playing = false)} />
+    {/key}
+  {/if}
   <header class="head">
     <div class="eyebrow">Paso 2 · vos decidís</div>
     <input class="title-in" bind:value={doc.title} oninput={touch} placeholder="Título del proyecto" />
@@ -345,7 +406,7 @@
       {:else if dirty}<span class="pill warn">cambios sin firmar</span>{/if}
       <!-- D-087: la película en stills CON su narrativa — la vista temporal del plan -->
       {#if playerFrames.length}
-        <button class="play-plan" onclick={() => (playing = true)}
+        <button class="play-plan" onclick={() => playFrom(0)}
                 title="Ver la película en stills, plano por plano, con lo que pasa en cada uno">
           ▶ Reproducir el plan
         </button>
@@ -377,6 +438,58 @@
             </div>
           {/each}
         </div>
+      </div>
+    {/if}
+
+    <!-- D-094: Tira temporal — cada plano ocupa ancho proporcional a su duration_s.
+         Informa el ritmo del montaje; click navega a la escena; ▶ reproduce desde ahí. -->
+    {#if timelineBlocks.length && total > 0}
+      <div class="tl-wrap" title="Tira temporal: cada bloque = un plano, ancho proporcional a su duración">
+        <span class="tl-lbl">ritmo</span>
+        <div class="tl-track" role="list">
+          {#each timelineBlocks as blk, bi}
+            <div
+              class="tl-block"
+              class:tl-still={blk.isStill}
+              class:tl-no-motion={!blk.hasMotion && !blk.isStill}
+              class:tl-scene-first={blk.sceneFirst}
+              style="width:{blk.widthPct}%; min-width:4px"
+              role="listitem"
+              title="{blk.sceneId} · {blk.shotLabel} — {blk.dur}s{blk.isStill ? ' (still)' : blk.hasMotion ? '' : ' (sin motion)'}"
+            >
+              <!-- Etiqueta de escena encima del primer plano (solo si hay espacio) -->
+              {#if blk.sceneFirst && blk.widthPct * (blk.sceneSpan) > 4}
+                <span class="tl-scene-lbl">{blk.sceneId}{blk.beat ? ' · ' + blk.beat : ''}</span>
+              {/if}
+
+              <!-- Cuerpo del bloque: navegación (click -> scroll) + reproducción (▶) -->
+              <div class="tl-body">
+                <!-- Botón de navegación: ocupa casi todo el ancho del bloque -->
+                <button
+                  class="tl-nav"
+                  onclick={() => scrollToScene(blk.sceneId)}
+                  title="Ir a escena {blk.sceneId} ({blk.shotLabel})"
+                  aria-label="Ir a {blk.sceneId} {blk.shotLabel} — {blk.dur}s"
+                >
+                  {#if blk.widthPct > 4}<span class="tl-dur">{blk.dur}s</span>{/if}
+                </button>
+
+                <!-- Botón ▶ reproducir desde este plano (solo si hay playerFrames) -->
+                {#if blk.frameIdx >= 0 && playerFrames.length}
+                  <button
+                    class="tl-play"
+                    onclick={() => playFrom(blk.frameIdx)}
+                    title="Reproducir desde {blk.sceneId} {blk.shotLabel}"
+                    aria-label="Reproducir desde plano {bi + 1}"
+                  >
+                    &#9654;
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+        <span class="tl-total mono">{total.toFixed(0)}s</span>
       </div>
     {/if}
   </header>
@@ -433,7 +546,7 @@
     {@const scenePoseList = scenePoses(s.id)}
     {@const scenePoseStat = posesReady(s.id)}
 
-    <section class="scene" class:is-editing={isEditing}>
+    <section class="scene" class:is-editing={isEditing} data-scene-id={s.id}>
 
       <!-- Cabecera: siempre visible. role/tabindex/handlers van JUNTOS (gated en
            !isEditing): en lectura es un botón; en edición es un contenedor de
@@ -1269,4 +1382,92 @@
     background: var(--warn-wash); color: #9a6b00; border-radius: 999px; padding: 0 6px;
   }
   .warn-chip { border-color: #e0c089; }
+
+  /* ===== D-094: Tira temporal (timeline) ===== */
+  .tl-wrap {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    min-height: 48px;
+  }
+  .tl-lbl {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-soft); flex-shrink: 0; min-width: 32px;
+  }
+  .tl-total {
+    font-family: var(--font-mono); font-size: 10px; color: var(--ink-soft); flex-shrink: 0;
+  }
+  .tl-track {
+    flex: 1; display: flex; align-items: stretch; gap: 2px;
+    height: 40px; overflow: hidden;
+  }
+
+  /* Bloque individual de plano */
+  .tl-block {
+    display: flex; flex-direction: column; height: 100%;
+    position: relative; flex-shrink: 0;
+  }
+  /* Separador visual entre escenas */
+  .tl-block.tl-scene-first {
+    margin-left: 3px;
+    border-left: 2px solid var(--line-2);
+    padding-left: 2px;
+  }
+  .tl-block:first-child { margin-left: 0; border-left: none; padding-left: 0; }
+
+  /* Etiqueta del id de escena (encima del primer plano de la escena) */
+  .tl-scene-lbl {
+    font-size: 8.5px; font-weight: 700; color: var(--ink-soft); letter-spacing: 0.04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1; padding-bottom: 2px; max-width: 100%;
+  }
+
+  /* Cuerpo del bloque: botón de nav + botón play */
+  .tl-body {
+    flex: 1; display: flex; align-items: stretch; gap: 0; overflow: hidden;
+    border-radius: var(--r-sm); background: var(--blue-wash);
+    border: 1px solid var(--blue); transition: border-color 0.12s, background 0.12s;
+    min-width: 0;
+  }
+  .tl-block:hover .tl-body {
+    background: var(--blue); border-color: var(--blue-deep);
+  }
+  /* Still: tono diferente (no es video) */
+  .tl-block.tl-still .tl-body {
+    background: var(--paper-2); border-color: var(--line-2);
+  }
+  .tl-block.tl-still:hover .tl-body {
+    background: var(--paper-3); border-color: var(--line);
+  }
+  /* Sin motion: advertencia sutil */
+  .tl-block.tl-no-motion .tl-body {
+    border-color: var(--warn); background: var(--warn-wash);
+  }
+  .tl-block.tl-no-motion:hover .tl-body {
+    background: #f0d9b5; border-color: var(--warn);
+  }
+
+  /* Botón de navegación (la mayor parte del bloque) */
+  .tl-nav {
+    flex: 1; border: none; background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px; min-width: 0; box-shadow: none;
+  }
+  .tl-nav:focus-visible { outline: 2px solid var(--blue-deep); outline-offset: 1px; border-radius: var(--r-sm); }
+  .tl-dur {
+    font-family: var(--font-mono); font-size: 9px; color: var(--blue-deep);
+    overflow: hidden; white-space: nowrap; pointer-events: none;
+  }
+  .tl-block.tl-still .tl-dur { color: var(--ink-soft); }
+  .tl-block.tl-no-motion .tl-dur { color: var(--warn); }
+  .tl-block:hover .tl-dur { color: #fff; }
+  .tl-block.tl-still:hover .tl-dur { color: var(--ink); }
+
+  /* Botón ▶ reproducir desde este plano */
+  .tl-play {
+    flex-shrink: 0; width: 18px; border: none; background: transparent;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 9px; color: var(--blue-deep); padding: 0; box-shadow: none;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .tl-block:hover .tl-play { opacity: 1; color: #fff; }
+  .tl-play:focus-visible { opacity: 1; outline: 2px solid var(--red); border-radius: 2px; }
 </style>

@@ -96,6 +96,13 @@ hardening post-auditoría. Detalle completo en
 
 - [ ] Planos **concurrentes dentro de un render** (toca `run_project`: `gather` con cap).
 - [ ] Envoltorio **desktop** (Tauri) para un ícono clickeable, si se quiere.
+- [ ] **Editor de timeline** (el norte de [D-094], opción (c)): arrastrar la duración de un bloque y
+  **reordenar planos** desde la tira temporal. Hoy la tira **informa + navega, NO edita** (la edición
+  vive en las tarjetas del Storyboard); el player es read-only. **Gate de contrato antes de empezar:**
+  los `shot_id` se derivan por **POSICIÓN** (`s1`, `s1.2`, …) y las selecciones/poses/takes se guardan
+  **por `shot_id`** (`selections.yaml`/`pose_picks.yaml`/`take_picks.yaml`), así que reordenar
+  **invalidaría las selecciones**. Hay que decidir primero la política — re-mapear / descartar con
+  aviso (estilo `dropped_selections`) / bloquear — y eso es **trabajo de motor/contrato**, no de UI.
 - [~] Reanudar jobs tras reinicio. **Parcial** ([D-090], 2026-06-13): los jobs ya **persisten** en
   SQLite (`out/telemetry.sqlite`, tablas `jobs`/`job_events`) y el historial sobrevive al reinicio;
   al boot, los huérfanos queued/running se marcan `failed` (rompe el deadlock del guard 409). Falta lo

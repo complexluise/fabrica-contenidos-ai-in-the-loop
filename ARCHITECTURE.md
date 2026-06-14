@@ -521,6 +521,17 @@ projects/<slug>/
 > **libro de costos** ([D-079]) es su propia página (`views/Costos.svelte`, `GET /api/costs`), ya
 > no un panel dentro de Producción (una verdad, un lugar — [D-088]). Sin endpoints nuevos: todo el
 > contrato (history, detalle, costs) ya existía.
+>
+> **Vista temporal en el Storyboard ([D-094]).** El Storyboard centro ([D-086]) gana una **tira
+> temporal**: bloques cuyo ancho es proporcional a `duration_s` (el ritmo del montaje, visible de un
+> vistazo). Click navega (scroll a la escena); "▶ reproducir desde acá" lanza el **FilmPlayer**
+> ([D-087]) en ese plano vía la prop `start`. El player gana un **scrubber** (saltar a un plano por
+> tiempo, navegación con teclado) pero **sigue read-only**. La tira **informa + navega, NO edita**:
+> la edición sigue en las tarjetas del Storyboard; la tira solo **LEE** `duration_s` (una verdad, un
+> lugar — [D-088]). Sin cambios de contrato ni backend. **Norte futuro (fuera de alcance):** un
+> editor de timeline (arrastrar duración, **reordenar planos**) — gate de contrato: los `shot_id` se
+> derivan por POSICIÓN y selecciones/poses/takes se guardan por `shot_id`, así que reordenar exige
+> antes una política (re-mapear / descartar con aviso / bloquear), que es trabajo de motor, no de UI.
 
 ### 7.4 Modelo de datos (`project.py`)
 
